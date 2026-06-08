@@ -1,0 +1,28 @@
+"""
+配置文件
+"""
+
+CONFIG = {
+    # 输入目录（程序会列出该目录下的 xlsx 文件供选择）
+    'input_dir': 'input',
+
+    # 价格门槛（业务人员每次设定）
+    'threshold_price': 6.0,
+
+    # 输出目录
+    'output_dir': 'output',
+    'screenshot_dir': 'output/screenshots',
+
+    # 防爬配置
+    'delay_min': 1,      # 最小延迟（秒）
+    'delay_max': 3,      # 最大延迟（秒）
+
+    # 登录状态文件
+    'auth_file': 'jd_auth.json',
+
+    # SKU 列名（用于读取 Excel）
+    'sku_column': '商品SKU',
+    'price_column': '价格',
+    'image_column': '图片',
+    'remark_column': '备注',
+}
