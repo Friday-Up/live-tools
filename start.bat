@@ -128,11 +128,11 @@ echo ============================================================
 echo 提示：低于门槛价的商品将被标记为"不符合上菜"
 echo.
 
-set /p THRESHOLD_INPUT="请输入价格门槛（直接回车使用默认值 10.0）："
+set /p THRESHOLD_INPUT="请输入价格门槛（直接回车使用默认值 6.0）："
 
 :: 如果用户直接回车，使用默认值
 if "%THRESHOLD_INPUT%"=="" (
-    set "THRESHOLD=10.0"
+    set "THRESHOLD=6.0"
 ) else (
     set "THRESHOLD=%THRESHOLD_INPUT%"
 )

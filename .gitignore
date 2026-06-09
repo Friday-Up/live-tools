@@ -10,6 +10,7 @@ output/
 docs/*.md
 docs/*.pdf
 docs/*.docx
+docs/*.xlsx
 
 # 登录态文件
 jd_auth.json

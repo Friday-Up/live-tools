@@ -2,11 +2,13 @@
 京东价格爬取模块
 负责打开 SKU 页面、提取价格、截图、关闭弹窗
 支持多种价格类型抓取
+支持多系列多规格遍历（新版京东商品页）
 """
 
 import os
 import time
 import random
+import re
 
 
 def close_popups(page):
@@ -89,7 +91,6 @@ def extract_price(page, price_type='current'):
             if element.count() > 0:
                 price_text = element.text_content().strip()
                 # 提取数字部分
-                import re
                 numbers = re.findall(r'\d+\.?\d*', price_text)
                 if numbers:
                     return float(numbers[0])
@@ -137,7 +138,6 @@ def extract_all_prices(page):
     # 4. 到手价/补贴价（从页面文本中提取）
     try:
         page_text = page.locator(".product-price-panel, .page-right-price").first.text_content()
-        import re
         # 匹配"到手价¥xx"或"补贴价¥xx"
         deal_match = re.search(r'(到手价|补贴价)[¥\s]*(\d+\.?\d*)', page_text)
         if deal_match:
@@ -178,9 +178,115 @@ def check_need_login(page):
     return False
 
 
-def crawl_sku(page, sku, screenshot_dir, delay_min=1, delay_max=3, price_type='current', threshold_price=None):
+def get_series_tabs(page):
     """
-    爬取单个 SKU 的价格和截图
+    获取页面上的所有系列标签
+    支持多种选择器策略，兼容不同版本的京东页面
+
+    Returns:
+        list: [(index, element, text), ...] 系列标签列表
+    """
+    # 策略1: 新版京东 - 系列标签通常是 .left-tabs-item 或类似结构
+    # 策略2: 可能是 .p-choose 下的系列选择
+    # 策略3: 可能是 .sku-series 或 [class*="series"]
+    # 策略4: 可能是 .item 中带有特定文本的元素
+
+    strategies = [
+        # 策略1: 新版京东系列标签（如：镇店爆款、品质纯奶、限时直降）
+        '.specification-series-item',
+        # 策略2: 旧版京东系列标签
+        '.left-tabs-item',
+        # 策略3: 通用 tab 结构
+        '[class*="tab"][class*="item"]',
+        # 策略4: 系列相关
+        '[class*="series"]',
+        # 策略5: 规格分组标签
+        '.specification-group-label',
+    ]
+
+    for strategy in strategies:
+        try:
+            elements = page.locator(strategy).all()
+            if elements:
+                tabs = []
+                for i, el in enumerate(elements):
+                    text = el.text_content().strip()
+                    # 过滤掉无效标签（如评价、详情等导航标签）
+                    if text and len(text) < 20 and text not in ['买家评价', '商品详情', '售后保障', '推荐']:
+                        tabs.append((i, el, text))
+                if tabs:
+                    return tabs
+        except:
+            continue
+
+    return []
+
+
+def get_spec_items(page):
+    """
+    获取当前系列下的所有规格选项
+    支持多种选择器策略
+
+    Returns:
+        list: [(index, element, text), ...] 规格选项列表
+    """
+    strategies = [
+        # 策略1: 新版京东规格项（如：【原生高钙4.0g蛋白】200mL*24盒）
+        '.specification-item-sku',
+        # 策略2: 旧版京东
+        '.p-choose-item',
+        # 策略3: 通用规格
+        '[class*="sku-item"]',
+        # 策略4: 选择项
+        '.choose-item',
+    ]
+
+    for strategy in strategies:
+        try:
+            elements = page.locator(strategy).all()
+            if elements:
+                items = []
+                for i, el in enumerate(elements):
+                    # 尝试获取文本（可能是图片+文字结构）
+                    text_el = el.locator('[class*="text"], .name, .title').first
+                    if text_el.count() > 0:
+                        text = text_el.text_content().strip()
+                    else:
+                        text = el.text_content().strip()
+                    # 过滤无货项
+                    if text and '无货' not in text and '缺货' not in text:
+                        items.append((i, el, text))
+                if items:
+                    return items
+        except:
+            continue
+
+    return []
+
+
+def click_element_safely(page, element, timeout=5000):
+    """
+    安全点击元素，处理可能的拦截问题
+    """
+    try:
+        # 先尝试普通点击
+        element.click(timeout=timeout)
+        return True
+    except Exception as e:
+        # 如果被拦截，尝试通过 JS 点击
+        try:
+            element.evaluate('el => el.click()')
+            return True
+        except:
+            return False
+
+
+def crawl_sku_with_series(page, sku, screenshot_dir, delay_min=1, delay_max=3,
+                          price_type='current', threshold_price=None):
+    """
+    爬取单个 SKU 的所有系列和规格的价格
+    遍历所有系列标签下的所有规格选项，收集最低价格
+    发现低于门槛价的规格时立即截图，确保截图与价格一致
 
     Args:
         page: Playwright page 对象
@@ -188,16 +294,17 @@ def crawl_sku(page, sku, screenshot_dir, delay_min=1, delay_max=3, price_type='c
         screenshot_dir: 截图保存目录
         delay_min: 最小延迟（秒）
         delay_max: 最大延迟（秒）
-        price_type: 抓取的价格类型 ('current', 'origin', 'plus', 'deal', 'all')
-        threshold_price: 价格门槛，仅低于此价格时才截图（None 表示都截图）
+        price_type: 抓取的价格类型
+        threshold_price: 价格门槛
 
     Returns:
         dict: {
             'sku': sku,
-            'price': float or None,        # 主价格（用于门槛判定）
-            'all_prices': dict or None,    # 所有价格信息（price_type='all'时）
-            'screenshot_path': str or None,
-            'status': str,                 # 'success' / 'need_login' / 'error'
+            'price': float or None,           # 所有规格中的最低价格
+            'all_prices': dict or None,
+            'spec_details': list,              # 所有规格的详细价格信息
+            'screenshot_path': str or None,    # 如果有低于门槛的规格，截图保存
+            'status': str,
             'message': str
         }
     """
@@ -218,62 +325,189 @@ def crawl_sku(page, sku, screenshot_dir, delay_min=1, delay_max=3, price_type='c
                 'sku': sku,
                 'price': None,
                 'all_prices': None,
+                'spec_details': [],
                 'screenshot_path': None,
                 'status': 'need_login',
-                'message': '登录态已失效，请删除 jd_auth.json 后重新运行并登录'
+                'message': '登录态已失效，请登录后继续'
             }
 
         # 4. 关闭弹窗
         close_popups(page)
         time.sleep(0.5)
 
-        # 5. 提取价格
-        if price_type == 'all':
-            all_prices = extract_all_prices(page)
-            price = all_prices.get('current')  # 使用当前售价作为门槛判定依据
-            print(f"  💰 当前售价: ¥{price}")
-            if all_prices.get('plus'):
-                print(f"     Plus价: ¥{all_prices['plus']}")
-            if all_prices.get('deal'):
-                print(f"     到手价: ¥{all_prices['deal']}")
-        else:
-            all_prices = None
-            price = extract_price(page, price_type)
-            print(f"  💰 价格: ¥{price}")
+        # 5. 获取系列标签
+        series_tabs = get_series_tabs(page)
+        print(f"  🏷️  发现 {len(series_tabs)} 个系列标签")
 
-        # 6. 判断是否截图：仅当价格低于门槛价时才截图
-        screenshot_path = None
-        if threshold_price is not None and price is not None:
-            if price < threshold_price:
+        all_spec_prices = []  # 收集所有规格的价格
+        lowest_price = None
+        lowest_spec_info = None
+        screenshot_path = None  # 截图路径（发现低于门槛时立即截图）
+
+        if not series_tabs:
+            # 没有系列标签，按单规格处理
+            print(f"  ℹ️  该 SKU 无多系列，直接提取当前价格")
+            try:
+                price = extract_price(page, price_type)
+                all_spec_prices.append({
+                    'series': '默认',
+                    'spec': '默认规格',
+                    'price': price
+                })
+                lowest_price = price
+                lowest_spec_info = {'series': '默认', 'spec': '默认规格'}
+
+                # 立即判断是否需要截图
+                if threshold_price is not None and price < threshold_price:
+                    os.makedirs(screenshot_dir, exist_ok=True)
+                    screenshot_path = os.path.join(screenshot_dir, f"{sku}.png")
+                    page.screenshot(path=screenshot_path, full_page=False)
+                    print(f"  📸 截图已保存: {screenshot_path}（¥{price} < ¥{threshold_price}）")
+
+            except Exception as e:
+                print(f"  ⚠️  提取价格失败: {e}")
+        else:
+            # 遍历每个系列标签
+            for series_idx, series_el, series_name in series_tabs:
+                print(f"\n  📂 系列 [{series_idx + 1}/{len(series_tabs)}]: {series_name}")
+
+                # 点击系列标签
+                if series_idx > 0:  # 第一个系列通常默认已选中
+                    click_success = click_element_safely(page, series_el)
+                    if click_success:
+                        print(f"     已点击系列: {series_name}")
+                        time.sleep(1)  # 等待规格列表更新
+                    else:
+                        print(f"     ⚠️ 点击系列失败，跳过")
+                        continue
+
+                # 获取该系列下的所有规格
+                spec_items = get_spec_items(page)
+                print(f"     发现 {len(spec_items)} 个规格选项")
+
+                if not spec_items:
+                    # 尝试直接提取当前价格
+                    try:
+                        price = extract_price(page, price_type)
+                        all_spec_prices.append({
+                            'series': series_name,
+                            'spec': '默认',
+                            'price': price
+                        })
+                        if lowest_price is None or price < lowest_price:
+                            lowest_price = price
+                            lowest_spec_info = {'series': series_name, 'spec': '默认'}
+                        print(f"     💰 价格: ¥{price}")
+
+                        # 立即判断是否需要截图
+                        if threshold_price is not None and price < threshold_price and screenshot_path is None:
+                            os.makedirs(screenshot_dir, exist_ok=True)
+                            screenshot_path = os.path.join(screenshot_dir, f"{sku}.png")
+                            page.screenshot(path=screenshot_path, full_page=False)
+                            print(f"     📸 截图已保存: {screenshot_path}（¥{price} < ¥{threshold_price}）")
+
+                    except Exception as e:
+                        print(f"     ⚠️ 提取价格失败: {e}")
+                    continue
+
+                # 遍历每个规格
+                for spec_idx, spec_el, spec_name in spec_items:
+                    print(f"     🔘 规格 [{spec_idx + 1}/{len(spec_items)}]: {spec_name}", end='')
+
+                    # 点击规格
+                    if spec_idx > 0:  # 第一个规格通常默认已选中
+                        click_success = click_element_safely(page, spec_el)
+                        if click_success:
+                            time.sleep(0.8)  # 等待价格更新
+                        else:
+                            print(" - 点击失败，跳过")
+                            continue
+
+                    # 提取价格
+                    try:
+                        price = extract_price(page, price_type)
+                        all_spec_prices.append({
+                            'series': series_name,
+                            'spec': spec_name,
+                            'price': price
+                        })
+
+                        # 更新最低价
+                        if lowest_price is None or price < lowest_price:
+                            lowest_price = price
+                            lowest_spec_info = {'series': series_name, 'spec': spec_name}
+
+                        print(f" - ¥{price}")
+
+                        # 立即判断是否需要截图（发现低于门槛价时立即截图，确保截图与价格一致）
+                        if threshold_price is not None and price < threshold_price and screenshot_path is None:
+                            os.makedirs(screenshot_dir, exist_ok=True)
+                            screenshot_path = os.path.join(screenshot_dir, f"{sku}.png")
+                            page.screenshot(path=screenshot_path, full_page=False)
+                            print(f"     📸 截图已保存: {screenshot_path}（¥{price} < ¥{threshold_price}）")
+
+                        # 随机延迟，模拟人工
+                        time.sleep(random.uniform(0.3, 0.8))
+
+                    except Exception as e:
+                        print(f" - 提取失败: {e}")
+
+        # 6. 输出汇总
+        print(f"\n  📊 SKU {sku} 价格汇总:")
+        print(f"     共检测 {len(all_spec_prices)} 个规格")
+        if lowest_price is not None:
+            print(f"     最低价格: ¥{lowest_price} ({lowest_spec_info['series']} / {lowest_spec_info['spec']})")
+        else:
+            print(f"     ⚠️ 未能提取到任何价格")
+
+        # 7. 最终截图判断（兼容未设置门槛价的情况）
+        if screenshot_path is None and lowest_price is not None:
+            if threshold_price is None:
+                # 未设置门槛价时，默认截图（兼容旧逻辑）
                 os.makedirs(screenshot_dir, exist_ok=True)
                 screenshot_path = os.path.join(screenshot_dir, f"{sku}.png")
                 page.screenshot(path=screenshot_path, full_page=False)
-                print(f"  📸 截图已保存: {screenshot_path}（低于门槛价 ¥{threshold_price}）")
+                print(f"  📸 截图已保存: {screenshot_path}")
             else:
-                print(f"  ⏭️  价格 ¥{price} ≥ 门槛价 ¥{threshold_price}，跳过截图")
-        else:
-            # 未设置门槛价时，默认截图（兼容旧逻辑）
-            os.makedirs(screenshot_dir, exist_ok=True)
-            screenshot_path = os.path.join(screenshot_dir, f"{sku}.png")
-            page.screenshot(path=screenshot_path, full_page=False)
-            print(f"  📸 截图已保存: {screenshot_path}")
+                # 设置了门槛价但没有低于门槛的
+                print(f"  ⏭️  所有规格价格均 ≥ 门槛价 ¥{threshold_price}，跳过截图")
 
         return {
             'sku': sku,
-            'price': price,
-            'all_prices': all_prices,
+            'price': lowest_price,
+            'all_prices': {'current': lowest_price},
+            'spec_details': all_spec_prices,
             'screenshot_path': screenshot_path,
             'status': 'success',
-            'message': '抓取成功'
+            'message': f"检测 {len(all_spec_prices)} 个规格，最低 ¥{lowest_price}"
         }
 
     except Exception as e:
         print(f"  ❌ 处理失败: {e}")
+        import traceback
+        traceback.print_exc()
         return {
             'sku': sku,
             'price': None,
             'all_prices': None,
+            'spec_details': [],
             'screenshot_path': None,
             'status': 'error',
             'message': str(e)
         }
+
+
+# 为了保持向后兼容，保留旧的 crawl_sku 函数
+def crawl_sku(page, sku, screenshot_dir, delay_min=1, delay_max=3, price_type='current', threshold_price=None):
+    """
+    兼容旧接口，实际调用新版多系列遍历逻辑
+    """
+    return crawl_sku_with_series(
+        page=page,
+        sku=sku,
+        screenshot_dir=screenshot_dir,
+        delay_min=delay_min,
+        delay_max=delay_max,
+        price_type=price_type,
+        threshold_price=threshold_price
+    )

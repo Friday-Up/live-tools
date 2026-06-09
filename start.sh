@@ -118,11 +118,11 @@ echo "提示：低于门槛价的商品将被标记为\"不符合上菜\""
 echo ""
 
 while true; do
-    read -p "请输入价格门槛（直接回车使用默认值 10.0）：" threshold_input
+    read -p "请输入价格门槛（直接回车使用默认值 6.0）：" threshold_input
 
     # 如果用户直接回车，使用默认值
     if [ -z "$threshold_input" ]; then
-        THRESHOLD="10.0"
+        THRESHOLD="6.0"
         break
     fi
 

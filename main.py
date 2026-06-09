@@ -6,6 +6,7 @@
 import os
 import sys
 import argparse
+import time
 
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -77,7 +78,7 @@ def get_inputs():
     parser.add_argument(
         '-t', '--threshold',
         type=float,
-        help='价格门槛（如：10.0）'
+        help='价格门槛（如：6.0）'
     )
     parser.add_argument(
         '-f', '--file',
@@ -120,7 +121,7 @@ def get_inputs():
                     continue
                 break
             except ValueError:
-                print("❌ 请输入有效的数字（如：10.0）")
+                print("❌ 请输入有效的数字（如：6.0）")
 
     return threshold_price, input_file
 
@@ -210,8 +211,28 @@ def main():
         # 检查是否需要登录
         if result['status'] == 'need_login':
             print(f"\n❌ {result['message']}")
-            need_login_flag = True
-            break
+            print("=" * 60)
+            print("🛑 检测到登录态失效，程序已暂停")
+            print("=" * 60)
+            print("请在新打开的浏览器窗口中完成登录")
+            print("登录完成后，请按回车键继续...")
+            print("=" * 60)
+            try:
+                input("按回车继续...")
+            except EOFError:
+                time.sleep(60)
+
+            # 用户登录后，重新检查登录状态
+            print("\n🔐 重新检查登录状态...")
+            if browser.check_login_status():
+                print("✅ 登录状态已恢复，继续运行")
+                # 重新处理当前 SKU
+                i -= 1
+                continue
+            else:
+                print("❌ 登录状态仍未恢复，程序退出")
+                need_login_flag = True
+                break
 
     print("\n" + "="*60)
 

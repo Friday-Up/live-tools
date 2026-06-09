@@ -23,10 +23,15 @@ class BrowserManager:
         启动浏览器
         如果存在登录态文件则复用，否则需要人工登录
         如果登录态失效，自动引导重新登录
+        开启远程调试端口，便于外部工具连接分析页面
         """
         self.playwright = sync_playwright().start()
         # 必须可视化运行，方便人工登录
-        self.browser = self.playwright.chromium.launch(headless=False)
+        # 开启远程调试端口，便于调试脚本连接同一浏览器
+        self.browser = self.playwright.chromium.launch(
+            headless=False,
+            args=['--remote-debugging-port=9222']
+        )
 
         if os.path.exists(self.auth_file):
             # 复用已有登录态
