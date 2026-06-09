@@ -201,7 +201,8 @@ def main():
             sku=sku,
             screenshot_dir=CONFIG['screenshot_dir'],
             delay_min=CONFIG['delay_min'],
-            delay_max=CONFIG['delay_max']
+            delay_max=CONFIG['delay_max'],
+            threshold_price=threshold_price
         )
         result['row_index'] = row_index
         results.append(result)

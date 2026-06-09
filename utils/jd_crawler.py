@@ -178,7 +178,7 @@ def check_need_login(page):
     return False
 
 
-def crawl_sku(page, sku, screenshot_dir, delay_min=1, delay_max=3, price_type='current'):
+def crawl_sku(page, sku, screenshot_dir, delay_min=1, delay_max=3, price_type='current', threshold_price=None):
     """
     爬取单个 SKU 的价格和截图
 
@@ -189,6 +189,7 @@ def crawl_sku(page, sku, screenshot_dir, delay_min=1, delay_max=3, price_type='c
         delay_min: 最小延迟（秒）
         delay_max: 最大延迟（秒）
         price_type: 抓取的价格类型 ('current', 'origin', 'plus', 'deal', 'all')
+        threshold_price: 价格门槛，仅低于此价格时才截图（None 表示都截图）
 
     Returns:
         dict: {
@@ -240,11 +241,22 @@ def crawl_sku(page, sku, screenshot_dir, delay_min=1, delay_max=3, price_type='c
             price = extract_price(page, price_type)
             print(f"  💰 价格: ¥{price}")
 
-        # 6. 截图（仅截取浏览器可视区域）
-        os.makedirs(screenshot_dir, exist_ok=True)
-        screenshot_path = os.path.join(screenshot_dir, f"{sku}.png")
-        page.screenshot(path=screenshot_path, full_page=False)
-        print(f"  📸 截图已保存: {screenshot_path}")
+        # 6. 判断是否截图：仅当价格低于门槛价时才截图
+        screenshot_path = None
+        if threshold_price is not None and price is not None:
+            if price < threshold_price:
+                os.makedirs(screenshot_dir, exist_ok=True)
+                screenshot_path = os.path.join(screenshot_dir, f"{sku}.png")
+                page.screenshot(path=screenshot_path, full_page=False)
+                print(f"  📸 截图已保存: {screenshot_path}（低于门槛价 ¥{threshold_price}）")
+            else:
+                print(f"  ⏭️  价格 ¥{price} ≥ 门槛价 ¥{threshold_price}，跳过截图")
+        else:
+            # 未设置门槛价时，默认截图（兼容旧逻辑）
+            os.makedirs(screenshot_dir, exist_ok=True)
+            screenshot_path = os.path.join(screenshot_dir, f"{sku}.png")
+            page.screenshot(path=screenshot_path, full_page=False)
+            print(f"  📸 截图已保存: {screenshot_path}")
 
         return {
             'sku': sku,
