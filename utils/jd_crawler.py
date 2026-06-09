@@ -441,6 +441,9 @@ def crawl_sku_with_series(page, sku, screenshot_dir, delay_min=1, delay_max=3,
                         if threshold_price is not None and price < threshold_price and screenshot_path is None:
                             os.makedirs(screenshot_dir, exist_ok=True)
                             screenshot_path = os.path.join(screenshot_dir, f"{sku}.png")
+                            # 截图前滚动到页面顶部，确保价格在可视区域
+                            page.evaluate('() => window.scrollTo(0, 0)')
+                            time.sleep(0.3)
                             page.screenshot(path=screenshot_path, full_page=False)
                             print(f"     📸 截图已保存: {screenshot_path}（¥{price} < ¥{threshold_price}）")
                             print(f"     🛑 发现低于门槛价，停止遍历该 SKU")
