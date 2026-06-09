@@ -443,12 +443,19 @@ def crawl_sku_with_series(page, sku, screenshot_dir, delay_min=1, delay_max=3,
                             screenshot_path = os.path.join(screenshot_dir, f"{sku}.png")
                             page.screenshot(path=screenshot_path, full_page=False)
                             print(f"     📸 截图已保存: {screenshot_path}（¥{price} < ¥{threshold_price}）")
+                            print(f"     🛑 发现低于门槛价，停止遍历该 SKU")
+                            # 跳出规格循环
+                            break
 
                         # 随机延迟，模拟人工
                         time.sleep(random.uniform(0.3, 0.8))
 
                     except Exception as e:
                         print(f" - 提取失败: {e}")
+
+                # 如果已经截图，跳出系列循环
+                if screenshot_path is not None:
+                    break
 
         # 6. 输出汇总
         print(f"\n  📊 SKU {sku} 价格汇总:")
