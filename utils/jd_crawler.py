@@ -371,15 +371,14 @@ def crawl_sku_with_series(page, sku, screenshot_dir, delay_min=1, delay_max=3,
             for series_idx, series_el, series_name in series_tabs:
                 print(f"\n  📂 系列 [{series_idx + 1}/{len(series_tabs)}]: {series_name}")
 
-                # 点击系列标签
-                if series_idx > 0:  # 第一个系列通常默认已选中
-                    click_success = click_element_safely(page, series_el)
-                    if click_success:
-                        print(f"     已点击系列: {series_name}")
-                        time.sleep(1)  # 等待规格列表更新
-                    else:
-                        print(f"     ⚠️ 点击系列失败，跳过")
-                        continue
+                # 点击系列标签（每个系列都点击，确保规格列表正确刷新）
+                click_success = click_element_safely(page, series_el)
+                if click_success:
+                    print(f"     已点击系列: {series_name}")
+                    time.sleep(1)  # 等待规格列表更新
+                else:
+                    print(f"     ⚠️ 点击系列失败，跳过")
+                    continue
 
                 # 获取该系列下的所有规格
                 spec_items = get_spec_items(page)
@@ -414,14 +413,13 @@ def crawl_sku_with_series(page, sku, screenshot_dir, delay_min=1, delay_max=3,
                 for spec_idx, spec_el, spec_name in spec_items:
                     print(f"     🔘 规格 [{spec_idx + 1}/{len(spec_items)}]: {spec_name}", end='')
 
-                    # 点击规格
-                    if spec_idx > 0:  # 第一个规格通常默认已选中
-                        click_success = click_element_safely(page, spec_el)
-                        if click_success:
-                            time.sleep(0.8)  # 等待价格更新
-                        else:
-                            print(" - 点击失败，跳过")
-                            continue
+                    # 点击规格（每个规格都点击，确保价格正确刷新）
+                    click_success = click_element_safely(page, spec_el)
+                    if click_success:
+                        time.sleep(0.8)  # 等待价格更新
+                    else:
+                        print(" - 点击失败，跳过")
+                        continue
 
                     # 提取价格
                     try:
