@@ -1,4 +1,5 @@
 @echo off
+setlocal enabledelayedexpansion
 chcp 65001 >nul 2>&1
 :: ============================================================
 :: 直播-点菜 SKU 巡检 - 一键启动脚本 (Windows)
@@ -120,3 +121,4 @@ echo    • 结果文件保存在 output/ 目录
 echo ============================================================
 echo.
 pause
+endlocal

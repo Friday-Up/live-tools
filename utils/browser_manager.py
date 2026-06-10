@@ -23,15 +23,10 @@ class BrowserManager:
         启动浏览器
         如果存在登录态文件则复用，否则需要人工登录
         如果登录态失效，自动引导重新登录
-        开启远程调试端口，便于外部工具连接分析页面
         """
         self.playwright = sync_playwright().start()
         # 必须可视化运行，方便人工登录
-        # 开启远程调试端口，便于调试脚本连接同一浏览器
-        self.browser = self.playwright.chromium.launch(
-            headless=False,
-            args=['--remote-debugging-port=9222']
-        )
+        self.browser = self.playwright.chromium.launch(headless=False)
 
         if os.path.exists(self.auth_file):
             # 复用已有登录态
@@ -80,6 +75,33 @@ class BrowserManager:
         else:
             print("⚠️  登录验证失败，程序将继续运行...")
             return False
+
+    def wait_for_login_interactive(self):
+        """
+        交互式等待用户登录（用于 EXE 模式）
+        显示提示信息，等待用户按回车
+        """
+        print("\n" + "="*60)
+        print("🛑 检测到登录态失效，程序已暂停")
+        print("="*60)
+        print("请在新打开的浏览器窗口中完成登录")
+        print("登录完成后，请在此窗口按回车键继续...")
+        print("="*60 + "\n")
+
+        try:
+            input("按回车继续...")
+        except EOFError:
+            # EXE 模式下 input 可能不可用，使用循环等待
+            print("等待登录中...（请在浏览器中完成登录）")
+            import time
+            for i in range(120):  # 最多等待 120 秒
+                time.sleep(1)
+                if self.check_login_status():
+                    print("✅ 检测到已登录")
+                    return True
+            print("⚠️ 等待超时")
+            return False
+        return True
 
     def _manual_login(self):
         """

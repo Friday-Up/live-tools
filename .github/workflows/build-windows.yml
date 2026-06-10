@@ -50,6 +50,7 @@ jobs:
           Copy-Item -Path "start.bat" -Destination "dist/SKU-Price-Audit/start.bat" -Force
           Copy-Item -Path "config.py" -Destination "dist/SKU-Price-Audit/config.py" -Force
           Copy-Item -Path "utils" -Destination "dist/SKU-Price-Audit/utils" -Recurse -Force
+          Copy-Item -Path "requirements.txt" -Destination "dist/SKU-Price-Audit/requirements.txt" -Force
 
       - name: Compress output
         shell: pwsh

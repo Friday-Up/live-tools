@@ -211,16 +211,8 @@ def main():
         # 检查是否需要登录
         if result['status'] == 'need_login':
             print(f"\n❌ {result['message']}")
-            print("=" * 60)
-            print("🛑 检测到登录态失效，程序已暂停")
-            print("=" * 60)
-            print("请在新打开的浏览器窗口中完成登录")
-            print("登录完成后，请按回车键继续...")
-            print("=" * 60)
-            try:
-                input("按回车继续...")
-            except EOFError:
-                time.sleep(60)
+            # 使用交互式等待，兼容 EXE 模式
+            browser.wait_for_login_interactive()
 
             # 用户登录后，重新检查登录状态
             print("\n🔐 重新检查登录状态...")
