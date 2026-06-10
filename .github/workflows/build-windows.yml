@@ -1,0 +1,70 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Install Playwright Chromium to local dir
+        run: |
+          $env:PLAYWRIGHT_BROWSERS_PATH = "0"
+          playwright install chromium
+
+      - name: Build with PyInstaller
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --onedir --console `
+            --name "SKU-Price-Audit" `
+            --collect-all playwright `
+            --hidden-import openpyxl `
+            --hidden-import PIL `
+            main.py
+
+      - name: Copy input template
+        shell: pwsh
+        run: |
+          Copy-Item -Path "input" -Destination "dist/SKU-Price-Audit/input" -Recurse -Force
+          Copy-Item -Path "start.bat" -Destination "dist/SKU-Price-Audit/start.bat" -Force
+
+      - name: Compress output
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist/SKU-Price-Audit" -DestinationPath "dist/SKU-Price-Audit-Windows.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SKU-Price-Audit-Windows
+          path: dist/SKU-Price-Audit-Windows.zip
+          retention-days: 30
+
+      - name: Upload to Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/SKU-Price-Audit-Windows.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

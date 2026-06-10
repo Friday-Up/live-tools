@@ -13,7 +13,12 @@ echo 🚀 直播-点菜 SKU 巡检 - 测价工具
 echo ============================================================
 echo.
 
-:: 检查 Python 是否安装
+:: 检查 Python 是否安装（优先使用打包内置的 Python）
+if exist "%SCRIPT_DIR%\_internal\python.exe" (
+    set "PYTHON_CMD=%SCRIPT_DIR%\_internal\python.exe"
+    goto :python_found
+)
+
 python --version >nul 2>&1
 if %errorlevel% equ 0 (
     set "PYTHON_CMD=python"
@@ -36,36 +41,40 @@ echo ✅ 使用 Python: %PYTHON_CMD%
 echo 📁 工作目录: %SCRIPT_DIR%
 echo.
 
-:: 检查依赖是否安装
-echo 🔍 检查依赖...
-%PYTHON_CMD% -c "import openpyxl, playwright" >nul 2>&1
-if %errorlevel% neq 0 (
-    echo ⚠️  依赖未安装，正在安装...
-    %PYTHON_CMD% -m pip install -r requirements.txt -q
-    if %errorlevel% neq 0 (
-        echo ❌ 依赖安装失败，请手动运行: pip install -r requirements.txt
-        pause
-        exit /b 1
-    )
-    echo ✅ 依赖安装完成
+:: 检查依赖是否安装（如果不是打包版本）
+if "%PYTHON_CMD%"=="%SCRIPT_DIR%\_internal\python.exe" (
+    echo ✅ 打包版本，依赖已内置
 ) else (
-    echo ✅ 依赖已安装
-)
+    echo 🔍 检查依赖...
+    %PYTHON_CMD% -c "import openpyxl, playwright" >nul 2>&1
+    if %errorlevel% neq 0 (
+        echo ⚠️  依赖未安装，正在安装...
+        %PYTHON_CMD% -m pip install -r requirements.txt -q
+        if %errorlevel% neq 0 (
+            echo ❌ 依赖安装失败，请手动运行: pip install -r requirements.txt
+            pause
+            exit /b 1
+        )
+        echo ✅ 依赖安装完成
+    ) else (
+        echo ✅ 依赖已安装
+    )
 
-:: 检查 Playwright 浏览器是否安装
-echo 🔍 检查 Playwright 浏览器...
-%PYTHON_CMD% -c "from playwright.sync_api import sync_playwright; p = sync_playwright().start(); p.chromium.launch(headless=True).close(); p.stop()" >nul 2>&1
-if %errorlevel% neq 0 (
-    echo ⚠️  Playwright 浏览器未安装，正在安装...
-    %PYTHON_CMD% -m playwright install chromium
+    :: 检查 Playwright 浏览器是否安装
+    echo 🔍 检查 Playwright 浏览器...
+    %PYTHON_CMD% -c "from playwright.sync_api import sync_playwright; p = sync_playwright().start(); p.chromium.launch(headless=True).close(); p.stop()" >nul 2>&1
     if %errorlevel% neq 0 (
-        echo ❌ 浏览器安装失败，请手动运行: playwright install chromium
-        pause
-        exit /b 1
+        echo ⚠️  Playwright 浏览器未安装，正在安装...
+        %PYTHON_CMD% -m playwright install chromium
+        if %errorlevel% neq 0 (
+            echo ❌ 浏览器安装失败，请手动运行: playwright install chromium
+            pause
+            exit /b 1
+        )
+        echo ✅ 浏览器安装完成
+    ) else (
+        echo ✅ 浏览器已安装
     )
-    echo ✅ 浏览器安装完成
-) else (
-    echo ✅ 浏览器已安装
 )
 
 echo.
