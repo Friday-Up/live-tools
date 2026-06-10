@@ -43,11 +43,13 @@ jobs:
             --hidden-import PIL `
             main.py
 
-      - name: Copy input template
+      - name: Copy input template and start script
         shell: pwsh
         run: |
           Copy-Item -Path "input" -Destination "dist/SKU-Price-Audit/input" -Recurse -Force
           Copy-Item -Path "start.bat" -Destination "dist/SKU-Price-Audit/start.bat" -Force
+          Copy-Item -Path "config.py" -Destination "dist/SKU-Price-Audit/config.py" -Force
+          Copy-Item -Path "utils" -Destination "dist/SKU-Price-Audit/utils" -Recurse -Force
 
       - name: Compress output
         shell: pwsh

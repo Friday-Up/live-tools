@@ -13,70 +13,16 @@ echo 🚀 直播-点菜 SKU 巡检 - 测价工具
 echo ============================================================
 echo.
 
-:: 检查 Python 是否安装（优先使用打包内置的 Python）
-if exist "%SCRIPT_DIR%\_internal\python.exe" (
-    set "PYTHON_CMD=%SCRIPT_DIR%\_internal\python.exe"
-    goto :python_found
-)
-
-python --version >nul 2>&1
-if %errorlevel% equ 0 (
-    set "PYTHON_CMD=python"
-    goto :python_found
-)
-
-python3 --version >nul 2>&1
-if %errorlevel% equ 0 (
-    set "PYTHON_CMD=python3"
-    goto :python_found
-)
-
-echo ❌ 错误：未找到 Python，请先安装 Python 3.8+
-echo    下载地址：https://www.python.org/downloads/
-pause
-exit /b 1
-
-:python_found
-echo ✅ 使用 Python: %PYTHON_CMD%
-echo 📁 工作目录: %SCRIPT_DIR%
-echo.
-
-:: 检查依赖是否安装（如果不是打包版本）
-if "%PYTHON_CMD%"=="%SCRIPT_DIR%\_internal\python.exe" (
-    echo ✅ 打包版本，依赖已内置
+:: 检查是否是打包版本（存在 SKU-Price-Audit.exe）
+if exist "%SCRIPT_DIR%\SKU-Price-Audit.exe" (
+    set "USE_EXE=1"
+    echo ✅ 检测到打包版本
 ) else (
-    echo 🔍 检查依赖...
-    %PYTHON_CMD% -c "import openpyxl, playwright" >nul 2>&1
-    if %errorlevel% neq 0 (
-        echo ⚠️  依赖未安装，正在安装...
-        %PYTHON_CMD% -m pip install -r requirements.txt -q
-        if %errorlevel% neq 0 (
-            echo ❌ 依赖安装失败，请手动运行: pip install -r requirements.txt
-            pause
-            exit /b 1
-        )
-        echo ✅ 依赖安装完成
-    ) else (
-        echo ✅ 依赖已安装
-    )
-
-    :: 检查 Playwright 浏览器是否安装
-    echo 🔍 检查 Playwright 浏览器...
-    %PYTHON_CMD% -c "from playwright.sync_api import sync_playwright; p = sync_playwright().start(); p.chromium.launch(headless=True).close(); p.stop()" >nul 2>&1
-    if %errorlevel% neq 0 (
-        echo ⚠️  Playwright 浏览器未安装，正在安装...
-        %PYTHON_CMD% -m playwright install chromium
-        if %errorlevel% neq 0 (
-            echo ❌ 浏览器安装失败，请手动运行: playwright install chromium
-            pause
-            exit /b 1
-        )
-        echo ✅ 浏览器安装完成
-    ) else (
-        echo ✅ 浏览器已安装
-    )
+    set "USE_EXE=0"
+    echo ℹ️  源码版本，需要 Python 环境
 )
 
+echo 📁 工作目录: %SCRIPT_DIR%
 echo.
 
 :: 列出 input 目录下的 xlsx 文件
@@ -151,18 +97,24 @@ echo ✅ 本次价格门槛：¥%THRESHOLD%
 echo.
 
 echo ============================================================
-echo 🎉 环境检查完成，正在启动程序...
+echo 🎉 正在启动程序...
 echo ============================================================
 echo.
 
 :: 启动主程序
-%PYTHON_CMD% main.py -f "%SELECTED_FILE%" -t %THRESHOLD%
+if "%USE_EXE%"=="1" (
+    :: 打包版本：直接运行 EXE
+    "%SCRIPT_DIR%\SKU-Price-Audit.exe" -f "%SELECTED_FILE%" -t %THRESHOLD%
+) else (
+    :: 源码版本：使用 Python 运行
+    python main.py -f "%SELECTED_FILE%" -t %THRESHOLD%
+)
 
 :: 程序结束后提示
 echo.
 echo ============================================================
 echo 💡 提示:
-echo    • 程序执行完毕，浏览器窗口已关闭
+echo    • 程序执行完毕
 echo    • 登录态已保存，下次运行无需重新登录
 echo    • 结果文件保存在 output/ 目录
 echo ============================================================
