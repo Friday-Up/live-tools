@@ -2,7 +2,7 @@ name: Build Windows EXE
 
 on:
   push:
-    branches: [main]
+    branches: [master, main]
     tags: ['v*']
   workflow_dispatch:
 
@@ -33,41 +33,47 @@ jobs:
           $env:PLAYWRIGHT_BROWSERS_PATH = "0"
           playwright install chromium
 
-      - name: Build with PyInstaller
+      - name: Build Web GUI with PyInstaller
         shell: pwsh
         run: |
           pyinstaller --noconfirm --onedir --console `
-            --name "SKU-Price-Audit" `
+            --name "SKU-Price-Audit-Web" `
             --collect-all playwright `
+            --collect-all flask `
+            --collect-all jinja2 `
+            --collect-all werkzeug `
+            --collect-all click `
+            --collect-all itsdangerous `
+            --collect-all markupsafe `
             --hidden-import openpyxl `
             --hidden-import PIL `
-            main.py
+            --add-data "templates;templates" `
+            app.py
 
-      - name: Copy input template and start script
+      - name: Copy additional files
         shell: pwsh
         run: |
-          Copy-Item -Path "input" -Destination "dist/SKU-Price-Audit/input" -Recurse -Force
-          Copy-Item -Path "start.bat" -Destination "dist/SKU-Price-Audit/start.bat" -Force
-          Copy-Item -Path "config.py" -Destination "dist/SKU-Price-Audit/config.py" -Force
-          Copy-Item -Path "utils" -Destination "dist/SKU-Price-Audit/utils" -Recurse -Force
-          Copy-Item -Path "requirements.txt" -Destination "dist/SKU-Price-Audit/requirements.txt" -Force
+          Copy-Item -Path "input" -Destination "dist/SKU-Price-Audit-Web/input" -Recurse -Force
+          Copy-Item -Path "config.py" -Destination "dist/SKU-Price-Audit-Web/config.py" -Force
+          Copy-Item -Path "utils" -Destination "dist/SKU-Price-Audit-Web/utils" -Recurse -Force
+          Copy-Item -Path "start_web.bat" -Destination "dist/SKU-Price-Audit-Web/启动测价工具.bat" -Force
 
       - name: Compress output
         shell: pwsh
         run: |
-          Compress-Archive -Path "dist/SKU-Price-Audit" -DestinationPath "dist/SKU-Price-Audit-Windows.zip"
+          Compress-Archive -Path "dist/SKU-Price-Audit-Web" -DestinationPath "dist/SKU-Price-Audit-Web-Windows.zip"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SKU-Price-Audit-Windows
-          path: dist/SKU-Price-Audit-Windows.zip
+          name: SKU-Price-Audit-Web-Windows
+          path: dist/SKU-Price-Audit-Web-Windows.zip
           retention-days: 30
 
       - name: Upload to Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/SKU-Price-Audit-Windows.zip
+          files: dist/SKU-Price-Audit-Web-Windows.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

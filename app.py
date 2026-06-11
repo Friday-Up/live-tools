@@ -15,13 +15,22 @@ from flask import Flask, render_template, request, jsonify, send_file
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from config import CONFIG, BASE_DIR
+# 兼容 PyInstaller 打包后的路径
+if getattr(sys, 'frozen', False):
+    # 打包后的运行环境
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    # 源码运行环境
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+from config import CONFIG
 from utils.browser_manager import BrowserManager
 from utils.jd_crawler import crawl_sku
 from utils.excel_handler import read_sku_list, write_results
 from utils.cleanup import auto_cleanup
 
-app = Flask(__name__)
+# 创建 Flask 应用，指定模板目录
+app = Flask(__name__, template_folder=os.path.join(BASE_DIR, 'templates'))
 
 # 全局状态
 audit_status = {
