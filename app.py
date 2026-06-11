@@ -149,9 +149,17 @@ def run_audit_task(input_file, threshold_price):
             add_log('⚠️ 登录态已失效，请登录')
             audit_status['need_login'] = True
             login_event.clear()
+
             # 等待前端通知继续
             add_log('⏳ 等待用户完成登录并点击"我已登录"...')
-            login_event.wait(timeout=300)  # 最多等待5分钟
+            # 循环等待，每隔一段时间检查一次，让前端有机会更新状态
+            wait_count = 0
+            while not login_event.is_set() and wait_count < 60:  # 最多等待5分钟 (60 * 5秒)
+                login_event.wait(timeout=5)
+                wait_count += 1
+                if wait_count % 6 == 0:  # 每30秒输出一次日志
+                    add_log(f'⏳ 仍在等待用户登录... ({wait_count * 5}秒)')
+
             audit_status['need_login'] = False
 
             # 再次检查登录状态

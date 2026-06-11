@@ -47,24 +47,22 @@ class BrowserManager:
         访问京东首页，通过多种方式判断登录状态
         """
         try:
-            # 访问一个需要登录才能看到的页面，或者检查 cookie
-            # 更可靠的方式：访问订单页面或购物车，看是否跳转
+            # 方法1：访问订单页面，看是否重定向到登录页
             self.page.goto("https://order.jd.com/center/list.action", wait_until="domcontentloaded", timeout=10000)
             time.sleep(2)
 
-            # 如果 URL 包含 passport 或 login，说明需要登录
             current_url = self.page.url
             if "passport.jd.com" in current_url or "login" in current_url:
                 print(f"   重定向到登录页: {current_url}")
                 return False
 
-            # 检查页面标题
+            # 方法2：检查页面标题
             title = self.page.title()
             if "登录" in title:
                 print(f"   页面标题包含'登录': {title}")
                 return False
 
-            # 检查是否有登录表单
+            # 方法3：检查是否有登录表单
             try:
                 login_form = self.page.locator(".login-form, .login-tab, #loginname").count()
                 if login_form > 0:
@@ -73,9 +71,8 @@ class BrowserManager:
             except:
                 pass
 
-            # 如果能访问到订单页面内容，说明已登录
+            # 方法4：如果能访问到订单页面内容，说明已登录
             try:
-                # 检查订单页面特有的元素
                 order_elements = self.page.locator(".order-list, .order-item, .o-list").count()
                 if order_elements > 0:
                     print(f"   发现订单页面元素，已登录")
@@ -83,23 +80,30 @@ class BrowserManager:
             except:
                 pass
 
-            # 检查页面内容是否包含个人信息
+            # 方法5：检查页面内容是否包含个人信息
             try:
                 content = self.page.content()
-                # 京东登录后通常会有这些特征
                 if "我的订单" in content or "个人中心" in content:
                     print("   页面包含个人中心内容，已登录")
                     return True
             except:
                 pass
 
-            # 备用方案：访问首页检查
+            # 方法6：检查 cookie 中的登录凭证
+            try:
+                cookies = self.context.cookies()
+                for cookie in cookies:
+                    if cookie.get('name') in ['pin', 'unick', '_pst', 'wskey']:
+                        print(f"   发现登录cookie: {cookie['name']}")
+                        return True
+            except:
+                pass
+
+            # 方法7：访问首页检查是否有用户昵称
             self.page.goto("https://www.jd.com", wait_until="domcontentloaded", timeout=10000)
             time.sleep(1)
 
-            # 检查首页是否有"你好"或用户昵称
             try:
-                # 京东首页登录后右上角会显示用户名
                 user_elements = self.page.locator(".nickname, .user-name, [class*='user-info']").count()
                 if user_elements > 0:
                     print(f"   发现用户昵称元素，已登录")
@@ -107,7 +111,7 @@ class BrowserManager:
             except:
                 pass
 
-            # 检查是否有退出按钮
+            # 方法8：检查是否有退出按钮
             try:
                 logout_btn = self.page.locator("text=退出, a[href*='logout']").count()
                 if logout_btn > 0:
@@ -116,22 +120,11 @@ class BrowserManager:
             except:
                 pass
 
-            # 如果以上都无法确定，尝试检查 cookie
-            try:
-                cookies = self.context.cookies()
-                for cookie in cookies:
-                    if cookie.get('name') in ['pin', 'unick', '_pst']:
-                        print(f"   发现登录cookie: {cookie['name']}")
-                        return True
-            except:
-                pass
-
             print("   未检测到登录状态")
             return False
 
         except Exception as e:
             print(f"⚠️ 检查登录状态出错: {e}")
-            # 出错时保守返回 False，让用户重新登录
             return False
 
     def close(self, force=False):
