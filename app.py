@@ -16,15 +16,21 @@ from flask import Flask, render_template, request, jsonify, send_file
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # 兼容 PyInstaller 打包后的路径
-if getattr(sys, 'frozen', False):
-    # 打包后的运行环境（PyInstaller）
-    BASE_DIR = os.path.dirname(sys.executable)
-    # 如果 exe 在 _internal 目录中（onedir 模式），需要向上回退一级
-    if os.path.basename(BASE_DIR).lower() == '_internal':
-        BASE_DIR = os.path.dirname(BASE_DIR)
-else:
-    # 源码运行环境
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+def get_base_dir():
+    """获取程序根目录（兼容源码和打包模式）"""
+    if getattr(sys, 'frozen', False):
+        # PyInstaller 打包后的 EXE 运行
+        # sys.executable 指向 _internal/SKU-Price-Audit-Web.exe
+        exe_dir = os.path.dirname(sys.executable)
+        # 如果 exe 在 _internal 目录中，向上回退一级
+        if os.path.basename(exe_dir).lower() == '_internal':
+            return os.path.dirname(exe_dir)
+        return exe_dir
+    else:
+        # 源码运行
+        return os.path.dirname(os.path.abspath(__file__))
+
+BASE_DIR = get_base_dir()
 
 from config import CONFIG
 from utils.browser_manager import BrowserManager
