@@ -1,69 +1,57 @@
 @echo off
-setlocal enabledelayedexpansion
-chcp 65001 >nul 2>&1
 :: ============================================================
 :: 直播-点菜 SKU 巡检 - Web GUI 启动脚本 (Windows)
+:: 后台运行，不显示终端窗口
 :: ============================================================
 
 :: 获取脚本所在目录
 set "SCRIPT_DIR=%~dp0"
 cd /d "%SCRIPT_DIR%" || exit /b 1
 
-echo ============================================================
-echo 🚀 直播-点菜 SKU 巡检 - Web 版
-echo ============================================================
-echo.
-
-:: 检查是否是打包版本（存在 SKU-Price-Audit-Web.exe）
+:: 检查是否是打包版本
 if exist "%SCRIPT_DIR%\SKU-Price-Audit-Web.exe" (
-    echo ✅ 检测到打包版本
-    echo 📁 工作目录: %SCRIPT_DIR%
-    echo.
-    echo ============================================================
-    echo 🌐 正在启动 Web 服务...
-    echo ============================================================
-    echo.
-    echo 服务启动后，将自动打开浏览器
-    echo 如未自动打开，请手动访问: http://localhost:8080
-    echo.
-    "%SCRIPT_DIR%\SKU-Price-Audit-Web.exe"
-    goto :end
+    :: 后台运行 EXE，隐藏窗口
+    start "" /B "%SCRIPT_DIR%\SKU-Price-Audit-Web.exe"
+    goto :wait_for_server
 )
 
 :: 检查是否是源码版本
 python --version >nul 2>&1
 if %errorlevel% equ 0 (
-    echo ℹ️  源码版本，使用系统 Python
-    echo 📁 工作目录: %SCRIPT_DIR%
-    echo.
-    echo ============================================================
-    echo 🌐 正在启动 Web 服务...
-    echo ============================================================
-    echo.
-    python "%SCRIPT_DIR%\app.py"
-    goto :end
+    start "" /B python "%SCRIPT_DIR%\app.py"
+    goto :wait_for_server
 )
 
 python3 --version >nul 2>&1
 if %errorlevel% equ 0 (
-    echo ℹ️  源码版本，使用系统 Python3
-    echo 📁 工作目录: %SCRIPT_DIR%
-    echo.
-    echo ============================================================
-    echo 🌐 正在启动 Web 服务...
-    echo ============================================================
-    echo.
-    python3 "%SCRIPT_DIR%\app.py"
-    goto :end
+    start "" /B python3 "%SCRIPT_DIR%\app.py"
+    goto :wait_for_server
 )
 
 echo ❌ 错误：未找到 Python，请先安装 Python 3.8+
 pause
 exit /b 1
 
-:end
-echo.
-echo ⚠️ 程序已退出
-echo.
+:wait_for_server
+echo 🚀 正在启动服务...
+
+:: 等待服务启动（最多 10 秒）
+set /a count=0
+:check_loop
+ping -n 2 127.0.0.1 >nul 2>&1
+set /a count+=1
+if %count% geq 10 goto :timeout
+
+:: 检查服务是否启动
+powershell -Command "try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:8080' -TimeoutSec 1 -UseBasicParsing; exit 0 } catch { exit 1 }"
+if %errorlevel% neq 0 goto :check_loop
+
+:: 服务已启动，打开浏览器
+echo ✅ 服务已启动，正在打开浏览器...
+start http://127.0.0.1:8080
+exit /b 0
+
+:timeout
+echo ⚠️ 服务启动超时，请手动访问 http://127.0.0.1:8080
 pause
-endlocal
+exit /b 1
