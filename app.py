@@ -7,7 +7,6 @@ import os
 import sys
 import time
 import threading
-import json
 from pathlib import Path
 
 from flask import Flask, render_template, request, jsonify, send_file
@@ -69,11 +68,14 @@ audit_status = {
     'total': 0,
     'current': 0,
     'current_sku': '',
+    'success_count': 0,
+    'fail_count': 0,
     'unqualified_count': 0,
     'logs': [],
     'result_file': None,
     'error': None,
-    'need_login': False
+    'need_login': False,
+    'stopping': False
 }
 
 # 登录等待事件
@@ -85,6 +87,39 @@ stop_flag = threading.Event()
 # 全局浏览器实例（用于强制关闭）
 current_browser = None
 browser_lock = threading.Lock()
+
+
+def json_error(message, status_code=400):
+    return jsonify({'success': False, 'error': message}), status_code
+
+
+def resolve_input_file(file_path):
+    """只允许启动 input 目录下的文件，避免任意本地路径被 Web 请求触发读取。"""
+    if not file_path:
+        return None
+
+    input_dir = Path(CONFIG['input_dir']).resolve()
+    candidate = Path(file_path)
+    if not candidate.is_absolute():
+        candidate = Path(BASE_DIR) / candidate
+    candidate = candidate.resolve()
+
+    try:
+        candidate.relative_to(input_dir)
+    except ValueError:
+        return None
+
+    if not candidate.is_file() or candidate.suffix.lower() != '.xlsx':
+        return None
+
+    return str(candidate)
+
+
+def safe_upload_name(filename):
+    name = (filename or '').replace('\\', '/').split('/')[-1].strip()
+    if not name or name in {'.', '..'} or not name.lower().endswith('.xlsx'):
+        return None
+    return name
 
 
 def add_log(message):
@@ -113,16 +148,21 @@ def run_audit_task(input_file, threshold_price):
         from utils.browser_manager import BrowserManager
         from utils.jd_crawler import crawl_sku
         from utils.excel_handler import read_sku_list, write_results
+        from utils.audit_runner import run_sku_batch
 
         with status_lock:
             audit_status['running'] = True
+            audit_status['stopping'] = False
             audit_status['total'] = 0
             audit_status['current'] = 0
             audit_status['current_sku'] = ''
+            audit_status['success_count'] = 0
+            audit_status['fail_count'] = 0
             audit_status['unqualified_count'] = 0
             audit_status['logs'] = []
             audit_status['result_file'] = None
             audit_status['error'] = None
+            audit_status['need_login'] = False
 
         add_log('🚀 开始批量测价')
         add_log(f'📁 输入文件: {os.path.basename(input_file)}')
@@ -130,7 +170,13 @@ def run_audit_task(input_file, threshold_price):
 
         # 1. 读取 SKU 列表
         add_log('📖 正在读取 Excel...')
-        sku_data = read_sku_list(input_file, CONFIG['sku_column'])
+        try:
+            sku_data = read_sku_list(input_file, CONFIG['sku_column'])
+        except Exception as e:
+            with status_lock:
+                audit_status['error'] = str(e)
+            add_log(f'❌ {e}')
+            return
 
         with status_lock:
             audit_status['total'] = len(sku_data)
@@ -155,7 +201,7 @@ def run_audit_task(input_file, threshold_price):
         is_logged_in = browser.check_login_status()
         add_log(f'   登录状态检查结果: {"已登录" if is_logged_in else "未登录"}')
 
-        if not is_logged_in:
+        def wait_for_web_login():
             add_log('⚠️ 登录态已失效，请登录')
             with status_lock:
                 audit_status['need_login'] = True
@@ -165,6 +211,11 @@ def run_audit_task(input_file, threshold_price):
             add_log('⏳ 等待用户完成登录并点击"我已登录"...')
             # 循环等待，检查是否停止
             wait_count = 0
+            try:
+                browser.open_login_page()
+            except Exception as e:
+                add_log(f'⚠️ 打开登录页失败: {e}')
+
             while not login_event.is_set() and wait_count < 120:  # 最多等待10分钟
                 login_event.wait(timeout=5)
                 wait_count += 1
@@ -178,7 +229,7 @@ def run_audit_task(input_file, threshold_price):
                 audit_status['need_login'] = False
 
             if stop_flag.is_set():
-                return
+                return False
 
             # 再次检查登录状态
             add_log('🔐 重新检查登录状态...')
@@ -186,10 +237,22 @@ def run_audit_task(input_file, threshold_price):
             add_log(f'   登录状态检查结果: {"已登录" if is_logged_in else "未登录"}')
 
             if not is_logged_in:
+                add_log('❌ 登录失败')
+                return False
+
+            try:
+                browser.save_auth_state()
+            except Exception as e:
+                add_log(f'⚠️ 保存登录状态失败: {e}')
+
+            add_log('✅ 登录恢复，继续运行')
+            return True
+
+        if not is_logged_in:
+            if not wait_for_web_login():
                 with status_lock:
                     audit_status['error'] = '登录失败，请重新运行'
                 return
-
         add_log('✅ 登录状态正常')
 
         # 4. 创建输出目录
@@ -201,31 +264,27 @@ def run_audit_task(input_file, threshold_price):
         os.makedirs(CONFIG['screenshot_dir'], exist_ok=True)
 
         # 5. 批量测价
-        results = []
-        stop_flag.clear()
-        for i, (row_index, sku) in enumerate(sku_data, 1):
-            # 检查是否停止
-            if stop_flag.is_set():
-                add_log('🛑 测价已停止')
-                break
-
+        def on_item_start(i, total, row_index, sku):
             with status_lock:
                 audit_status['current'] = i
                 audit_status['current_sku'] = sku
             add_log(f'[{i}/{len(sku_data)}] 处理 SKU: {sku}')
 
-            result = crawl_sku(
+        def crawl_one(row_index, sku):
+            return crawl_sku(
                 page=page,
                 sku=sku,
                 screenshot_dir=CONFIG['screenshot_dir'],
                 delay_min=CONFIG['delay_min'],
                 delay_max=CONFIG['delay_max'],
-                threshold_price=threshold_price
+                threshold_price=threshold_price,
+                should_stop=stop_flag.is_set
             )
-            result['row_index'] = row_index
-            results.append(result)
 
+        def on_result(result):
             if result['status'] == 'success':
+                with status_lock:
+                    audit_status['success_count'] += 1
                 if result['price'] is not None and result['price'] < threshold_price:
                     with status_lock:
                         audit_status['unqualified_count'] += 1
@@ -233,44 +292,27 @@ def run_audit_task(input_file, threshold_price):
                 else:
                     add_log(f'  ✅ 价格: ¥{result["price"]}')
             elif result['status'] == 'need_login':
-                add_log('⚠️ 登录态失效，等待登录...')
                 with status_lock:
-                    audit_status['need_login'] = True
-                login_event.clear()
-                # 等待前端通知继续
-                add_log('⏳ 等待用户完成登录并点击"我已登录"...')
-
-                # 循环等待，检查是否停止
-                wait_count = 0
-                while not login_event.is_set() and wait_count < 120:
-                    login_event.wait(timeout=5)
-                    wait_count += 1
-                    if stop_flag.is_set():
-                        add_log('🛑 测价已停止')
-                        break
-
-                with status_lock:
-                    audit_status['need_login'] = False
-
-                if stop_flag.is_set():
-                    break
-
-                # 再次检查登录状态
-                add_log('🔐 重新检查登录状态...')
-                is_logged_in = browser.check_login_status()
-                add_log(f'   登录状态检查结果: {"已登录" if is_logged_in else "未登录"}')
-
-                if is_logged_in:
-                    add_log('✅ 登录恢复，继续运行')
-                    # 重新处理当前 SKU
-                    i -= 1
-                    continue
-                else:
-                    with status_lock:
-                        audit_status['error'] = '登录失败，程序中断'
-                    break
+                    audit_status['fail_count'] += 1
+                add_log(f'  ❌ 需要登录: {result["message"]}')
             else:
+                with status_lock:
+                    audit_status['fail_count'] += 1
                 add_log(f'  ❌ 失败: {result["message"]}')
+
+        def on_login_required(row_index, sku, result):
+            add_log(f'⚠️ SKU {sku} 需要重新登录')
+
+        batch = run_sku_batch(
+            sku_data=sku_data,
+            crawl_func=crawl_one,
+            recover_login_func=wait_for_web_login,
+            stop_event=stop_flag,
+            on_item_start=on_item_start,
+            on_result=on_result,
+            on_login_required=on_login_required,
+        )
+        results = batch.results
 
         # 6. 写入结果
         if results:
@@ -290,8 +332,12 @@ def run_audit_task(input_file, threshold_price):
             add_log(f'✅ 结果已保存: {os.path.basename(output_path)}')
 
         # 7. 检查是否因停止而结束
-        if stop_flag.is_set():
+        if batch.stopped or stop_flag.is_set():
             add_log('🛑 测价已停止')
+        elif batch.login_failed:
+            with status_lock:
+                audit_status['error'] = '登录失败，程序中断'
+            add_log('❌ 登录失败，程序中断')
         else:
             add_log('🎉 测价完成！')
 
@@ -316,6 +362,8 @@ def run_audit_task(input_file, threshold_price):
 
         with status_lock:
             audit_status['running'] = False
+            audit_status['stopping'] = False
+            audit_status['need_login'] = False
 
 
 @app.route('/')
@@ -344,16 +392,18 @@ def upload_file():
     if file.filename == '':
         return jsonify({'success': False, 'error': '未选择文件'})
 
-    if not file.filename.endswith('.xlsx'):
+    safe_name = safe_upload_name(file.filename)
+    if not safe_name:
         return jsonify({'success': False, 'error': '仅支持 .xlsx 格式'})
 
     # 保存到 input 目录
-    upload_path = os.path.join(CONFIG['input_dir'], file.filename)
+    os.makedirs(CONFIG['input_dir'], exist_ok=True)
+    upload_path = os.path.join(CONFIG['input_dir'], safe_name)
     file.save(upload_path)
 
     return jsonify({
         'success': True,
-        'filename': file.filename,
+        'filename': safe_name,
         'path': upload_path
     })
 
@@ -367,17 +417,29 @@ def start_audit():
         if audit_status['running']:
             return jsonify({'success': False, 'error': '已有任务正在运行'})
 
-    data = request.json
+    data = request.get_json(silent=True) or {}
     input_file = data.get('file')
     threshold = data.get('threshold', CONFIG['threshold_price'])
 
-    if not input_file or not os.path.exists(input_file):
-        return jsonify({'success': False, 'error': '文件不存在，请先上传'})
+    try:
+        threshold = float(threshold)
+    except (TypeError, ValueError):
+        return json_error('价格门槛必须是有效数字')
+
+    if threshold < 0:
+        return json_error('价格门槛不能为负数')
+
+    input_file = resolve_input_file(input_file)
+    if not input_file:
+        return json_error('文件不存在或不在 input 目录，请先上传')
+
+    stop_flag.clear()
+    login_event.clear()
 
     # 启动后台线程
     thread = threading.Thread(
         target=run_audit_task,
-        args=(input_file, float(threshold))
+        args=(input_file, threshold)
     )
     thread.daemon = False  # 改为非守护线程，确保能正常完成
     thread.start()
@@ -436,26 +498,10 @@ def stop_audit():
     stop_flag.set()
     login_event.set()  # 唤醒可能正在等待登录的线程
 
-    # 强制关闭浏览器
-    global current_browser
-    with browser_lock:
-        if current_browser:
-            try:
-                add_log('🛑 正在关闭浏览器...')
-                # 先重置 current_browser，防止重复关闭
-                browser_to_close = current_browser
-                current_browser = None
-                browser_to_close.close(force=True)
-                add_log('✅ 浏览器已强制关闭')
-            except Exception as e:
-                add_log(f"❌ 关闭浏览器出错: {e}")
-                current_browser = None
-
-    # 重置状态
     with status_lock:
-        audit_status['running'] = False
+        audit_status['stopping'] = True
         audit_status['need_login'] = False
-    add_log('🛑 测价任务已停止')
+    add_log('🛑 已请求停止，正在等待当前步骤结束')
 
     return jsonify({'success': True})
 
@@ -510,13 +556,5 @@ if __name__ == '__main__':
     print('   2. 双击"关闭服务.bat"')
     print('   3. 在任务管理器中结束进程')
 
-    # 自动打开浏览器（仅在非打包模式下）
-    if not getattr(sys, 'frozen', False):
-        import webbrowser
-        def open_browser():
-            time.sleep(1.5)
-            webbrowser.open('http://localhost:8080')
-        threading.Thread(target=open_browser, daemon=True).start()
-
     # 使用多线程模式运行
-    app.run(host='0.0.0.0', port=8080, debug=False, threaded=True)
+    app.run(host='127.0.0.1', port=8080, debug=False, threaded=True)

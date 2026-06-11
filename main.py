@@ -6,7 +6,7 @@
 import os
 import sys
 import argparse
-import time
+import threading
 
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -16,6 +16,7 @@ from utils.browser_manager import BrowserManager
 from utils.jd_crawler import crawl_sku
 from utils.excel_handler import read_sku_list, write_results
 from utils.cleanup import auto_cleanup
+from utils.audit_runner import run_sku_batch
 
 
 def list_input_files():
@@ -153,7 +154,11 @@ def main():
 
     # 2. 读取 SKU 列表
     print(f"\n📖 正在读取: {input_file}")
-    sku_data = read_sku_list(input_file, CONFIG['sku_column'])
+    try:
+        sku_data = read_sku_list(input_file, CONFIG['sku_column'])
+    except Exception as e:
+        print(f"❌ {e}")
+        return
     print(f"✅ 共读取 {len(sku_data)} 个 SKU")
 
     if len(sku_data) == 0:
@@ -191,13 +196,8 @@ def main():
     print(f"\n📦 开始批量测价（门槛价: ¥{threshold_price}）")
     print("-"*60)
 
-    results = []
-    need_login_flag = False
-
-    for i, (row_index, sku) in enumerate(sku_data, 1):
-        print(f"\n[{i}/{len(sku_data)}] SKU: {sku}")
-
-        result = crawl_sku(
+    def crawl_one(row_index, sku):
+        return crawl_sku(
             page=page,
             sku=sku,
             screenshot_dir=CONFIG['screenshot_dir'],
@@ -205,26 +205,32 @@ def main():
             delay_max=CONFIG['delay_max'],
             threshold_price=threshold_price
         )
-        result['row_index'] = row_index
-        results.append(result)
 
-        # 检查是否需要登录
-        if result['status'] == 'need_login':
-            print(f"\n❌ {result['message']}")
-            # 使用交互式等待，兼容 EXE 模式
-            browser.wait_for_login_interactive()
+    def on_item_start(i, total, row_index, sku):
+        print(f"\n[{i}/{total}] SKU: {sku}")
 
-            # 用户登录后，重新检查登录状态
-            print("\n🔐 重新检查登录状态...")
-            if browser.check_login_status():
-                print("✅ 登录状态已恢复，继续运行")
-                # 重新处理当前 SKU
-                i -= 1
-                continue
-            else:
-                print("❌ 登录状态仍未恢复，程序退出")
-                need_login_flag = True
-                break
+    def on_login_required(row_index, sku, result):
+        print(f"\n❌ {result['message']}")
+
+    def recover_login():
+        browser.wait_for_login_interactive()
+        print("\n🔐 重新检查登录状态...")
+        if browser.check_login_status():
+            browser.save_auth_state()
+            print("✅ 登录状态已恢复，继续运行")
+            return True
+        print("❌ 登录状态仍未恢复")
+        return False
+
+    batch = run_sku_batch(
+        sku_data=sku_data,
+        crawl_func=crawl_one,
+        recover_login_func=recover_login,
+        stop_event=threading.Event(),
+        on_item_start=on_item_start,
+        on_login_required=on_login_required,
+    )
+    results = batch.results
 
     print("\n" + "="*60)
 
@@ -259,7 +265,7 @@ def main():
     # 8. 保存登录态（不关闭浏览器，便于下次复用）
     browser.close(force=False)
 
-    if need_login_flag:
+    if batch.login_failed:
         print("\n⚠️ 检测到登录态失效，已中断运行")
         print("请重新运行程序，会自动引导重新登录")
     else:

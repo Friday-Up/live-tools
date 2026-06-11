@@ -281,8 +281,21 @@ def click_element_safely(page, element, timeout=5000):
             return False
 
 
+def _stopped_result(sku):
+    return {
+        'sku': sku,
+        'price': None,
+        'all_prices': None,
+        'spec_details': [],
+        'screenshot_path': None,
+        'status': 'stopped',
+        'message': '用户停止测价'
+    }
+
+
 def crawl_sku_with_series(page, sku, screenshot_dir, delay_min=1, delay_max=3,
-                          price_type='current', threshold_price=None):
+                          price_type='current', threshold_price=None,
+                          should_stop=None):
     """
     爬取单个 SKU 的所有系列和规格的价格
     遍历所有系列标签下的所有规格选项，收集最低价格
@@ -309,8 +322,12 @@ def crawl_sku_with_series(page, sku, screenshot_dir, delay_min=1, delay_max=3,
         }
     """
     url = f"https://item.jd.com/{sku}.html"
+    should_stop = should_stop or (lambda: False)
 
     try:
+        if should_stop():
+            return _stopped_result(sku)
+
         # 1. 打开页面
         print(f"  📦 正在处理 SKU: {sku}")
         page.goto(url, wait_until="domcontentloaded", timeout=60000)
@@ -318,6 +335,8 @@ def crawl_sku_with_series(page, sku, screenshot_dir, delay_min=1, delay_max=3,
         # 2. 随机延迟，模拟人工操作
         delay = random.uniform(delay_min, delay_max)
         time.sleep(delay)
+        if should_stop():
+            return _stopped_result(sku)
 
         # 3. 检查是否需要登录
         if check_need_login(page):
@@ -369,6 +388,8 @@ def crawl_sku_with_series(page, sku, screenshot_dir, delay_min=1, delay_max=3,
         else:
             # 遍历每个系列标签
             for series_idx, series_el, series_name in series_tabs:
+                if should_stop():
+                    return _stopped_result(sku)
                 print(f"\n  📂 系列 [{series_idx + 1}/{len(series_tabs)}]: {series_name}")
 
                 # 点击系列标签（每个系列都点击，确保规格列表正确刷新）
@@ -415,6 +436,8 @@ def crawl_sku_with_series(page, sku, screenshot_dir, delay_min=1, delay_max=3,
 
                 # 遍历每个规格
                 for spec_idx, spec_el, spec_name in spec_items:
+                    if should_stop():
+                        return _stopped_result(sku)
                     print(f"     🔘 规格 [{spec_idx + 1}/{len(spec_items)}]: {spec_name}", end='')
 
                     # 点击规格（每个规格都点击，确保价格正确刷新）
@@ -510,7 +533,8 @@ def crawl_sku_with_series(page, sku, screenshot_dir, delay_min=1, delay_max=3,
 
 
 # 为了保持向后兼容，保留旧的 crawl_sku 函数
-def crawl_sku(page, sku, screenshot_dir, delay_min=1, delay_max=3, price_type='current', threshold_price=None):
+def crawl_sku(page, sku, screenshot_dir, delay_min=1, delay_max=3, price_type='current',
+              threshold_price=None, should_stop=None):
     """
     兼容旧接口，实际调用新版多系列遍历逻辑
     """
@@ -521,5 +545,6 @@ def crawl_sku(page, sku, screenshot_dir, delay_min=1, delay_max=3, price_type='c
         delay_min=delay_min,
         delay_max=delay_max,
         price_type=price_type,
-        threshold_price=threshold_price
+        threshold_price=threshold_price,
+        should_stop=should_stop
     )

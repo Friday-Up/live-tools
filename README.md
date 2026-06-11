@@ -33,7 +33,7 @@
 
 | 特性 | 说明 |
 | --- | --- |
-| 📁 **自动识别输入** | `input/` 目录下所有 `.xlsx` 文件自动列出，交互式选择 |
+| 📁 **自动识别输入** | `input/` 目录下所有 `.xlsx` 文件自动列出，命令行和 Web 均可选择，也支持 Web 直接上传 |
 | 💰 **门槛价灵活设定** | 支持命令行参数或交互式输入，随时调整 |
 | 🔐 **登录态持久化** | 首次人工登录后自动保存，后续自动复用；失效时暂停等待人工登录 |
 | 🏷️ **多系列多规格遍历** | 自动识别商品系列标签（如镇店爆款/品质纯奶），遍历每个系列下的所有规格 |
@@ -89,8 +89,15 @@ playwright install chromium
 pip install -r requirements.txt
 playwright install chromium
 
-# 启动 Web 服务
+# 启动 Web 服务（Windows 推荐双击 start_web.bat）
 python app.py
+```
+
+源码模式下如缺少依赖，请先执行：
+
+```bash
+pip install -r requirements.txt
+python -m playwright install chromium
 ```
 
 ---
@@ -138,7 +145,7 @@ start.bat
    [1] 6月5日青春采销点菜.xlsx
    [2] 6月8日点菜.xlsx
    请输入编号（1-2）：2
-3. 💰 输入价格门槛（回车默认 10.0）
+3. 💰 输入价格门槛（回车默认 6.0）
 4. 启动浏览器 → 人工登录（首次）→ 批量测价 → 输出结果
 ```
 
@@ -211,7 +218,7 @@ CONFIG = {
     'input_dir': 'input',                    # 输入目录
     'output_dir': 'output',                  # 输出目录
     'screenshot_dir': 'output/screenshots',  # 截图目录
-    'threshold_price': 10.0,                 # 默认门槛价
+    'threshold_price': 6.0,                  # 默认门槛价
     'delay_min': 1,                          # 最小延迟（秒）
     'delay_max': 3,                          # 最大延迟（秒）
     'auth_file': 'jd_auth.json',             # 登录态文件
@@ -235,7 +242,7 @@ CONFIG = {
 <details>
 <summary><b>Q2：登录态失效了怎么办？</b></summary>
 
-**Web GUI 模式**：程序会自动弹出"我已登录"弹窗，请在浏览器中重新登录京东，然后点击弹窗上的"✓ 我已登录，继续"按钮。
+**Web GUI 模式**：程序会自动弹出"我已登录"弹窗，请在浏览器中重新登录京东，然后点击弹窗上的"✓ 我已登录，继续"按钮。登录恢复后会重试当前 SKU，不会跳过。
 
 **命令行模式**：程序会自动检测到失效，重新打开登录页面，请在浏览器中重新登录后，回到终端按回车键继续。
 
@@ -243,44 +250,50 @@ CONFIG = {
 </details>
 
 <details>
-<summary><b>Q3：支持哪些 Excel 格式？</b></summary>
+<summary><b>Q3：Windows 双击后网页打不开怎么办？</b></summary>
 
-仅支持 `.xlsx` 格式，不支持 `.xls`。表格必须包含 `商品SKU` 列。
+请打开程序目录下的 `logs/web.log` 查看启动日志。源码模式的 `start_web.bat` 会自动检查并安装 Python 依赖和 Playwright Chromium；如果网络限制导致安装失败，日志里会显示具体错误。
 </details>
 
 <details>
-<summary><b>Q4：运行一次大概多久？</b></summary>
+<summary><b>Q4：支持哪些 Excel 格式？</b></summary>
 
-300 个 SKU 预计耗时 10-15 分钟（含 1-3 秒随机延迟）。
+仅支持 `.xlsx` 格式，不支持 `.xls`。表格必须包含 `商品SKU` 列，也兼容 `商品SKU（必填）` 这类带说明的表头；如果找不到 SKU 列会直接报错，不会猜测列位置。
 </details>
 
 <details>
-<summary><b>Q5：截图会被保留吗？</b></summary>
+<summary><b>Q5：运行一次大概多久？</b></summary>
+
+耗时取决于 SKU 数量和每个商品页的系列/规格数量。普通单规格商品较快；多系列、多规格商品会逐个点击规格，耗时会明显增加。
+</details>
+
+<details>
+<summary><b>Q6：截图会被保留吗？</b></summary>
 
 每次运行前会自动清空 `output/screenshots/` 目录，只保留当前运行的截图。结果文件（`*_result.xlsx`）不会自动删除。
 </details>
 
 <details>
-<summary><b>Q6：为什么有些 SKU 只检测了几个规格就跳过了？</b></summary>
+<summary><b>Q7：为什么有些 SKU 只检测了几个规格就跳过了？</b></summary>
 
 这是正常行为。工具在遍历规格时，一旦发现**任意规格低于门槛价**，会立即截图并停止遍历该 SKU 的剩余规格，以节省时间和减少不必要的页面点击。
 </details>
 
 <details>
-<summary><b>Q7：多系列商品（如镇店爆款/品质纯奶）会全部检测吗？</b></summary>
+<summary><b>Q8：多系列商品（如镇店爆款/品质纯奶）会全部检测吗？</b></summary>
 
 会。工具会自动识别商品页面上的系列标签，逐个点击每个系列，再遍历该系列下的所有规格，确保不遗漏。
 </details>
 
 <details>
-<summary><b>Q8：Web GUI 模式和命令行模式有什么区别？</b></summary>
+<summary><b>Q9：Web GUI 模式和命令行模式有什么区别？</b></summary>
 
 | 对比项 | Web GUI 模式 | 命令行模式 |
 |:---|:---|:---|
 | **操作方式** | 浏览器网页操作 | 终端命令行交互 |
 | **适用人群** | 业务人员（推荐） | 开发者/技术人员 |
 | **启动命令** | `python app.py` 或双击 `启动测价工具.bat` | `python main.py` 或 `start.bat` |
-| **文件选择** | 网页拖拽/点击上传 | 终端输入编号选择 |
+| **文件选择** | 网页选择 input 文件或拖拽/点击上传 | 终端输入编号选择 |
 | **进度查看** | 网页实时进度条+日志 | 终端文字输出 |
 | **登录弹窗** | 网页"我已登录"按钮 | 终端按回车确认 |
 
@@ -316,9 +329,11 @@ live-sku-price-audit/
 │   └── index.html          # 主页面（上传/进度/结果）
 ├── utils/                  # 核心逻辑
 │   ├── browser_manager.py  # 浏览器管理（登录态复用/重新登录）
+│   ├── audit_runner.py     # 批量任务编排（停止/登录重试/结果汇总）
 │   ├── jd_crawler.py       # 京东价格爬取（价格提取/截图/弹窗关闭）
 │   ├── excel_handler.py    # Excel 读写（SKU 读取/结果写入/图片嵌入）
 │   └── cleanup.py          # 临时文件清理
+├── tests/                  # 单元测试
 ├── input/                  # 输入文件目录（.gitignore 排除业务数据）
 │   ├── README.md           # 输入格式说明
 │   └── 点菜清单模板.xlsx    # 模板文件

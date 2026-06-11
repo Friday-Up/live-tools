@@ -30,15 +30,16 @@ class BrowserManager:
 
         if os.path.exists(self.auth_file):
             # 复用已有登录态
-            self.context = self.browser.new_context(storage_state=self.auth_file)
-            print("✅ 已加载登录状态，无需再次登录")
+            try:
+                self.context = self.browser.new_context(storage_state=self.auth_file)
+                print("✅ 已加载登录状态")
+            except Exception as e:
+                print(f"⚠️ 登录状态文件不可用，将重新登录: {e}")
+                self.context = self.browser.new_context()
         else:
             # 首次运行，需要人工登录
             self.context = self.browser.new_context()
             print("⚠️ 首次运行，请登录京东...")
-            # Web 模式下不调用 _manual_login，由前端控制
-            # 保存空登录态，让前端处理登录流程
-            self.context.storage_state(path=self.auth_file)
 
         self.page = self.context.new_page()
         return self.page
@@ -101,13 +102,7 @@ class BrowserManager:
                     pass
 
             # 检查页面内容是否包含个人信息
-            try:
-                content = self.page.content()
-                if "我的京东" in content or "个人中心" in content or "我的订单" in content:
-                    print("   页面包含个人中心内容，已登录")
-                    return True
-            except:
-                pass
+            # 不用“我的京东/我的订单”作为登录依据，京东未登录首页也会出现这些入口。
 
             # 检查 cookie 中的登录凭证
             try:
@@ -239,3 +234,33 @@ class BrowserManager:
         # 保存登录状态
         self.context.storage_state(path=self.auth_file)
         print(f"✅ 登录状态已保存到 {self.auth_file}")
+
+    def open_login_page(self):
+        if not self.page:
+            self.page = self.context.new_page()
+        self.page.goto("https://passport.jd.com/new/login.aspx", wait_until="domcontentloaded", timeout=30000)
+
+    def save_auth_state(self):
+        if self.context:
+            self.context.storage_state(path=self.auth_file)
+            print(f"✅ 登录状态已保存到 {self.auth_file}")
+
+    def wait_for_login_interactive(self):
+        self.open_login_page()
+        print("\n" + "=" * 50)
+        print("⚠️  需要人工登录京东")
+        print("=" * 50)
+        print("请在浏览器窗口中完成登录，登录完成后回到终端按回车继续。")
+        print("=" * 50 + "\n")
+        try:
+            input("按回车确认已登录...")
+        except EOFError:
+            print("非交互环境，等待 60 秒...")
+            time.sleep(60)
+
+    def re_login(self):
+        self.wait_for_login_interactive()
+        if self.check_login_status():
+            self.save_auth_state()
+            return True
+        return False

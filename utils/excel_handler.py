@@ -9,6 +9,25 @@ from openpyxl.drawing.image import Image as XLImage
 from openpyxl.utils import get_column_letter
 
 
+def _normalize_header(value):
+    return str(value or "").strip().replace(" ", "")
+
+
+def _find_header_index(headers, expected_name):
+    normalized_expected = _normalize_header(expected_name)
+    for index, header in enumerate(headers):
+        normalized = _normalize_header(header)
+        if normalized == normalized_expected or normalized_expected in normalized:
+            return index
+    return None
+
+
+def _format_sku(value):
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value).strip()
+
+
 def read_sku_list(file_path, sku_column='商品SKU'):
     """
     从 Excel 读取 SKU 列表
@@ -26,18 +45,16 @@ def read_sku_list(file_path, sku_column='商品SKU'):
     # 找到表头行
     headers = [cell.value for cell in ws[1]]
 
-    # 找到 SKU 列索引
-    if sku_column in headers:
-        sku_col_index = headers.index(sku_column)
-    else:
-        # 默认第2列（B列）
-        sku_col_index = 1
+    sku_col_index = _find_header_index(headers, sku_column)
+    if sku_col_index is None:
+        header_text = "、".join(str(h) for h in headers if h)
+        raise ValueError(f"未找到SKU列「{sku_column}」，当前表头: {header_text or '空'}")
 
     sku_list = []
     for i, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-        sku = row[sku_col_index]
+        sku = row[sku_col_index] if sku_col_index < len(row) else None
         if sku:
-            sku_list.append((i, str(sku).strip()))
+            sku_list.append((i, _format_sku(sku)))
 
     return sku_list
 
@@ -65,14 +82,24 @@ def write_results(file_path, results, threshold_price, output_dir='output',
     # 找到列索引
     headers = [cell.value for cell in ws[1]]
 
-    def get_col_index(col_name):
-        if col_name in headers:
-            return headers.index(col_name) + 1
-        return None
+    next_output_col = ws.max_column + 1
 
-    price_col = get_col_index(price_column) or 4
-    img_col = get_col_index(image_column) or 5
-    remark_col = get_col_index(remark_column) or 6
+    def get_or_create_col_index(col_name, fallback_col):
+        nonlocal next_output_col
+        index = _find_header_index(headers, col_name)
+        if index is not None:
+            return index + 1
+        target_col = fallback_col
+        if ws.cell(row=1, column=target_col).value not in (None, ""):
+            target_col = next_output_col
+            next_output_col += 1
+        ws.cell(row=1, column=target_col, value=col_name)
+        headers.append(col_name)
+        return target_col
+
+    price_col = get_or_create_col_index(price_column, 4)
+    img_col = get_or_create_col_index(image_column, 5)
+    remark_col = get_or_create_col_index(remark_column, 6)
 
     # 设置图片列宽度
     ws.column_dimensions[get_column_letter(img_col)].width = 30

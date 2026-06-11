@@ -134,6 +134,38 @@
             color: #e74c3c;
         }
 
+        .file-picker {
+            margin-top: 12px;
+            display: none;
+        }
+
+        .file-picker.active {
+            display: block;
+        }
+
+        .file-picker-title {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 8px;
+        }
+
+        .existing-file {
+            width: 100%;
+            text-align: left;
+            border: 1px solid #e5e7eb;
+            background: #fff;
+            border-radius: 8px;
+            padding: 10px 12px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            color: #333;
+        }
+
+        .existing-file:hover {
+            border-color: #4a90e2;
+            background: #f0f7ff;
+        }
+
         /* Form Row */
         .form-row {
             display: flex;
@@ -203,6 +235,38 @@
 
         .btn-success:hover {
             background: #219a52;
+        }
+
+        .btn-secondary {
+            background: #f3f4f6;
+            color: #333;
+            border: 1px solid #e5e7eb;
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: #e5e7eb;
+        }
+
+        .status-message {
+            display: none;
+            margin-top: 12px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            font-size: 13px;
+        }
+
+        .status-message.active {
+            display: block;
+        }
+
+        .status-message.error {
+            color: #991b1b;
+            background: #fee2e2;
+        }
+
+        .status-message.info {
+            color: #1e3a8a;
+            background: #dbeafe;
         }
 
         /* Progress */
@@ -415,6 +479,8 @@
             <input type="file" id="fileInput" accept=".xlsx" class="hidden">
 
             <div class="file-list" id="fileList"></div>
+            <div class="file-picker" id="existingFilePicker"></div>
+            <div class="status-message" id="statusMessage"></div>
 
             <div style="margin-top: 20px;">
                 <div class="section-title">⚙️ 测价配置</div>
@@ -519,11 +585,34 @@
     <script>
         let selectedFile = null;
         let statusInterval = null;
+        let lastStatus = null;
 
         const uploadArea = document.getElementById('uploadArea');
         const fileInput = document.getElementById('fileInput');
         const fileList = document.getElementById('fileList');
         const startBtn = document.getElementById('startBtn');
+        const existingFilePicker = document.getElementById('existingFilePicker');
+        const statusMessage = document.getElementById('statusMessage');
+
+        function escapeHtml(value) {
+            return String(value || '').replace(/[&<>"']/g, (char) => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            }[char]));
+        }
+
+        function showMessage(message, type = 'info') {
+            statusMessage.textContent = message;
+            statusMessage.className = `status-message active ${type}`;
+        }
+
+        function clearMessage() {
+            statusMessage.textContent = '';
+            statusMessage.className = 'status-message';
+        }
 
         uploadArea.addEventListener('click', () => fileInput.click());
         uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); uploadArea.classList.add('dragover'); });
@@ -548,10 +637,12 @@
                         selectedFile = data.path;
                         renderFile(data.filename);
                         startBtn.disabled = false;
+                        clearMessage();
                     } else {
-                        alert(data.error);
+                        showMessage(data.error, 'error');
                     }
-                });
+                })
+                .catch(() => showMessage('上传失败，请确认服务仍在运行', 'error'));
         }
 
         function renderFile(name) {
@@ -559,13 +650,14 @@
                 <div class="file-item">
                     <div class="file-icon">📊</div>
                     <div class="file-info">
-                        <div class="file-name">${name}</div>
+                        <div class="file-name">${escapeHtml(name)}</div>
                         <div class="file-status">已选择</div>
                     </div>
                     <div class="file-delete" onclick="deleteFile()">🗑️</div>
                 </div>
             `;
             uploadArea.style.display = 'none';
+            existingFilePicker.classList.remove('active');
         }
 
         function deleteFile() {
@@ -574,7 +666,41 @@
             fileList.innerHTML = '';
             uploadArea.style.display = 'block';
             fileInput.value = ''; // 清空 input，允许重新上传同一个文件
+            loadExistingFiles();
         }
+
+        function loadExistingFiles() {
+            fetch('/api/list_files')
+                .then(res => res.json())
+                .then(data => {
+                    if (!data.files || data.files.length === 0 || selectedFile) {
+                        existingFilePicker.classList.remove('active');
+                        existingFilePicker.innerHTML = '';
+                        return;
+                    }
+                    existingFilePicker.classList.add('active');
+                    existingFilePicker.innerHTML = `
+                        <div class="file-picker-title">或选择 input 目录中的文件</div>
+                        ${data.files.map(file => `
+                            <button class="existing-file" type="button" data-path="${escapeHtml(file.path)}" data-name="${escapeHtml(file.name)}">
+                                ${escapeHtml(file.name)}
+                            </button>
+                        `).join('')}
+                    `;
+                })
+                .catch(() => {
+                    existingFilePicker.classList.remove('active');
+                });
+        }
+
+        existingFilePicker.addEventListener('click', (event) => {
+            const btn = event.target.closest('.existing-file');
+            if (!btn) return;
+            selectedFile = btn.dataset.path;
+            renderFile(btn.dataset.name);
+            startBtn.disabled = false;
+            clearMessage();
+        });
 
         startBtn.addEventListener('click', () => {
             if (!selectedFile) { alert('请先选择文件'); return; }
@@ -582,6 +708,7 @@
             if (isNaN(threshold) || threshold < 0) { alert('请输入有效的价格门槛'); return; }
 
             startBtn.disabled = true;
+            clearMessage();
             document.getElementById('progressCard').classList.add('active');
             document.getElementById('resultCard').classList.remove('active');
 
@@ -592,40 +719,59 @@
             })
             .then(res => res.json())
             .then(data => {
-                if (!data.success) { alert(data.error); startBtn.disabled = false; }
+                if (!data.success) { showMessage(data.error, 'error'); startBtn.disabled = false; }
                 else startStatusPolling();
+            })
+            .catch(() => {
+                showMessage('启动失败，请确认服务仍在运行', 'error');
+                startBtn.disabled = false;
             });
         });
 
-        let stopRequested = false;
-
         function startStatusPolling() {
             if (statusInterval) clearInterval(statusInterval);
-            stopRequested = false;
             document.getElementById('stopBtn').style.display = 'inline-flex';
+            document.getElementById('stopBtn').disabled = false;
             statusInterval = setInterval(() => {
-                if (stopRequested) {
-                    clearInterval(statusInterval);
-                    addLog('🛑 用户停止测价', 'warning');
-                    startBtn.disabled = false;
-                    document.getElementById('stopBtn').style.display = 'none';
-                    return;
-                }
                 fetch('/api/status')
                     .then(res => res.json())
                     .then(data => {
+                        lastStatus = data;
                         updateUI(data);
                         if (data.need_login) showLoginModal();
-                        if (!data.running && data.result_file) { clearInterval(statusInterval); showResult(); document.getElementById('stopBtn').style.display = 'none'; }
-                        if (data.error) { clearInterval(statusInterval); addLog(data.error, 'error'); startBtn.disabled = false; document.getElementById('stopBtn').style.display = 'none'; }
+                        else hideLoginModal();
+
+                        if (!data.running && data.result_file && !data.error) {
+                            clearInterval(statusInterval);
+                            showResult(data);
+                            document.getElementById('stopBtn').style.display = 'none';
+                        } else if (!data.running && data.error) {
+                            clearInterval(statusInterval);
+                            showMessage(data.error, 'error');
+                            startBtn.disabled = false;
+                            document.getElementById('stopBtn').style.display = 'none';
+                        } else if (!data.running) {
+                            clearInterval(statusInterval);
+                            showMessage('测价已停止', 'info');
+                            startBtn.disabled = false;
+                            document.getElementById('stopBtn').style.display = 'none';
+                        }
+                    })
+                    .catch(() => {
+                        clearInterval(statusInterval);
+                        showMessage('连接服务失败，请重新启动工具', 'error');
+                        startBtn.disabled = false;
+                        document.getElementById('stopBtn').style.display = 'none';
                     });
             }, 500);
         }
 
         document.getElementById('stopBtn').addEventListener('click', () => {
             if (confirm('确定要停止测价吗？')) {
-                stopRequested = true;
-                fetch('/api/stop', { method: 'POST' });
+                document.getElementById('stopBtn').disabled = true;
+                showMessage('正在停止，请等待当前页面处理结束', 'info');
+                fetch('/api/stop', { method: 'POST' })
+                    .catch(() => showMessage('停止请求发送失败，请稍后刷新页面确认状态', 'error'));
             }
         });
 
@@ -640,7 +786,7 @@
                 percent = Math.max(0, percent); // 确保不为负数
             }
             document.getElementById('progressFill').style.width = percent + '%';
-            document.getElementById('progressText').textContent = data.running ? `正在处理: ${data.current_sku || '...'}` : '已完成';
+            document.getElementById('progressText').textContent = data.stopping ? '正在停止...' : (data.running ? `正在处理: ${data.current_sku || '...'}` : '已完成');
             document.getElementById('progressPercent').textContent = percent + '%';
             document.getElementById('statCurrent').textContent = `${data.current}/${data.total}`;
             document.getElementById('statUnqualified').textContent = data.unqualified_count;
@@ -651,7 +797,7 @@
                 if (log.message.includes('✅')) cls = 'log-success';
                 else if (log.message.includes('❌') || log.message.includes('🚫')) cls = 'log-error';
                 else if (log.message.includes('⚠️')) cls = 'log-warning';
-                return `<div class="log-entry ${cls}"><span class="log-time">${log.time}</span>${log.message}</div>`;
+                return `<div class="log-entry ${cls}"><span class="log-time">${escapeHtml(log.time)}</span>${escapeHtml(log.message)}</div>`;
             }).join('');
             logContainer.scrollTop = logContainer.scrollHeight;
         }
@@ -660,19 +806,20 @@
             const logContainer = document.getElementById('logContainer');
             const time = new Date().toLocaleTimeString();
             let cls = type === 'error' ? 'log-error' : type === 'success' ? 'log-success' : '';
-            logContainer.innerHTML += `<div class="log-entry ${cls}"><span class="log-time">${time}</span>${message}</div>`;
+            logContainer.innerHTML += `<div class="log-entry ${cls}"><span class="log-time">${escapeHtml(time)}</span>${escapeHtml(message)}</div>`;
             logContainer.scrollTop = logContainer.scrollHeight;
         }
 
-        function showResult() {
+        function showResult(data) {
             // 保留进度卡片显示，同时显示结果卡片
             document.getElementById('resultCard').classList.add('active');
             startBtn.disabled = false;
+            clearMessage();
 
             // 更新结果统计
-            const total = parseInt(document.getElementById('statCurrent').textContent.split('/')[1]) || 0;
-            const unqualified = parseInt(document.getElementById('statUnqualified').textContent) || 0;
-            const passed = total - unqualified;
+            const total = data.total || 0;
+            const unqualified = data.unqualified_count || 0;
+            const passed = data.success_count ? Math.max(data.success_count - unqualified, 0) : Math.max(total - unqualified - (data.fail_count || 0), 0);
             const threshold = document.getElementById('thresholdInput').value;
 
             document.getElementById('resultTotal').textContent = total;
@@ -705,6 +852,7 @@
             document.getElementById('statCurrent').textContent = '0/0';
             document.getElementById('statUnqualified').textContent = '0';
             document.getElementById('logContainer').innerHTML = '';
+            clearMessage();
             document.getElementById('mainCard').scrollIntoView({ behavior: 'smooth' });
         });
 
@@ -747,6 +895,8 @@
                 alert('复制失败，请手动选择复制');
             });
         });
+
+        loadExistingFiles();
     </script>
 </body>
 </html>

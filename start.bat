@@ -26,6 +26,41 @@ if exist "%SCRIPT_DIR%\SKU-Price-Audit.exe" (
 echo 📁 工作目录: %SCRIPT_DIR%
 echo.
 
+if "%USE_EXE%"=="0" (
+    python --version >nul 2>&1
+    if !errorlevel! neq 0 (
+        echo ❌ 错误：未找到 Python，请先安装 Python 3.8+
+        pause
+        exit /b 1
+    )
+
+    echo 🔍 检查依赖...
+    python -c "import openpyxl, playwright, PIL" >nul 2>&1
+    if !errorlevel! neq 0 (
+        echo ⚠️  依赖缺失，正在安装 requirements.txt...
+        python -m pip install -r requirements.txt
+        if !errorlevel! neq 0 (
+            echo ❌ 依赖安装失败，请检查网络或 Python 环境
+            pause
+            exit /b 1
+        )
+    )
+
+    echo 🔍 检查 Playwright Chromium...
+    python -c "from playwright.sync_api import sync_playwright; p=sync_playwright().start(); b=p.chromium.launch(headless=True); b.close(); p.stop()" >nul 2>&1
+    if !errorlevel! neq 0 (
+        echo ⚠️  Chromium 未安装，正在安装...
+        python -m playwright install chromium
+        if !errorlevel! neq 0 (
+            echo ❌ Chromium 安装失败，请手动运行: python -m playwright install chromium
+            pause
+            exit /b 1
+        )
+    )
+    echo ✅ 环境检查通过
+    echo.
+)
+
 :: 列出 input 目录下的 xlsx 文件
 set "INPUT_DIR=input"
 if not exist "%INPUT_DIR%" (
@@ -84,6 +119,7 @@ echo ============================================================
 echo 提示：低于门槛价的商品将被标记为"不符合上菜"
 echo.
 
+:input_threshold
 set /p THRESHOLD_INPUT="请输入价格门槛（直接回车使用默认值 6.0）："
 
 :: 如果用户直接回车，使用默认值
@@ -91,6 +127,12 @@ if "%THRESHOLD_INPUT%"=="" (
     set "THRESHOLD=6.0"
 ) else (
     set "THRESHOLD=%THRESHOLD_INPUT%"
+)
+
+powershell -NoProfile -Command "try { $v=[double]'%THRESHOLD%'; if ($v -lt 0) { exit 1 } else { exit 0 } } catch { exit 1 }" >nul 2>&1
+if %errorlevel% neq 0 (
+    echo ❌ 请输入有效的非负数字（如：6.0 或 20）
+    goto :input_threshold
 )
 
 echo.
