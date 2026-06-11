@@ -12,9 +12,6 @@ from pathlib import Path
 
 from flask import Flask, render_template, request, jsonify, send_file
 
-# 添加项目根目录到路径
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
 # 兼容 PyInstaller 打包后的路径
 def get_base_dir():
     """获取程序根目录（兼容源码和打包模式）"""
@@ -32,14 +29,17 @@ def get_base_dir():
 
 BASE_DIR = get_base_dir()
 
+# 添加项目根目录到 Python 路径
+sys.path.insert(0, BASE_DIR)
+
+# 导入配置
 from config import CONFIG
-from utils.browser_manager import BrowserManager
-from utils.jd_crawler import crawl_sku
-from utils.excel_handler import read_sku_list, write_results
-from utils.cleanup import auto_cleanup
 
 # 创建 Flask 应用，指定模板目录
 template_dir = os.path.join(BASE_DIR, 'templates')
+static_dir = os.path.join(BASE_DIR, 'static')
+
+print(f"📁 BASE_DIR: {BASE_DIR}")
 print(f"📁 模板目录: {template_dir}")
 print(f"📁 模板是否存在: {os.path.exists(template_dir)}")
 
@@ -54,10 +54,13 @@ if not os.path.exists(template_dir):
         print(f"✅ 使用备用模板目录")
     else:
         # 列出 BASE_DIR 下的所有文件，帮助调试
-        print(f"📁 BASE_DIR 内容: {os.listdir(BASE_DIR) if os.path.exists(BASE_DIR) else '目录不存在'}")
+        if os.path.exists(BASE_DIR):
+            print(f"📁 BASE_DIR 内容: {os.listdir(BASE_DIR)}")
+        else:
+            print(f"❌ BASE_DIR 不存在: {BASE_DIR}")
         print(f"❌ 错误: 找不到模板目录！")
 
-app = Flask(__name__, template_folder=template_dir)
+app = Flask(__name__, template_folder=template_dir, static_folder=static_dir)
 
 # 全局状态
 audit_status = {
@@ -97,8 +100,14 @@ def add_log(message):
 def run_audit_task(input_file, threshold_price):
     """在后台线程运行测价任务"""
     global audit_status
+    global current_browser
 
     try:
+        # 延迟导入，避免启动时加载失败
+        from utils.browser_manager import BrowserManager
+        from utils.jd_crawler import crawl_sku
+        from utils.excel_handler import read_sku_list, write_results
+
         audit_status['running'] = True
         audit_status['total'] = 0
         audit_status['current'] = 0
@@ -124,7 +133,6 @@ def run_audit_task(input_file, threshold_price):
 
         # 2. 启动浏览器
         add_log('🌐 正在启动浏览器...')
-        global current_browser
         browser = BrowserManager(CONFIG['auth_file'])
         current_browser = browser
         page = browser.start()
@@ -257,7 +265,17 @@ def run_audit_task(input_file, threshold_price):
 @app.route('/')
 def index():
     """首页"""
-    return render_template('index.html')
+    try:
+        return render_template('index.html')
+    except Exception as e:
+        return f"""
+        <h1>错误：无法加载页面</h1>
+        <p>错误信息: {str(e)}</p>
+        <p>BASE_DIR: {BASE_DIR}</p>
+        <p>模板目录: {template_dir}</p>
+        <p>模板是否存在: {os.path.exists(template_dir)}</p>
+        <p>目录内容: {os.listdir(BASE_DIR) if os.path.exists(BASE_DIR) else 'N/A'}</p>
+        """, 500
 
 
 @app.route('/api/upload', methods=['POST'])
@@ -366,6 +384,9 @@ def stop_audit():
 
 
 if __name__ == '__main__':
+    # 延迟导入，避免启动时加载失败
+    from utils.cleanup import auto_cleanup
+
     # 自动清理临时文件
     auto_cleanup()
 

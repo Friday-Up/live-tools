@@ -36,9 +36,15 @@ jobs:
       - name: Build Web GUI with PyInstaller
         shell: pwsh
         run: |
+          # 使用绝对路径
           $templatePath = Join-Path $PWD "templates"
           $configPath = Join-Path $PWD "config.py"
           $utilsPath = Join-Path $PWD "utils"
+
+          Write-Host "=== 构建参数 ==="
+          Write-Host "模板路径: $templatePath"
+          Write-Host "配置路径: $configPath"
+          Write-Host "工具路径: $utilsPath"
 
           pyinstaller --noconfirm --onedir --console `
             --name "SKU-Price-Audit-Web" `
@@ -61,54 +67,82 @@ jobs:
         run: |
           Write-Host "=== 检查打包输出 ==="
           $distPath = "dist/SKU-Price-Audit-Web"
+
           if (Test-Path $distPath) {
-            Write-Host "✅ 打包目录存在"
-            Get-ChildItem $distPath -Recurse | Select-Object -First 20
+            Write-Host "✅ 打包目录存在: $distPath"
+            Write-Host "目录内容:"
+            Get-ChildItem $distPath | ForEach-Object { Write-Host "  $($_.Name)" }
           } else {
-            Write-Host "❌ 打包目录不存在"
+            Write-Host "❌ 打包目录不存在: $distPath"
+            exit 1
           }
 
+          # 检查关键文件
           $templatePath = Join-Path $distPath "templates"
+          $configPath = Join-Path $distPath "config.py"
+          $utilsPath = Join-Path $distPath "utils"
+
           if (Test-Path $templatePath) {
             Write-Host "✅ templates 目录存在"
+            Get-ChildItem $templatePath | ForEach-Object { Write-Host "    $($_.Name)" }
           } else {
             Write-Host "❌ templates 目录不存在"
+          }
+
+          if (Test-Path $configPath) {
+            Write-Host "✅ config.py 存在"
+          } else {
+            Write-Host "❌ config.py 不存在"
+          }
+
+          if (Test-Path $utilsPath) {
+            Write-Host "✅ utils 目录存在"
+          } else {
+            Write-Host "❌ utils 目录不存在"
           }
 
       - name: Copy additional files
         shell: pwsh
         run: |
-          # 确保 templates 目录存在（如果不存在则复制）
-          $destTemplatePath = "dist/SKU-Price-Audit-Web/templates"
+          $distPath = "dist/SKU-Price-Audit-Web"
+
+          # 确保 templates 目录存在
+          $destTemplatePath = Join-Path $distPath "templates"
           if (-not (Test-Path $destTemplatePath)) {
             Copy-Item -Path "templates" -Destination $destTemplatePath -Recurse -Force
             Write-Host "✅ 复制 templates 目录"
           }
 
           # 确保 config.py 存在
-          $destConfigPath = "dist/SKU-Price-Audit-Web/config.py"
+          $destConfigPath = Join-Path $distPath "config.py"
           if (-not (Test-Path $destConfigPath)) {
             Copy-Item -Path "config.py" -Destination $destConfigPath -Force
             Write-Host "✅ 复制 config.py"
           }
 
           # 确保 utils 目录存在
-          $destUtilsPath = "dist/SKU-Price-Audit-Web/utils"
+          $destUtilsPath = Join-Path $distPath "utils"
           if (-not (Test-Path $destUtilsPath)) {
             Copy-Item -Path "utils" -Destination $destUtilsPath -Recurse -Force
             Write-Host "✅ 复制 utils 目录"
           }
 
           # 创建 input 目录（空目录）
-          New-Item -ItemType Directory -Path "dist/SKU-Price-Audit-Web/input" -Force
+          $inputPath = Join-Path $distPath "input"
+          New-Item -ItemType Directory -Path $inputPath -Force
+          Write-Host "✅ 创建 input 目录"
 
           # 复制启动脚本
-          Copy-Item -Path "start_web.bat" -Destination "dist/SKU-Price-Audit-Web/启动测价工具.bat" -Force
+          Copy-Item -Path "start_web.bat" -Destination (Join-Path $distPath "启动测价工具.bat") -Force
+          Write-Host "✅ 复制启动脚本"
 
       - name: Compress output
         shell: pwsh
         run: |
-          Compress-Archive -Path "dist/SKU-Price-Audit-Web" -DestinationPath "dist/SKU-Price-Audit-Web-Windows.zip"
+          $source = "dist/SKU-Price-Audit-Web"
+          $dest = "dist/SKU-Price-Audit-Web-Windows.zip"
+          Compress-Archive -Path $source -DestinationPath $dest -Force
+          Write-Host "✅ 压缩完成: $dest"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
