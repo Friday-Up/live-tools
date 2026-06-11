@@ -7,32 +7,34 @@
 set "SCRIPT_DIR=%~dp0"
 cd /d "%SCRIPT_DIR%" || exit /b 1
 
+:: 生成唯一文件名避免冲突
+set "VBS_FILE=%TEMP%\start_hidden_%RANDOM%.vbs"
+
 :: 检查是否是打包版本
 if exist "%SCRIPT_DIR%\SKU-Price-Audit-Web.exe" (
-    :: 使用 vbs 隐藏窗口运行
-    echo Set WshShell = CreateObject("WScript.Shell") > "%TEMP%\start_hidden.vbs"
-    echo WshShell.Run """%SCRIPT_DIR%\SKU-Price-Audit-Web.exe""", 0, False >> "%TEMP%\start_hidden.vbs"
-    cscript //nologo "%TEMP%\start_hidden.vbs"
-    del "%TEMP%\start_hidden.vbs"
+    echo Set WshShell = CreateObject("WScript.Shell") > "%VBS_FILE%"
+    echo WshShell.Run """%SCRIPT_DIR%\SKU-Price-Audit-Web.exe""", 0, False >> "%VBS_FILE%"
+    cscript //nologo "%VBS_FILE%"
+    del "%VBS_FILE%"
     goto :wait_for_server
 )
 
 :: 检查是否是源码版本
 python --version >nul 2>&1
 if %errorlevel% equ 0 (
-    echo Set WshShell = CreateObject("WScript.Shell") > "%TEMP%\start_hidden.vbs"
-    echo WshShell.Run "python ""%SCRIPT_DIR%\app.py""", 0, False >> "%TEMP%\start_hidden.vbs"
-    cscript //nologo "%TEMP%\start_hidden.vbs"
-    del "%TEMP%\start_hidden.vbs"
+    echo Set WshShell = CreateObject("WScript.Shell") > "%VBS_FILE%"
+    echo WshShell.Run "python ""%SCRIPT_DIR%\app.py""", 0, False >> "%VBS_FILE%"
+    cscript //nologo "%VBS_FILE%"
+    del "%VBS_FILE%"
     goto :wait_for_server
 )
 
 python3 --version >nul 2>&1
 if %errorlevel% equ 0 (
-    echo Set WshShell = CreateObject("WScript.Shell") > "%TEMP%\start_hidden.vbs"
-    echo WshShell.Run "python3 ""%SCRIPT_DIR%\app.py""", 0, False >> "%TEMP%\start_hidden.vbs"
-    cscript //nologo "%TEMP%\start_hidden.vbs"
-    del "%TEMP%\start_hidden.vbs"
+    echo Set WshShell = CreateObject("WScript.Shell") > "%VBS_FILE%"
+    echo WshShell.Run "python3 ""%SCRIPT_DIR%\app.py""", 0, False >> "%VBS_FILE%"
+    cscript //nologo "%VBS_FILE%"
+    del "%VBS_FILE%"
     goto :wait_for_server
 )
 
@@ -46,12 +48,12 @@ echo 🚀 正在启动服务...
 :: 等待服务启动（最多 15 秒）
 set /a count=0
 :check_loop
-ping -n 2 127.0.0.1 >nul 2>&1
+timeout /t 1 /nobreak >nul 2>&1
 set /a count+=1
 if %count% geq 15 goto :timeout
 
 :: 检查服务是否启动
-powershell -Command "try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:8080' -TimeoutSec 1 -UseBasicParsing; exit 0 } catch { exit 1 }"
+powershell -Command "try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:8080' -TimeoutSec 3 -UseBasicParsing; exit 0 } catch { exit 1 }"
 if %errorlevel% neq 0 goto :check_loop
 
 :: 服务已启动，打开浏览器
@@ -63,7 +65,7 @@ if not exist "%SCRIPT_DIR%\关闭服务.bat" (
     (
         echo @echo off
         echo echo 🛑 正在关闭服务...
-        echo powershell -Command "try { Invoke-WebRequest -Uri 'http://127.0.0.1:8080/api/shutdown' -Method POST -TimeoutSec 2 ^| Out-Null } catch {}"
+        echo powershell -Command "try { Invoke-WebRequest -Uri 'http://127.0.0.1:8080/api/shutdown' -Method POST -TimeoutSec 3 ^| Out-Null } catch {}"
         echo echo ✅ 服务已关闭
         echo timeout /t 2 /nobreak ^>nul
     ) > "%SCRIPT_DIR%\关闭服务.bat"

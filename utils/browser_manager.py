@@ -36,7 +36,9 @@ class BrowserManager:
             # 首次运行，需要人工登录
             self.context = self.browser.new_context()
             print("⚠️ 首次运行，请登录京东...")
-            self._manual_login()
+            # Web 模式下不调用 _manual_login，由前端控制
+            # 保存空登录态，让前端处理登录流程
+            self.context.storage_state(path=self.auth_file)
 
         self.page = self.context.new_page()
         return self.page
@@ -47,22 +49,23 @@ class BrowserManager:
         访问京东首页，通过多种方式判断登录状态
         """
         try:
-            # 方法1：访问订单页面，看是否重定向到登录页
-            self.page.goto("https://order.jd.com/center/list.action", wait_until="domcontentloaded", timeout=10000)
+            # 方法1：访问首页，检查是否有登录态
+            self.page.goto("https://www.jd.com", wait_until="domcontentloaded", timeout=10000)
             time.sleep(2)
 
+            # 检查 URL 是否跳转到登录页
             current_url = self.page.url
-            if "passport.jd.com" in current_url or "login" in current_url:
+            if "passport.jd.com" in current_url:
                 print(f"   重定向到登录页: {current_url}")
                 return False
 
-            # 方法2：检查页面标题
+            # 检查页面标题
             title = self.page.title()
             if "登录" in title:
                 print(f"   页面标题包含'登录': {title}")
                 return False
 
-            # 方法3：检查是否有登录表单
+            # 检查是否有登录表单
             try:
                 login_form = self.page.locator(".login-form, .login-tab, #loginname").count()
                 if login_form > 0:
@@ -71,51 +74,62 @@ class BrowserManager:
             except:
                 pass
 
-            # 方法4：如果能访问到订单页面内容，说明已登录
+            # 检查是否有登录按钮（右上角）
             try:
-                order_elements = self.page.locator(".order-list, .order-item, .o-list").count()
-                if order_elements > 0:
-                    print(f"   发现订单页面元素，已登录")
-                    return True
+                login_btn = self.page.locator("a[href*='passport.jd.com'], .login-btn, [class*='login']").count()
+                if login_btn > 0:
+                    print(f"   发现登录按钮")
+                    # 有登录按钮不一定未登录，继续检查其他特征
             except:
                 pass
 
-            # 方法5：检查页面内容是否包含个人信息
+            # 检查已登录特有的元素
+            logged_in_elements = [
+                "text=退出",
+                ".nickname",
+                "[class*='user-name']",
+                "a[href*='logout']",
+                ".user-info",
+            ]
+            for selector in logged_in_elements:
+                try:
+                    count = self.page.locator(selector).count()
+                    if count > 0:
+                        print(f"   发现已登录元素: {selector}")
+                        return True
+                except:
+                    pass
+
+            # 检查页面内容是否包含个人信息
             try:
                 content = self.page.content()
-                if "我的订单" in content or "个人中心" in content:
+                if "我的京东" in content or "个人中心" in content or "我的订单" in content:
                     print("   页面包含个人中心内容，已登录")
                     return True
             except:
                 pass
 
-            # 方法6：检查 cookie 中的登录凭证
+            # 检查 cookie 中的登录凭证
             try:
                 cookies = self.context.cookies()
                 for cookie in cookies:
-                    if cookie.get('name') in ['pin', 'unick', '_pst', 'wskey']:
-                        print(f"   发现登录cookie: {cookie['name']}")
-                        return True
+                    if cookie.get('name') in ['pin', 'unick', '_pst', 'wskey', 'pt_key']:
+                        # 检查 cookie 是否过期
+                        expires = cookie.get('expires', -1)
+                        if expires == -1 or expires > time.time():
+                            print(f"   发现有效登录cookie: {cookie['name']}")
+                            return True
+                        else:
+                            print(f"   发现过期cookie: {cookie['name']}")
             except:
                 pass
 
-            # 方法7：访问首页检查是否有用户昵称
-            self.page.goto("https://www.jd.com", wait_until="domcontentloaded", timeout=10000)
-            time.sleep(1)
-
+            # 如果以上都无法确定，尝试访问购物车页面（需要登录）
             try:
-                user_elements = self.page.locator(".nickname, .user-name, [class*='user-info']").count()
-                if user_elements > 0:
-                    print(f"   发现用户昵称元素，已登录")
-                    return True
-            except:
-                pass
-
-            # 方法8：检查是否有退出按钮
-            try:
-                logout_btn = self.page.locator("text=退出, a[href*='logout']").count()
-                if logout_btn > 0:
-                    print("   发现退出按钮，已登录")
+                self.page.goto("https://cart.jd.com/cart_index", wait_until="domcontentloaded", timeout=5000)
+                time.sleep(1)
+                if "passport.jd.com" not in self.page.url:
+                    print("   可访问购物车，已登录")
                     return True
             except:
                 pass
@@ -203,6 +217,7 @@ class BrowserManager:
         """
         引导人工登录京东
         打开登录页后暂停，等待人工完成登录
+        注意：此方法仅在命令行模式下使用，Web模式下由前端控制
         """
         self.page = self.context.new_page()
         self.page.goto("https://passport.jd.com/new/login.aspx")
