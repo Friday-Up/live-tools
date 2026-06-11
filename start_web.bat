@@ -49,6 +49,18 @@ if %errorlevel% neq 0 goto :check_loop
 :: 服务已启动，打开浏览器
 echo ✅ 服务已启动，正在打开浏览器...
 start http://127.0.0.1:8080
+
+:: 创建关闭快捷方式（可选）
+if not exist "%SCRIPT_DIR%\关闭服务.bat" (
+    (
+        echo @echo off
+        echo echo 🛑 正在关闭服务...
+        echo powershell -Command "try { Invoke-WebRequest -Uri 'http://127.0.0.1:8080/api/shutdown' -Method POST -TimeoutSec 2 | Out-Null } catch {}"
+        echo echo ✅ 服务已关闭
+        echo timeout /t 2 /nobreak >nul
+    ) > "%SCRIPT_DIR%\关闭服务.bat"
+)
+
 exit /b 0
 
 :timeout

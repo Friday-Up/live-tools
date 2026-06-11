@@ -497,9 +497,10 @@
             </div>
 
             <div class="result-desc">结果文件已生成，可下载查看详细数据</div>
-            <div style="display: flex; gap: 12px; justify-content: center;">
+            <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
                 <button class="btn btn-success" id="downloadBtn">📥 下载结果</button>
                 <button class="btn btn-secondary" id="restartBtn">🔄 再次测价</button>
+                <button class="btn btn-secondary" id="shutdownBtn" style="background: #e74c3c; color: white;">🛑 关闭服务</button>
             </div>
         </div>
     </div>
@@ -705,6 +706,20 @@
             document.getElementById('statUnqualified').textContent = '0';
             document.getElementById('logContainer').innerHTML = '';
             document.getElementById('mainCard').scrollIntoView({ behavior: 'smooth' });
+        });
+
+        document.getElementById('shutdownBtn').addEventListener('click', () => {
+            if (confirm('确定要关闭服务吗？关闭后需要重新启动程序。')) {
+                fetch('/api/shutdown', { method: 'POST' })
+                    .then(() => {
+                        alert('服务已关闭，请关闭此页面');
+                        window.close();
+                    })
+                    .catch(() => {
+                        alert('服务已关闭，请关闭此页面');
+                        window.close();
+                    });
+            }
         });
 
         // 复制日志功能

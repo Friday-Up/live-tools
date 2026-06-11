@@ -398,6 +398,33 @@ def stop_audit():
     return jsonify({'success': True})
 
 
+def shutdown_server():
+    """关闭服务器和浏览器"""
+    add_log('🛑 正在关闭服务...')
+
+    # 停止测价
+    stop_flag.set()
+    login_event.set()
+
+    # 关闭浏览器
+    global current_browser
+    if current_browser:
+        try:
+            current_browser.close(force=True)
+        except:
+            pass
+
+    # 退出程序
+    os._exit(0)
+
+
+@app.route('/api/shutdown', methods=['POST'])
+def shutdown():
+    """接收关闭请求"""
+    threading.Thread(target=shutdown_server, daemon=True).start()
+    return jsonify({'success': True})
+
+
 if __name__ == '__main__':
     # 延迟导入，避免启动时加载失败
     from utils.cleanup import auto_cleanup
@@ -412,6 +439,10 @@ if __name__ == '__main__':
     # 启动服务
     print('🚀 启动 Web 服务...')
     print('📱 请在浏览器中访问: http://localhost:8080')
+    print('🛑 关闭方式：')
+    print('   1. 在网页上点击"停止测价"按钮')
+    print('   2. 在浏览器中访问 http://localhost:8080/api/shutdown')
+    print('   3. 在任务管理器中结束进程')
 
     # 自动打开浏览器
     import webbrowser
