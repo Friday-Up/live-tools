@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>直播 SKU 价格巡检工具</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif;
+            background: #f5f7fa;
+            color: #333;
+            line-height: 1.5;
+        }
+
+        .container {
+            max-width: 960px;
+            margin: 0 auto;
+            padding: 40px 24px;
+        }
+
+        /* Header */
+        .header {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin-bottom: 6px;
+        }
+
+        .header p {
+            color: #888;
+            font-size: 14px;
+        }
+
+        /* Card */
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+
+        .section-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #666;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Upload */
+        .upload-area {
+            border: 2px dashed #ddd;
+            border-radius: 8px;
+            padding: 32px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: #fafafa;
+        }
+
+        .upload-area:hover {
+            border-color: #4a90e2;
+            background: #f0f7ff;
+        }
+
+        .upload-area.dragover {
+            border-color: #4a90e2;
+            background: #e6f0ff;
+        }
+
+        .upload-icon {
+            font-size: 36px;
+            margin-bottom: 8px;
+        }
+
+        .upload-text {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .upload-hint {
+            color: #aaa;
+            font-size: 12px;
+            margin-top: 4px;
+        }
+
+        /* File */
+        .file-item {
+            display: flex;
+            align-items: center;
+            padding: 12px;
+            background: #f5f7fa;
+            border-radius: 8px;
+            margin-top: 12px;
+        }
+
+        .file-icon {
+            font-size: 24px;
+            margin-right: 12px;
+        }
+
+        .file-info {
+            flex: 1;
+        }
+
+        .file-name {
+            font-weight: 500;
+            font-size: 14px;
+        }
+
+        .file-status {
+            font-size: 12px;
+            color: #4a90e2;
+        }
+
+        .file-delete {
+            cursor: pointer;
+            opacity: 0.4;
+            font-size: 18px;
+            padding: 4px;
+        }
+
+        .file-delete:hover {
+            opacity: 1;
+            color: #e74c3c;
+        }
+
+        /* Form Row */
+        .form-row {
+            display: flex;
+            gap: 12px;
+            align-items: flex-end;
+        }
+
+        .form-group {
+            flex: 1;
+        }
+
+        .form-label {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 13px;
+            color: #666;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 10px 14px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 15px;
+            transition: border-color 0.2s;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: #4a90e2;
+        }
+
+        /* Button */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 10px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            gap: 6px;
+            height: 42px;
+        }
+
+        .btn-primary {
+            background: #4a90e2;
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: #357abd;
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .btn-success {
+            background: #27ae60;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #219a52;
+        }
+
+        /* Progress */
+        .progress-section {
+            display: none;
+        }
+
+        .progress-section.active {
+            display: block;
+        }
+
+        .progress-bar {
+            height: 6px;
+            background: #eee;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-bottom: 12px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: #4a90e2;
+            border-radius: 3px;
+            transition: width 0.3s;
+        }
+
+        .progress-info {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            color: #888;
+            margin-bottom: 16px;
+        }
+
+        .stats {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+
+        .stat {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: 600;
+            color: #4a90e2;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #888;
+        }
+
+        /* Log */
+        .log-wrapper {
+            position: relative;
+        }
+
+        .log-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .log-copy-btn {
+            background: #333;
+            color: #aaa;
+            border: none;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .log-copy-btn:hover {
+            background: #444;
+            color: #fff;
+        }
+
+        .log-copy-btn.copied {
+            background: #27ae60;
+            color: white;
+        }
+
+        .log-container {
+            background: #1e1e1e;
+            border-radius: 8px;
+            padding: 16px;
+            height: 200px;
+            min-height: 120px;
+            max-height: 600px;
+            overflow-y: auto;
+            font-family: 'Consolas', monospace;
+            font-size: 12px;
+            line-height: 1.8;
+            resize: vertical;
+        }
+
+        .log-entry {
+            color: #aaa;
+        }
+
+        .log-time {
+            color: #666;
+            margin-right: 8px;
+        }
+
+        .log-success { color: #4ade80; }
+        .log-error { color: #f87171; }
+        .log-warning { color: #fbbf24; }
+
+        /* Result */
+        .result-section {
+            display: none;
+            text-align: center;
+            padding: 32px;
+        }
+
+        .result-section.active {
+            display: block;
+        }
+
+        .result-icon {
+            font-size: 48px;
+            margin-bottom: 12px;
+        }
+
+        .result-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .result-desc {
+            color: #888;
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+
+        /* Modal */
+        .modal {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            z-index: 1000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5);
+        }
+
+        .modal-content {
+            position: relative;
+            background: white;
+            border-radius: 12px;
+            padding: 32px;
+            text-align: center;
+            width: 320px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+        }
+
+        .modal-icon {
+            font-size: 40px;
+            margin-bottom: 12px;
+        }
+
+        .modal-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .modal-desc {
+            color: #888;
+            font-size: 13px;
+            margin-bottom: 20px;
+        }
+
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🛒 直播 SKU 价格巡检工具</h1>
+            <p>批量抓取京东 SKU 实时售价，自动判定是否符合上菜门槛</p>
+        </div>
+
+        <!-- 上传 + 配置 -->
+        <div class="card" id="mainCard">
+            <div class="section-title">📁 选择 Excel 文件</div>
+
+            <div class="upload-area" id="uploadArea">
+                <div class="upload-icon">📄</div>
+                <div class="upload-text">点击上传或拖拽文件到此处</div>
+                <div class="upload-hint">支持 .xlsx 格式，需包含「商品SKU」列</div>
+            </div>
+            <input type="file" id="fileInput" accept=".xlsx" class="hidden">
+
+            <div class="file-list" id="fileList"></div>
+
+            <div style="margin-top: 20px;">
+                <div class="section-title">⚙️ 测价配置</div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">价格门槛（低于此价格标记为"不符合上菜"）</label>
+                        <input type="number" class="form-input" id="thresholdInput" value="6.0" step="0.1" min="0">
+                    </div>
+                    <button class="btn btn-primary" id="startBtn" disabled>
+                        🚀 开始测价
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 进度 -->
+        <div class="card progress-section" id="progressCard">
+            <div class="section-title">📊 测价进度</div>
+
+            <div class="stats">
+                <div class="stat">
+                    <div class="stat-value" id="statCurrent">0/0</div>
+                    <div class="stat-label">当前/总数</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="statUnqualified" style="color: #e74c3c;">0</div>
+                    <div class="stat-label">低于门槛</div>
+                </div>
+            </div>
+
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+            </div>
+            <div class="progress-info">
+                <span id="progressText">准备中...</span>
+                <span id="progressPercent">0%</span>
+            </div>
+
+            <div style="text-align: center; margin-bottom: 16px;">
+                <button class="btn btn-secondary" id="stopBtn" style="background: #e74c3c; color: white;">
+                    🛑 停止测价
+                </button>
+            </div>
+
+            <div class="log-wrapper">
+                <div class="log-header">
+                    <div class="section-title" style="margin-bottom: 0;">📝 实时日志</div>
+                    <button class="log-copy-btn" id="copyLogBtn">📋 复制日志</button>
+                </div>
+                <div class="log-container" id="logContainer"></div>
+            </div>
+        </div>
+
+        <!-- 结果 -->
+        <div class="card result-section" id="resultCard">
+            <div class="result-icon">🎉</div>
+            <div class="result-title">测价完成！</div>
+            <div class="result-desc">结果文件已生成</div>
+            <div style="display: flex; gap: 12px; justify-content: center;">
+                <button class="btn btn-success" id="downloadBtn">📥 下载结果</button>
+                <button class="btn btn-secondary" id="restartBtn">🔄 再次测价</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 登录弹窗 -->
+    <div class="modal" id="loginModal">
+        <div class="modal-overlay"></div>
+        <div class="modal-content">
+            <div class="modal-icon">🔐</div>
+            <div class="modal-title">需要登录京东</div>
+            <div class="modal-desc">登录态已失效，请在浏览器窗口中完成登录后，点击继续</div>
+            <button class="btn btn-primary" id="continueBtn" style="width: 100%;">✓ 我已登录，继续</button>
+        </div>
+    </div>
+
+    <script>
+        let selectedFile = null;
+        let statusInterval = null;
+
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const fileList = document.getElementById('fileList');
+        const startBtn = document.getElementById('startBtn');
+
+        uploadArea.addEventListener('click', () => fileInput.click());
+        uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); uploadArea.classList.add('dragover'); });
+        uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]);
+        });
+        fileInput.addEventListener('change', (e) => { if (e.target.files.length > 0) handleFile(e.target.files[0]); });
+
+        function handleFile(file) {
+            if (!file.name.endsWith('.xlsx')) { alert('仅支持 .xlsx 格式'); return; }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            fetch('/api/upload', { method: 'POST', body: formData })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        selectedFile = data.path;
+                        renderFile(data.filename);
+                        startBtn.disabled = false;
+                    } else {
+                        alert(data.error);
+                    }
+                });
+        }
+
+        function renderFile(name) {
+            fileList.innerHTML = `
+                <div class="file-item">
+                    <div class="file-icon">📊</div>
+                    <div class="file-info">
+                        <div class="file-name">${name}</div>
+                        <div class="file-status">已选择</div>
+                    </div>
+                    <div class="file-delete" onclick="deleteFile()">🗑️</div>
+                </div>
+            `;
+            uploadArea.style.display = 'none';
+        }
+
+        function deleteFile() {
+            selectedFile = null;
+            startBtn.disabled = true;
+            fileList.innerHTML = '';
+            uploadArea.style.display = 'block';
+            fileInput.value = ''; // 清空 input，允许重新上传同一个文件
+        }
+
+        startBtn.addEventListener('click', () => {
+            if (!selectedFile) { alert('请先选择文件'); return; }
+            const threshold = parseFloat(document.getElementById('thresholdInput').value);
+            if (isNaN(threshold) || threshold < 0) { alert('请输入有效的价格门槛'); return; }
+
+            startBtn.disabled = true;
+            document.getElementById('progressCard').classList.add('active');
+            document.getElementById('resultCard').classList.remove('active');
+
+            fetch('/api/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ file: selectedFile, threshold: threshold })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (!data.success) { alert(data.error); startBtn.disabled = false; }
+                else startStatusPolling();
+            });
+        });
+
+        let stopRequested = false;
+
+        function startStatusPolling() {
+            if (statusInterval) clearInterval(statusInterval);
+            stopRequested = false;
+            document.getElementById('stopBtn').style.display = 'inline-flex';
+            statusInterval = setInterval(() => {
+                if (stopRequested) {
+                    clearInterval(statusInterval);
+                    addLog('🛑 用户停止测价', 'warning');
+                    startBtn.disabled = false;
+                    document.getElementById('stopBtn').style.display = 'none';
+                    return;
+                }
+                fetch('/api/status')
+                    .then(res => res.json())
+                    .then(data => {
+                        updateUI(data);
+                        if (data.need_login) showLoginModal();
+                        if (!data.running && data.result_file) { clearInterval(statusInterval); showResult(); document.getElementById('stopBtn').style.display = 'none'; }
+                        if (data.error) { clearInterval(statusInterval); addLog(data.error, 'error'); startBtn.disabled = false; document.getElementById('stopBtn').style.display = 'none'; }
+                    });
+            }, 500);
+        }
+
+        document.getElementById('stopBtn').addEventListener('click', () => {
+            if (confirm('确定要停止测价吗？')) {
+                stopRequested = true;
+                fetch('/api/stop', { method: 'POST' });
+            }
+        });
+
+        function updateUI(data) {
+            // 进度计算：当前正在处理的算未完成，所以用 (current - 1) / total
+            // 当全部完成时 current 会等于 total，此时显示 100%
+            let percent;
+            if (!data.running && data.current >= data.total) {
+                percent = 100;
+            } else {
+                percent = data.total > 0 ? Math.round(((data.current - 1) / data.total) * 100) : 0;
+                percent = Math.max(0, percent); // 确保不为负数
+            }
+            document.getElementById('progressFill').style.width = percent + '%';
+            document.getElementById('progressText').textContent = data.running ? `正在处理: ${data.current_sku || '...'}` : '已完成';
+            document.getElementById('progressPercent').textContent = percent + '%';
+            document.getElementById('statCurrent').textContent = `${data.current}/${data.total}`;
+            document.getElementById('statUnqualified').textContent = data.unqualified_count;
+
+            const logContainer = document.getElementById('logContainer');
+            logContainer.innerHTML = data.logs.map(log => {
+                let cls = '';
+                if (log.message.includes('✅')) cls = 'log-success';
+                else if (log.message.includes('❌') || log.message.includes('🚫')) cls = 'log-error';
+                else if (log.message.includes('⚠️')) cls = 'log-warning';
+                return `<div class="log-entry ${cls}"><span class="log-time">${log.time}</span>${log.message}</div>`;
+            }).join('');
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+
+        function addLog(message, type) {
+            const logContainer = document.getElementById('logContainer');
+            const time = new Date().toLocaleTimeString();
+            let cls = type === 'error' ? 'log-error' : type === 'success' ? 'log-success' : '';
+            logContainer.innerHTML += `<div class="log-entry ${cls}"><span class="log-time">${time}</span>${message}</div>`;
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+
+        function showResult() {
+            document.getElementById('progressCard').classList.remove('active');
+            document.getElementById('resultCard').classList.add('active');
+            startBtn.disabled = false;
+        }
+
+        function showLoginModal() { document.getElementById('loginModal').classList.add('active'); }
+        function hideLoginModal() { document.getElementById('loginModal').classList.remove('active'); }
+
+        document.getElementById('continueBtn').addEventListener('click', () => {
+            hideLoginModal();
+            fetch('/api/continue', { method: 'POST' });
+        });
+
+        document.getElementById('downloadBtn').addEventListener('click', () => {
+            window.location.href = '/api/download';
+        });
+
+        document.getElementById('restartBtn').addEventListener('click', () => {
+            document.getElementById('resultCard').classList.remove('active');
+            document.getElementById('mainCard').scrollIntoView({ behavior: 'smooth' });
+        });
+
+        // 复制日志功能
+        document.getElementById('copyLogBtn').addEventListener('click', () => {
+            const logContainer = document.getElementById('logContainer');
+            const logs = Array.from(logContainer.querySelectorAll('.log-entry'))
+                .map(entry => entry.textContent)
+                .join('\n');
+
+            if (!logs) {
+                alert('暂无日志可复制');
+                return;
+            }
+
+            navigator.clipboard.writeText(logs).then(() => {
+                const btn = document.getElementById('copyLogBtn');
+                btn.textContent = '✓ 已复制';
+                btn.classList.add('copied');
+                setTimeout(() => {
+                    btn.textContent = '📋 复制日志';
+                    btn.classList.remove('copied');
+                }, 2000);
+            }).catch(err => {
+                console.error('复制失败:', err);
+                alert('复制失败，请手动选择复制');
+            });
+        });
+    </script>
+</body>
+</html>

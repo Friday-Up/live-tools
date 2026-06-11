@@ -375,13 +375,17 @@ def crawl_sku_with_series(page, sku, screenshot_dir, delay_min=1, delay_max=3,
                 click_success = click_element_safely(page, series_el)
                 if click_success:
                     print(f"     已点击系列: {series_name}")
-                    time.sleep(1)  # 等待规格列表更新
+                    time.sleep(1.5)  # 等待规格列表更新
                 else:
                     print(f"     ⚠️ 点击系列失败，跳过")
                     continue
 
-                # 获取该系列下的所有规格
+                # 获取该系列下的所有规格（等待 DOM 更新）
                 spec_items = get_spec_items(page)
+                # 如果获取不到，再试一次
+                if not spec_items:
+                    time.sleep(1)
+                    spec_items = get_spec_items(page)
                 print(f"     发现 {len(spec_items)} 个规格选项")
 
                 if not spec_items:
