@@ -47,94 +47,46 @@ class BrowserManager:
     def check_login_status(self):
         """
         检查当前是否处于登录状态
-        访问京东首页，通过多种方式判断登录状态
+        访问需要登录的购物车页面验证登录态。
+        首页 DOM 和历史 cookie 都可能误判，只把能正常进入购物车作为已登录依据。
         """
         try:
-            # 方法1：访问首页，检查是否有登录态
-            self.page.goto("https://www.jd.com", wait_until="domcontentloaded", timeout=10000)
-            time.sleep(2)
+            self.page.goto("https://cart.jd.com/cart_index", wait_until="domcontentloaded", timeout=15000)
+            time.sleep(1)
 
-            # 检查 URL 是否跳转到登录页
-            current_url = self.page.url
-            if "passport.jd.com" in current_url:
-                print(f"   重定向到登录页: {current_url}")
+            if self._is_login_page():
                 return False
 
-            # 检查页面标题
-            title = self.page.title()
-            if "登录" in title:
-                print(f"   页面标题包含'登录': {title}")
-                return False
-
-            # 检查是否有登录表单
-            try:
-                login_form = self.page.locator(".login-form, .login-tab, #loginname").count()
-                if login_form > 0:
-                    print(f"   发现登录表单")
-                    return False
-            except:
-                pass
-
-            # 检查是否有登录按钮（右上角）
-            try:
-                login_btn = self.page.locator("a[href*='passport.jd.com'], .login-btn, [class*='login']").count()
-                if login_btn > 0:
-                    print(f"   发现登录按钮")
-                    # 有登录按钮不一定未登录，继续检查其他特征
-            except:
-                pass
-
-            # 检查已登录特有的元素
-            logged_in_elements = [
-                "text=退出",
-                ".nickname",
-                "[class*='user-name']",
-                "a[href*='logout']",
-                ".user-info",
-            ]
-            for selector in logged_in_elements:
-                try:
-                    count = self.page.locator(selector).count()
-                    if count > 0:
-                        print(f"   发现已登录元素: {selector}")
-                        return True
-                except:
-                    pass
-
-            # 检查页面内容是否包含个人信息
-            # 不用“我的京东/我的订单”作为登录依据，京东未登录首页也会出现这些入口。
-
-            # 检查 cookie 中的登录凭证
-            try:
-                cookies = self.context.cookies()
-                for cookie in cookies:
-                    if cookie.get('name') in ['pin', 'unick', '_pst', 'wskey', 'pt_key']:
-                        # 检查 cookie 是否过期
-                        expires = cookie.get('expires', -1)
-                        if expires == -1 or expires > time.time():
-                            print(f"   发现有效登录cookie: {cookie['name']}")
-                            return True
-                        else:
-                            print(f"   发现过期cookie: {cookie['name']}")
-            except:
-                pass
-
-            # 如果以上都无法确定，尝试访问购物车页面（需要登录）
-            try:
-                self.page.goto("https://cart.jd.com/cart_index", wait_until="domcontentloaded", timeout=5000)
-                time.sleep(1)
-                if "passport.jd.com" not in self.page.url:
-                    print("   可访问购物车，已登录")
-                    return True
-            except:
-                pass
-
-            print("   未检测到登录状态")
-            return False
+            print("   可访问购物车，已登录")
+            return True
 
         except Exception as e:
             print(f"⚠️ 检查登录状态出错: {e}")
             return False
+
+    def _is_login_page(self):
+        current_url = self.page.url or ""
+        if "passport.jd.com" in current_url:
+            print(f"   重定向到登录页: {current_url}")
+            return True
+
+        try:
+            title = self.page.title()
+            if "登录" in title:
+                print(f"   页面标题包含'登录': {title}")
+                return True
+        except Exception:
+            pass
+
+        try:
+            login_form = self.page.locator(".login-form, .login-tab, #loginname, .qrcode-login").count()
+            if login_form > 0:
+                print("   发现登录表单")
+                return True
+        except Exception:
+            pass
+
+        return False
 
     def close(self, force=False):
         """

@@ -474,20 +474,6 @@ def download_result():
         return jsonify({'success': False, 'error': f'下载失败: {str(e)}'})
 
 
-@app.route('/api/list_files')
-def list_files():
-    """列出 input 目录下的文件"""
-    files = []
-    if os.path.exists(CONFIG['input_dir']):
-        for f in sorted(os.listdir(CONFIG['input_dir'])):
-            if f.endswith('.xlsx'):
-                files.append({
-                    'name': f,
-                    'path': os.path.join(CONFIG['input_dir'], f)
-                })
-    return jsonify({'files': files})
-
-
 @app.route('/api/continue', methods=['POST'])
 def continue_audit():
     """用户登录完成后通知后端继续"""

@@ -134,38 +134,6 @@
             color: #e74c3c;
         }
 
-        .file-picker {
-            margin-top: 12px;
-            display: none;
-        }
-
-        .file-picker.active {
-            display: block;
-        }
-
-        .file-picker-title {
-            font-size: 13px;
-            color: #666;
-            margin-bottom: 8px;
-        }
-
-        .existing-file {
-            width: 100%;
-            text-align: left;
-            border: 1px solid #e5e7eb;
-            background: #fff;
-            border-radius: 8px;
-            padding: 10px 12px;
-            margin-bottom: 8px;
-            cursor: pointer;
-            color: #333;
-        }
-
-        .existing-file:hover {
-            border-color: #4a90e2;
-            background: #f0f7ff;
-        }
-
         /* Form Row */
         .form-row {
             display: flex;
@@ -479,7 +447,6 @@
             <input type="file" id="fileInput" accept=".xlsx" class="hidden">
 
             <div class="file-list" id="fileList"></div>
-            <div class="file-picker" id="existingFilePicker"></div>
             <div class="status-message" id="statusMessage"></div>
 
             <div style="margin-top: 20px;">
@@ -591,7 +558,6 @@
         const fileInput = document.getElementById('fileInput');
         const fileList = document.getElementById('fileList');
         const startBtn = document.getElementById('startBtn');
-        const existingFilePicker = document.getElementById('existingFilePicker');
         const statusMessage = document.getElementById('statusMessage');
 
         function escapeHtml(value) {
@@ -657,7 +623,6 @@
                 </div>
             `;
             uploadArea.style.display = 'none';
-            existingFilePicker.classList.remove('active');
         }
 
         function deleteFile() {
@@ -666,41 +631,7 @@
             fileList.innerHTML = '';
             uploadArea.style.display = 'block';
             fileInput.value = ''; // 清空 input，允许重新上传同一个文件
-            loadExistingFiles();
         }
-
-        function loadExistingFiles() {
-            fetch('/api/list_files')
-                .then(res => res.json())
-                .then(data => {
-                    if (!data.files || data.files.length === 0 || selectedFile) {
-                        existingFilePicker.classList.remove('active');
-                        existingFilePicker.innerHTML = '';
-                        return;
-                    }
-                    existingFilePicker.classList.add('active');
-                    existingFilePicker.innerHTML = `
-                        <div class="file-picker-title">或选择 input 目录中的文件</div>
-                        ${data.files.map(file => `
-                            <button class="existing-file" type="button" data-path="${escapeHtml(file.path)}" data-name="${escapeHtml(file.name)}">
-                                ${escapeHtml(file.name)}
-                            </button>
-                        `).join('')}
-                    `;
-                })
-                .catch(() => {
-                    existingFilePicker.classList.remove('active');
-                });
-        }
-
-        existingFilePicker.addEventListener('click', (event) => {
-            const btn = event.target.closest('.existing-file');
-            if (!btn) return;
-            selectedFile = btn.dataset.path;
-            renderFile(btn.dataset.name);
-            startBtn.disabled = false;
-            clearMessage();
-        });
 
         startBtn.addEventListener('click', () => {
             if (!selectedFile) { alert('请先选择文件'); return; }
@@ -895,8 +826,6 @@
                 alert('复制失败，请手动选择复制');
             });
         });
-
-        loadExistingFiles();
     </script>
 </body>
 </html>
