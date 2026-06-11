@@ -452,11 +452,12 @@ if __name__ == '__main__':
     print('   2. 在浏览器中访问 http://localhost:8080/api/shutdown')
     print('   3. 在任务管理器中结束进程')
 
-    # 自动打开浏览器
-    import webbrowser
-    def open_browser():
-        time.sleep(1.5)
-        webbrowser.open('http://localhost:8080')
-    threading.Thread(target=open_browser, daemon=True).start()
+    # 自动打开浏览器（仅在非打包模式下）
+    if not getattr(sys, 'frozen', False):
+        import webbrowser
+        def open_browser():
+            time.sleep(1.5)
+            webbrowser.open('http://localhost:8080')
+        threading.Thread(target=open_browser, daemon=True).start()
 
     app.run(host='0.0.0.0', port=8080, debug=False)
