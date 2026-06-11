@@ -22,7 +22,6 @@ class BrowserManager:
         """
         启动浏览器
         如果存在登录态文件则复用，否则需要人工登录
-        如果登录态失效，自动引导重新登录
         """
         self.playwright = sync_playwright().start()
         # 必须可视化运行，方便人工登录
@@ -41,67 +40,89 @@ class BrowserManager:
         self.page = self.context.new_page()
         return self.page
 
-    def re_login(self):
+    def check_login_status(self):
         """
-        登录态失效时，引导重新登录
-        自动覆盖旧的登录态文件
+        检查当前是否处于登录状态
+        访问京东首页，检查是否跳转到登录页
         """
-        print("\n" + "="*50)
-        print("🔄 登录态已失效，需要重新登录")
-        print("="*50)
-        print("请在新打开的浏览器窗口中完成登录")
-        print("登录完成后，请在此终端按回车键继续...")
-        print("="*50 + "\n")
-
-        # 打开登录页
-        self.page.goto("https://passport.jd.com/new/login.aspx")
-
-        # 等待用户确认
         try:
-            input("按回车确认已登录...")
-        except EOFError:
-            print("非交互环境，等待 60 秒...")
-            time.sleep(60)
+            self.page.goto("https://www.jd.com", wait_until="domcontentloaded")
+            time.sleep(2)
 
-        # 验证登录是否成功
-        self.page.goto("https://www.jd.com", wait_until="domcontentloaded")
-        time.sleep(2)
+            # 如果 URL 包含 passport，说明需要登录
+            if "passport.jd.com" in self.page.url:
+                return False
 
-        if self.check_login_status():
-            # 保存新的登录状态（覆盖旧文件）
-            self.context.storage_state(path=self.auth_file)
-            print(f"✅ 重新登录成功，登录状态已保存到 {self.auth_file}")
-            return True
-        else:
-            print("⚠️  登录验证失败，程序将继续运行...")
-            return False
+            # 检查页面是否有登录相关的元素
+            login_indicators = [
+                ".login-form",
+                ".login-tab",
+                "text=请登录",
+                "text=登录/注册"
+            ]
 
-    def wait_for_login_interactive(self):
-        """
-        交互式等待用户登录（用于 EXE 模式）
-        显示提示信息，等待用户按回车
-        """
-        print("\n" + "="*60)
-        print("🛑 检测到登录态失效，程序已暂停")
-        print("="*60)
-        print("请在新打开的浏览器窗口中完成登录")
-        print("登录完成后，请在此窗口按回车键继续...")
-        print("="*60 + "\n")
+            for indicator in login_indicators:
+                try:
+                    if self.page.locator(indicator).count() > 0:
+                        return False
+                except:
+                    pass
 
-        try:
-            input("按回车继续...")
-        except EOFError:
-            # EXE 模式下 input 可能不可用，使用循环等待
-            print("等待登录中...（请在浏览器中完成登录）")
-            import time
-            for i in range(120):  # 最多等待 120 秒
-                time.sleep(1)
-                if self.check_login_status():
-                    print("✅ 检测到已登录")
+            # 检查是否显示用户名（已登录标志）
+            try:
+                # 京东已登录后会显示用户名或退出按钮
+                if self.page.locator("text=退出").count() > 0:
                     return True
-            print("⚠️ 等待超时")
+                if self.page.locator(".nickname").count() > 0:
+                    return True
+            except:
+                pass
+
+            # 如果以上都没匹配到，默认认为未登录（保守策略）
             return False
-        return True
+
+        except Exception as e:
+            print(f"⚠️ 检查登录状态出错: {e}")
+            return False
+
+    def close(self, force=False):
+        """
+        关闭浏览器
+        """
+        # 保存登录状态
+        if self.context:
+            try:
+                self.context.storage_state(path=self.auth_file)
+                print(f"✅ 登录状态已保存到 {self.auth_file}")
+            except Exception as e:
+                print(f"⚠️ 保存登录状态失败: {e}")
+
+        if force:
+            # 强制关闭浏览器
+            if self.context:
+                try:
+                    self.context.close()
+                except:
+                    pass
+            if self.browser:
+                try:
+                    self.browser.close()
+                except:
+                    pass
+            if self.playwright:
+                try:
+                    self.playwright.stop()
+                except:
+                    pass
+            print("✅ 浏览器已关闭")
+        else:
+            # 不关闭浏览器进程，保持运行以便下次复用
+            if self.context:
+                try:
+                    self.context.close()
+                except:
+                    pass
+            print("ℹ️ 浏览器保持运行，下次可直接复用")
 
     def _manual_login(self):
         """
@@ -128,67 +149,3 @@ class BrowserManager:
         # 保存登录状态
         self.context.storage_state(path=self.auth_file)
         print(f"✅ 登录状态已保存到 {self.auth_file}")
-
-    def check_login_status(self):
-        """
-        检查当前是否处于登录状态
-        访问京东首页，检查是否跳转到登录页
-        """
-        self.page.goto("https://www.jd.com", wait_until="domcontentloaded")
-        time.sleep(3)
-
-        # 如果 URL 包含 passport，说明需要登录
-        if "passport.jd.com" in self.page.url:
-            return False
-
-        # 检查页面是否有登录相关的元素
-        login_indicators = [
-            ".login-form",
-            ".login-tab",
-            "text=请登录",
-            "text=登录/注册"
-        ]
-
-        for indicator in login_indicators:
-            try:
-                if self.page.locator(indicator).count() > 0:
-                    return False
-            except:
-                pass
-
-        # 京东首页未登录也能访问，所以只要没有登录表单就认为状态正常
-        # 实际登录状态在访问 SKU 页面时检测更准确
-        return True
-
-    def close(self, force=False):
-        """
-        关闭浏览器
-
-        Args:
-            force: 是否强制关闭。默认 False，只保存登录态不关闭浏览器进程，便于下次复用。
-        """
-        # 保存登录状态
-        if self.context:
-            try:
-                self.context.storage_state(path=self.auth_file)
-                print(f"✅ 登录状态已保存到 {self.auth_file}")
-            except Exception as e:
-                print(f"⚠️ 保存登录状态失败: {e}")
-
-        if force:
-            # 强制关闭浏览器
-            if self.context:
-                self.context.close()
-            if self.browser:
-                self.browser.close()
-            if self.playwright:
-                self.playwright.stop()
-            print("✅ 浏览器已关闭")
-        else:
-            # 不关闭浏览器进程，保持运行以便下次复用
-            # 注意：只关闭 context，不关闭 browser 和 playwright
-            # 这样浏览器窗口保持打开，但释放了当前页面的资源
-            if self.context:
-                self.context.close()
-            print("ℹ️ 浏览器保持运行，下次可直接复用")
-            print("   如需关闭浏览器，请手动关闭窗口或删除 jd_auth.json 后重新运行")

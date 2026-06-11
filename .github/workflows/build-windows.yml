@@ -48,15 +48,16 @@ jobs:
             --hidden-import openpyxl `
             --hidden-import PIL `
             --add-data "templates;templates" `
+            --add-data "config.py;." `
+            --add-data "utils;utils" `
             app.py
 
       - name: Copy additional files
         shell: pwsh
         run: |
-          Copy-Item -Path "input" -Destination "dist/SKU-Price-Audit-Web/input" -Recurse -Force
-          Copy-Item -Path "templates" -Destination "dist/SKU-Price-Audit-Web/templates" -Recurse -Force
-          Copy-Item -Path "config.py" -Destination "dist/SKU-Price-Audit-Web/config.py" -Force
-          Copy-Item -Path "utils" -Destination "dist/SKU-Price-Audit-Web/utils" -Recurse -Force
+          # 创建 input 目录（空目录）
+          New-Item -ItemType Directory -Path "dist/SKU-Price-Audit-Web/input" -Force
+          # 复制启动脚本
           Copy-Item -Path "start_web.bat" -Destination "dist/SKU-Price-Audit-Web/启动测价工具.bat" -Force
 
       - name: Compress output

@@ -33,7 +33,10 @@ from utils.excel_handler import read_sku_list, write_results
 from utils.cleanup import auto_cleanup
 
 # 创建 Flask 应用，指定模板目录
-app = Flask(__name__, template_folder=os.path.join(BASE_DIR, 'templates'))
+template_dir = os.path.join(BASE_DIR, 'templates')
+print(f"📁 模板目录: {template_dir}")
+print(f"📁 模板是否存在: {os.path.exists(template_dir)}")
+app = Flask(__name__, template_folder=template_dir)
 
 # 全局状态
 audit_status = {
@@ -67,6 +70,7 @@ def add_log(message):
     # 只保留最近 100 条
     if len(audit_status['logs']) > 100:
         audit_status['logs'] = audit_status['logs'][-100:]
+    print(f"[{time.strftime('%H:%M:%S')}] {message}")
 
 
 def run_audit_task(input_file, threshold_price):
@@ -106,17 +110,28 @@ def run_audit_task(input_file, threshold_price):
 
         # 3. 检查登录状态
         add_log('🔐 检查登录状态...')
-        if not browser.check_login_status():
+        is_logged_in = browser.check_login_status()
+        add_log(f'   登录状态检查结果: {"已登录" if is_logged_in else "未登录"}')
+
+        if not is_logged_in:
             add_log('⚠️ 登录态已失效，请登录')
             audit_status['need_login'] = True
             login_event.clear()
             # 等待前端通知继续
+            add_log('⏳ 等待用户完成登录并点击"我已登录"...')
             login_event.wait(timeout=300)  # 最多等待5分钟
             audit_status['need_login'] = False
-            if not browser.check_login_status():
+
+            # 再次检查登录状态
+            add_log('🔐 重新检查登录状态...')
+            is_logged_in = browser.check_login_status()
+            add_log(f'   登录状态检查结果: {"已登录" if is_logged_in else "未登录"}')
+
+            if not is_logged_in:
                 audit_status['error'] = '登录失败，请重新运行'
                 browser.close(force=True)
                 return
+
         add_log('✅ 登录状态正常')
 
         # 4. 创建输出目录
@@ -162,9 +177,16 @@ def run_audit_task(input_file, threshold_price):
                 audit_status['need_login'] = True
                 login_event.clear()
                 # 等待前端通知继续
+                add_log('⏳ 等待用户完成登录并点击"我已登录"...')
                 login_event.wait(timeout=300)  # 最多等待5分钟
                 audit_status['need_login'] = False
-                if browser.check_login_status():
+
+                # 再次检查登录状态
+                add_log('🔐 重新检查登录状态...')
+                is_logged_in = browser.check_login_status()
+                add_log(f'   登录状态检查结果: {"已登录" if is_logged_in else "未登录"}')
+
+                if is_logged_in:
                     add_log('✅ 登录恢复，继续运行')
                     # 重新处理当前 SKU
                     i -= 1
@@ -205,6 +227,8 @@ def run_audit_task(input_file, threshold_price):
     except Exception as e:
         audit_status['error'] = str(e)
         add_log(f'❌ 错误: {str(e)}')
+        import traceback
+        add_log(f'❌ 详细错误: {traceback.format_exc()}')
     finally:
         audit_status['running'] = False
 
@@ -299,21 +323,24 @@ def list_files():
 def continue_audit():
     """用户登录完成后通知后端继续"""
     login_event.set()
+    add_log('✅ 用户点击"我已登录"，继续运行')
     return jsonify({'success': True})
 
 
 @app.route('/api/stop', methods=['POST'])
 def stop_audit():
     """停止测价任务"""
+    add_log('🛑 收到停止请求')
     stop_flag.set()
     # 强制关闭浏览器
     global current_browser
     if current_browser:
         try:
+            add_log('🛑 正在关闭浏览器...')
             current_browser.close(force=True)
-            add_log('🛑 浏览器已强制关闭')
+            add_log('✅ 浏览器已强制关闭')
         except Exception as e:
-            print(f"关闭浏览器出错: {e}")
+            add_log(f"❌ 关闭浏览器出错: {e}")
     return jsonify({'success': True})
 
 
@@ -327,11 +354,10 @@ if __name__ == '__main__':
 
     # 启动服务
     print('🚀 启动 Web 服务...')
-    print('📱 请在浏览器中访问: http://localhost:5000')
+    print('📱 请在浏览器中访问: http://localhost:8080')
 
     # 自动打开浏览器
     import webbrowser
-    import threading
     def open_browser():
         time.sleep(1.5)
         webbrowser.open('http://localhost:8080')
