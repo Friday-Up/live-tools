@@ -10,7 +10,11 @@ def get_base_dir():
     """获取程序根目录（兼容源码和打包模式）"""
     if getattr(sys, 'frozen', False):
         # PyInstaller 打包后的 EXE 运行
-        return os.path.dirname(sys.executable)
+        base_dir = os.path.dirname(sys.executable)
+        # 如果 exe 在 _internal 目录中（onedir 模式），需要向上回退一级
+        if os.path.basename(base_dir).lower() == '_internal':
+            base_dir = os.path.dirname(base_dir)
+        return base_dir
     else:
         # 源码运行
         return os.path.dirname(os.path.abspath(__file__))

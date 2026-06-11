@@ -54,6 +54,7 @@ jobs:
         shell: pwsh
         run: |
           Copy-Item -Path "input" -Destination "dist/SKU-Price-Audit-Web/input" -Recurse -Force
+          Copy-Item -Path "templates" -Destination "dist/SKU-Price-Audit-Web/templates" -Recurse -Force
           Copy-Item -Path "config.py" -Destination "dist/SKU-Price-Audit-Web/config.py" -Force
           Copy-Item -Path "utils" -Destination "dist/SKU-Price-Audit-Web/utils" -Recurse -Force
           Copy-Item -Path "start_web.bat" -Destination "dist/SKU-Price-Audit-Web/启动测价工具.bat" -Force
