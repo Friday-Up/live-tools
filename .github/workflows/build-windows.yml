@@ -13,6 +13,8 @@ permissions:
 
 env:
   PLAYWRIGHT_BROWSERS_PATH: "0"
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: "utf-8"
 
 jobs:
   build:
@@ -40,7 +42,7 @@ jobs:
       - name: Run unit tests
         run: |
           python -m unittest discover -s tests -p "test_*.py" -v
-          python -m py_compile app.py main.py utils/*.py
+          python -c "import pathlib, py_compile; files=[pathlib.Path('app.py'), pathlib.Path('main.py'), *pathlib.Path('utils').glob('*.py')]; [py_compile.compile(str(p), doraise=True) for p in files]"
 
       - name: Build Web GUI with PyInstaller
         shell: pwsh

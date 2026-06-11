@@ -11,6 +11,11 @@ from pathlib import Path
 
 from flask import Flask, render_template, request, jsonify, send_file
 
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
 # 兼容 PyInstaller 打包后的路径
 def get_base_dir():
     """获取程序根目录（兼容源码和打包模式）"""
