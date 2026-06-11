@@ -102,6 +102,9 @@ def run_audit_task(input_file, threshold_price):
     global audit_status
     global current_browser
 
+    browser = None
+    page = None
+
     try:
         # 延迟导入，避免启动时加载失败
         from utils.browser_manager import BrowserManager
@@ -158,7 +161,6 @@ def run_audit_task(input_file, threshold_price):
 
             if not is_logged_in:
                 audit_status['error'] = '登录失败，请重新运行'
-                browser.close(force=True)
                 return
 
         add_log('✅ 登录状态正常')
@@ -244,14 +246,9 @@ def run_audit_task(input_file, threshold_price):
 
         # 7. 检查是否因停止而结束
         if stop_flag.is_set():
-            add_log('🛑 浏览器已关闭')
-            browser.close(force=True)  # 强制关闭浏览器
+            add_log('🛑 测价已停止')
         else:
-            # 正常完成，保存登录态
-            browser.close(force=False)
             add_log('🎉 测价完成！')
-
-        current_browser = None
 
     except Exception as e:
         audit_status['error'] = str(e)
@@ -259,6 +256,16 @@ def run_audit_task(input_file, threshold_price):
         import traceback
         add_log(f'❌ 详细错误: {traceback.format_exc()}')
     finally:
+        # 确保浏览器被关闭
+        if browser:
+            try:
+                add_log('🛑 正在关闭浏览器...')
+                browser.close(force=True)
+                add_log('✅ 浏览器已关闭')
+            except Exception as e:
+                add_log(f'⚠️ 关闭浏览器出错: {e}')
+
+        current_browser = None
         audit_status['running'] = False
 
 
@@ -371,6 +378,8 @@ def stop_audit():
     """停止测价任务"""
     add_log('🛑 收到停止请求')
     stop_flag.set()
+    login_event.set()  # 唤醒可能正在等待登录的线程
+
     # 强制关闭浏览器
     global current_browser
     if current_browser:
@@ -380,6 +389,12 @@ def stop_audit():
             add_log('✅ 浏览器已强制关闭')
         except Exception as e:
             add_log(f"❌ 关闭浏览器出错: {e}")
+
+    # 重置状态
+    audit_status['running'] = False
+    audit_status['need_login'] = False
+    add_log('🛑 测价任务已停止')
+
     return jsonify({'success': True})
 
 

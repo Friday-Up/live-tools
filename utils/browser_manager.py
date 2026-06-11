@@ -17,6 +17,7 @@ class BrowserManager:
         self.browser = None
         self.context = None
         self.page = None
+        self._closed = False
 
     def start(self):
         """
@@ -43,42 +44,65 @@ class BrowserManager:
     def check_login_status(self):
         """
         检查当前是否处于登录状态
-        访问京东首页，检查是否跳转到登录页
+        访问京东首页，通过多种方式判断登录状态
         """
         try:
             self.page.goto("https://www.jd.com", wait_until="domcontentloaded")
             time.sleep(2)
 
-            # 如果 URL 包含 passport，说明需要登录
+            # 方法1：检查 URL 是否跳转到登录页
             if "passport.jd.com" in self.page.url:
+                print("   检测到 passport.jd.com，未登录")
                 return False
 
-            # 检查页面是否有登录相关的元素
-            login_indicators = [
-                ".login-form",
-                ".login-tab",
-                "text=请登录",
-                "text=登录/注册"
-            ]
+            # 方法2：检查页面标题
+            title = self.page.title()
+            if "登录" in title:
+                print(f"   页面标题包含'登录': {title}")
+                return False
 
-            for indicator in login_indicators:
+            # 方法3：检查是否有登录按钮/链接
+            login_elements = [
+                "a[href*='passport.jd.com']",
+                ".login-tab",
+                ".login-form",
+            ]
+            for selector in login_elements:
                 try:
-                    if self.page.locator(indicator).count() > 0:
+                    count = self.page.locator(selector).count()
+                    if count > 0:
+                        print(f"   发现登录元素: {selector}")
                         return False
                 except:
                     pass
 
-            # 检查是否显示用户名（已登录标志）
+            # 方法4：检查已登录特有的元素
+            logged_in_elements = [
+                "text=退出",
+                ".nickname",
+                "[class*='user-name']",
+                "a[href*='logout']",
+            ]
+            for selector in logged_in_elements:
+                try:
+                    count = self.page.locator(selector).count()
+                    if count > 0:
+                        print(f"   发现已登录元素: {selector}")
+                        return True
+                except:
+                    pass
+
+            # 方法5：检查页面内容是否包含"你好"或用户名
             try:
-                # 京东已登录后会显示用户名或退出按钮
-                if self.page.locator("text=退出").count() > 0:
-                    return True
-                if self.page.locator(".nickname").count() > 0:
+                content = self.page.content()
+                if "你好" in content or "我的京东" in content:
+                    print("   页面内容包含已登录标志")
                     return True
             except:
                 pass
 
-            # 如果以上都没匹配到，默认认为未登录（保守策略）
+            # 如果以上都无法确定，保守返回未登录
+            print("   无法确定登录状态，保守返回未登录")
             return False
 
         except Exception as e:
@@ -89,6 +113,11 @@ class BrowserManager:
         """
         关闭浏览器
         """
+        if self._closed:
+            return
+
+        self._closed = True
+
         # 保存登录状态
         if self.context:
             try:
@@ -98,25 +127,45 @@ class BrowserManager:
                 print(f"⚠️ 保存登录状态失败: {e}")
 
         if force:
-            # 强制关闭浏览器
+            # 强制关闭浏览器 - 使用非阻塞方式
+            print("🛑 强制关闭浏览器...")
+
+            # 先关闭 page
+            if self.page:
+                try:
+                    self.page.close()
+                except:
+                    pass
+
+            # 再关闭 context
             if self.context:
                 try:
                     self.context.close()
                 except:
                     pass
+
+            # 关闭 browser（带超时）
             if self.browser:
                 try:
                     self.browser.close()
                 except:
                     pass
+
+            # 停止 playwright
             if self.playwright:
                 try:
                     self.playwright.stop()
                 except:
                     pass
+
             print("✅ 浏览器已关闭")
         else:
             # 不关闭浏览器进程，保持运行以便下次复用
+            if self.page:
+                try:
+                    self.page.close()
+                except:
+                    pass
             if self.context:
                 try:
                     self.context.close()
