@@ -34,27 +34,31 @@ jobs:
           playwright install chromium
 
       - name: Build Web GUI with PyInstaller
-        shell: pwsh
+        shell: cmd
         run: |
-          pyinstaller --noconfirm --onedir --console `
-            --name "SKU-Price-Audit-Web" `
-            --collect-all playwright `
-            --collect-all flask `
-            --collect-all jinja2 `
-            --collect-all werkzeug `
-            --collect-all click `
-            --collect-all itsdangerous `
-            --collect-all markupsafe `
-            --hidden-import openpyxl `
-            --hidden-import PIL `
-            --add-data "templates;templates" `
-            --add-data "config.py;." `
-            --add-data "utils;utils" `
+          pyinstaller --noconfirm --onedir --console ^
+            --name "SKU-Price-Audit-Web" ^
+            --collect-all playwright ^
+            --collect-all flask ^
+            --collect-all jinja2 ^
+            --collect-all werkzeug ^
+            --collect-all click ^
+            --collect-all itsdangerous ^
+            --collect-all markupsafe ^
+            --hidden-import openpyxl ^
+            --hidden-import PIL ^
+            --add-data "templates;templates" ^
             app.py
 
       - name: Copy additional files
         shell: pwsh
         run: |
+          # 复制 templates 目录（确保存在）
+          Copy-Item -Path "templates" -Destination "dist/SKU-Price-Audit-Web/templates" -Recurse -Force
+          # 复制 config.py
+          Copy-Item -Path "config.py" -Destination "dist/SKU-Price-Audit-Web/config.py" -Force
+          # 复制 utils 目录
+          Copy-Item -Path "utils" -Destination "dist/SKU-Price-Audit-Web/utils" -Recurse -Force
           # 创建 input 目录（空目录）
           New-Item -ItemType Directory -Path "dist/SKU-Price-Audit-Web/input" -Force
           # 复制启动脚本

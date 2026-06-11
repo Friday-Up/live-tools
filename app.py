@@ -36,6 +36,21 @@ from utils.cleanup import auto_cleanup
 template_dir = os.path.join(BASE_DIR, 'templates')
 print(f"📁 模板目录: {template_dir}")
 print(f"📁 模板是否存在: {os.path.exists(template_dir)}")
+
+# 如果模板目录不存在，尝试其他可能的路径
+if not os.path.exists(template_dir):
+    # 尝试 exe 所在目录
+    alt_dir = os.path.dirname(sys.executable)
+    alt_template_dir = os.path.join(alt_dir, 'templates')
+    print(f"📁 尝试备用模板目录: {alt_template_dir}")
+    if os.path.exists(alt_template_dir):
+        template_dir = alt_template_dir
+        print(f"✅ 使用备用模板目录")
+    else:
+        # 列出 BASE_DIR 下的所有文件，帮助调试
+        print(f"📁 BASE_DIR 内容: {os.listdir(BASE_DIR) if os.path.exists(BASE_DIR) else '目录不存在'}")
+        print(f"❌ 错误: 找不到模板目录！")
+
 app = Flask(__name__, template_folder=template_dir)
 
 # 全局状态
