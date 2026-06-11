@@ -472,7 +472,31 @@
         <div class="card result-section" id="resultCard">
             <div class="result-icon">🎉</div>
             <div class="result-title">测价完成！</div>
-            <div class="result-desc">结果文件已生成</div>
+
+            <!-- 统计信息 -->
+            <div class="result-stats" style="background: #f8f9fa; border-radius: 8px; padding: 16px; margin: 16px 0; text-align: left;">
+                <div style="font-weight: 600; margin-bottom: 12px; color: #333;">📊 测价统计</div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                    <div class="result-stat-item">
+                        <div style="font-size: 20px; font-weight: 600; color: #4a90e2;" id="resultTotal">0</div>
+                        <div style="font-size: 12px; color: #888;">测价总数</div>
+                    </div>
+                    <div class="result-stat-item">
+                        <div style="font-size: 20px; font-weight: 600; color: #e74c3c;" id="resultUnqualified">0</div>
+                        <div style="font-size: 12px; color: #888;">低于门槛</div>
+                    </div>
+                    <div class="result-stat-item">
+                        <div style="font-size: 20px; font-weight: 600; color: #27ae60;" id="resultPassed">0</div>
+                        <div style="font-size: 12px; color: #888;">符合门槛</div>
+                    </div>
+                    <div class="result-stat-item">
+                        <div style="font-size: 20px; font-weight: 600; color: #666;" id="resultThreshold">¥0</div>
+                        <div style="font-size: 12px; color: #888;">价格门槛</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="result-desc">结果文件已生成，可下载查看详细数据</div>
             <div style="display: flex; gap: 12px; justify-content: center;">
                 <button class="btn btn-success" id="downloadBtn">📥 下载结果</button>
                 <button class="btn btn-secondary" id="restartBtn">🔄 再次测价</button>
@@ -640,9 +664,23 @@
         }
 
         function showResult() {
-            document.getElementById('progressCard').classList.remove('active');
+            // 保留进度卡片显示，同时显示结果卡片
             document.getElementById('resultCard').classList.add('active');
             startBtn.disabled = false;
+
+            // 更新结果统计
+            const total = parseInt(document.getElementById('statCurrent').textContent.split('/')[1]) || 0;
+            const unqualified = parseInt(document.getElementById('statUnqualified').textContent) || 0;
+            const passed = total - unqualified;
+            const threshold = document.getElementById('thresholdInput').value;
+
+            document.getElementById('resultTotal').textContent = total;
+            document.getElementById('resultUnqualified').textContent = unqualified;
+            document.getElementById('resultPassed').textContent = passed;
+            document.getElementById('resultThreshold').textContent = '¥' + threshold;
+
+            // 滚动到结果区域
+            document.getElementById('resultCard').scrollIntoView({ behavior: 'smooth' });
         }
 
         function showLoginModal() { document.getElementById('loginModal').classList.add('active'); }
@@ -659,6 +697,13 @@
 
         document.getElementById('restartBtn').addEventListener('click', () => {
             document.getElementById('resultCard').classList.remove('active');
+            // 重置进度显示
+            document.getElementById('progressFill').style.width = '0%';
+            document.getElementById('progressText').textContent = '准备中...';
+            document.getElementById('progressPercent').textContent = '0%';
+            document.getElementById('statCurrent').textContent = '0/0';
+            document.getElementById('statUnqualified').textContent = '0';
+            document.getElementById('logContainer').innerHTML = '';
             document.getElementById('mainCard').scrollIntoView({ behavior: 'smooth' });
         });
 
