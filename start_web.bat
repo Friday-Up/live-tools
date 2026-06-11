@@ -14,18 +14,24 @@ echo 🚀 直播-点菜 SKU 巡检 - Web 版
 echo ============================================================
 echo.
 
-:: 检查 Python 是否安装
-if exist "%SCRIPT_DIR%\_internal\python.exe" (
-    set "PYTHON_CMD=%SCRIPT_DIR%\_internal\python.exe"
+:: 检查是否是打包版本（存在 _internal 目录或 SKU-Price-Audit-Web.exe）
+if exist "%SCRIPT_DIR%\_internal" (
+    set "PYTHON_CMD=%SCRIPT_DIR%\SKU-Price-Audit-Web.exe"
+    echo ✅ 检测到打包版本
+) else if exist "%SCRIPT_DIR%\SKU-Price-Audit-Web.exe" (
+    set "PYTHON_CMD=%SCRIPT_DIR%\SKU-Price-Audit-Web.exe"
     echo ✅ 检测到打包版本
 ) else (
+    :: 源码版本，检查 Python
     python --version >nul 2>&1
     if %errorlevel% equ 0 (
         set "PYTHON_CMD=python"
+        echo ℹ️  源码版本，使用系统 Python
     ) else (
         python3 --version >nul 2>&1
         if %errorlevel% equ 0 (
             set "PYTHON_CMD=python3"
+            echo ℹ️  源码版本，使用系统 Python3
         ) else (
             echo ❌ 错误：未找到 Python，请先安装 Python 3.8+
             pause
@@ -37,8 +43,9 @@ if exist "%SCRIPT_DIR%\_internal\python.exe" (
 echo 📁 工作目录: %SCRIPT_DIR%
 echo.
 
-:: 检查依赖
-if "%PYTHON_CMD%"=="%SCRIPT_DIR%\_internal\python.exe" (
+:: 检查依赖（仅源码版本）
+echo "%PYTHON_CMD%" | findstr /C:"SKU-Price-Audit-Web.exe" >nul
+if %errorlevel% equ 0 (
     echo ✅ 打包版本，依赖已内置
 ) else (
     echo 🔍 检查依赖...
@@ -67,6 +74,6 @@ echo 如未自动打开，请手动访问: http://localhost:8080
 echo.
 
 :: 启动 Flask 服务
-%PYTHON_CMD% app.py
+"%PYTHON_CMD%"
 
 endlocal
