@@ -5,21 +5,18 @@
 import os
 import sys
 
-# 兼容 PyInstaller 打包后的路径
-def get_base_dir():
-    """获取程序根目录（兼容源码和打包模式）"""
-    if getattr(sys, 'frozen', False):
-        # PyInstaller 打包后的 EXE 运行
-        base_dir = os.path.dirname(sys.executable)
-        # 如果 exe 在 _internal 目录中（onedir 模式），需要向上回退一级
-        if os.path.basename(base_dir).lower() == '_internal':
-            base_dir = os.path.dirname(base_dir)
-        return base_dir
-    else:
-        # 源码运行
-        return os.path.dirname(os.path.abspath(__file__))
-
-BASE_DIR = get_base_dir()
+# 注意：这个 BASE_DIR 在源码运行时有效
+# 打包后，app.py 会重新计算并覆盖这个值
+if getattr(sys, 'frozen', False):
+    # PyInstaller 打包后的 EXE 运行
+    base_dir = os.path.dirname(sys.executable)
+    # 如果 exe 在 _internal 目录中，向上回退一级
+    if os.path.basename(base_dir).lower() == '_internal':
+        base_dir = os.path.dirname(base_dir)
+    BASE_DIR = base_dir
+else:
+    # 源码运行
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 CONFIG = {
     # 输入目录（程序会列出该目录下的 xlsx 文件供选择）

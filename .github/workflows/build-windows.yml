@@ -45,6 +45,14 @@ jobs:
           Write-Host "模板路径: $templatePath"
           Write-Host "配置路径: $configPath"
           Write-Host "工具路径: $utilsPath"
+          Write-Host "当前目录: $PWD"
+
+          # 先检查文件是否存在
+          if (Test-Path $templatePath) {
+            Write-Host "✅ templates 目录存在"
+          } else {
+            Write-Host "❌ templates 目录不存在"
+          }
 
           pyinstaller --noconfirm --onedir --console `
             --name "SKU-Price-Audit-Web" `
