@@ -131,7 +131,7 @@ class BrowserManager:
         """
         关闭浏览器
         """
-        if self._closed:
+        if self._closed and not force:
             return
 
         self._closed = True
@@ -154,6 +154,8 @@ class BrowserManager:
                     self.page.close()
                 except:
                     pass
+                finally:
+                    self.page = None
 
             # 再关闭 context
             if self.context:
@@ -161,6 +163,8 @@ class BrowserManager:
                     self.context.close()
                 except:
                     pass
+                finally:
+                    self.context = None
 
             # 关闭 browser（带超时）
             if self.browser:
@@ -168,6 +172,8 @@ class BrowserManager:
                     self.browser.close()
                 except:
                     pass
+                finally:
+                    self.browser = None
 
             # 停止 playwright
             if self.playwright:
@@ -175,6 +181,8 @@ class BrowserManager:
                     self.playwright.stop()
                 except:
                     pass
+                finally:
+                    self.playwright = None
 
             print("✅ 浏览器已关闭")
         else:

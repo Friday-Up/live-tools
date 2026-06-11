@@ -217,8 +217,20 @@ def run_audit_task(input_file, threshold_price):
                 login_event.clear()
                 # 等待前端通知继续
                 add_log('⏳ 等待用户完成登录并点击"我已登录"...')
-                login_event.wait(timeout=300)  # 最多等待5分钟
+
+                # 循环等待，检查是否停止
+                wait_count = 0
+                while not login_event.is_set() and wait_count < 60:
+                    login_event.wait(timeout=5)
+                    wait_count += 1
+                    if stop_flag.is_set():
+                        add_log('🛑 测价已停止')
+                        break
+
                 audit_status['need_login'] = False
+
+                if stop_flag.is_set():
+                    break
 
                 # 再次检查登录状态
                 add_log('🔐 重新检查登录状态...')
@@ -393,10 +405,14 @@ def stop_audit():
     if current_browser:
         try:
             add_log('🛑 正在关闭浏览器...')
-            current_browser.close(force=True)
+            # 先重置 current_browser，防止重复关闭
+            browser_to_close = current_browser
+            current_browser = None
+            browser_to_close.close(force=True)
             add_log('✅ 浏览器已强制关闭')
         except Exception as e:
             add_log(f"❌ 关闭浏览器出错: {e}")
+            current_browser = None
 
     # 重置状态
     audit_status['running'] = False
