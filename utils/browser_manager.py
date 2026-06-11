@@ -86,6 +86,19 @@ class BrowserManager:
         except Exception:
             pass
 
+        cart_login_prompts = [
+            "text=登录后将显示您之前加入的商品",
+            "text=你好，请登录",
+            "text=免费注册",
+        ]
+        for selector in cart_login_prompts:
+            try:
+                if self.page.locator(selector).count() > 0:
+                    print(f"   发现未登录提示: {selector}")
+                    return True
+            except Exception:
+                pass
+
         return False
 
     def close(self, force=False):

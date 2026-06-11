@@ -13,10 +13,11 @@ class FakeLocator:
 
 
 class FakePage:
-    def __init__(self, cart_url):
+    def __init__(self, cart_url, selector_counts=None):
         self.url = ""
         self.cart_url = cart_url
         self.visited = []
+        self.selector_counts = selector_counts or {}
 
     def goto(self, url, **kwargs):
         self.visited.append(url)
@@ -26,6 +27,8 @@ class FakePage:
         return "京东(JD.COM)"
 
     def locator(self, selector):
+        if selector in self.selector_counts:
+            return FakeLocator(self.selector_counts[selector])
         if selector == "text=退出":
             return FakeLocator(1)
         return FakeLocator(0)
@@ -50,6 +53,18 @@ class BrowserManagerLoginTests(unittest.TestCase):
         manager.context = FakeContext()
 
         self.assertTrue(manager.check_login_status())
+
+    def test_cart_page_with_login_prompt_is_not_logged_in(self):
+        manager = BrowserManager()
+        manager.page = FakePage(
+            "https://cart.jd.com/cart_index",
+            selector_counts={
+                "text=登录后将显示您之前加入的商品": 1,
+            },
+        )
+        manager.context = FakeContext()
+
+        self.assertFalse(manager.check_login_status())
 
 
 if __name__ == "__main__":
