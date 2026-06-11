@@ -41,7 +41,8 @@
 | 📸 **智能截图策略** | 仅对低于门槛价的 SKU 截图，发现后立即截图并停止遍历，节省时间和磁盘 |
 | ⚠️ **自动门槛判定** | 低于门槛自动标记"不符合上菜" |
 | 🧹 **截图自动清理** | 每次运行前清空旧截图，防止脏数据累积 |
-| 🖥️ **跨平台支持** | 提供 `start.sh`（macOS/Linux）和 `start.bat`（Windows） |
+| 🖥️ **双模式支持** | 命令行模式（`main.py`）+ Web GUI 模式（`app.py`），满足不同场景 |
+| 🖥️ **Web GUI 界面** | 提供可视化网页操作界面，上传文件、查看进度、下载结果，无需命令行 |
 | 🔧 **环境自动检测** | 自动检测 Python、依赖、浏览器，缺失时引导安装 |
 | ⏱️ **防爬策略** | 随机延迟 1-3 秒，模拟人工操作 |
 
@@ -62,14 +63,48 @@ playwright install chromium
 
 ## 🚀 快速开始
 
-### 1. 克隆项目
+### 方式一：Web GUI 模式（推荐，可视化操作）
+
+#### Windows 免安装版（业务人员推荐）
+
+1. **下载 Release**
+   - 访问 [Releases 页面](https://github.com/Friday-Up/live-sku-price-audit/releases)
+   - 下载 `SKU-Price-Audit-Web-Windows.zip`
+
+2. **解压运行**
+   ```text
+   解压 ZIP → 双击 "启动测价工具.bat"
+   ```
+
+3. **浏览器操作**
+   - 自动打开浏览器访问 `http://localhost:8080`
+   - 在网页上上传 Excel、设置门槛价、开始测价
+
+> 💡 **无需安装 Python**，解压即用
+
+#### 源码运行（开发者）
+
+```bash
+# 安装依赖
+pip install -r requirements.txt
+playwright install chromium
+
+# 启动 Web 服务
+python app.py
+```
+
+---
+
+### 方式二：命令行模式
+
+#### 1. 克隆项目
 
 ```bash
 git clone https://github.com/Friday-Up/live-sku-price-audit.git
 cd live-sku-price-audit
 ```
 
-### 2. 准备输入文件
+#### 2. 准备输入文件
 
 将业务表格放入 `input/` 目录：
 
@@ -80,16 +115,16 @@ input/
 
 > 📝 `input/` 目录下的 `.xlsx` 业务数据已被 `.gitignore` 排除，不会上传到 Git。
 
-### 3. 一键启动（推荐）
+#### 3. 一键启动（推荐）
 
-#### macOS / Linux
+**macOS / Linux**
 
 ```bash
 chmod +x start.sh
 ./start.sh
 ```
 
-#### Windows
+**Windows**
 
 ```bash
 start.bat
@@ -107,7 +142,7 @@ start.bat
 4. 启动浏览器 → 人工登录（首次）→ 批量测价 → 输出结果
 ```
 
-### 4. 查看结果
+#### 4. 查看结果
 
 ```text
 output/
@@ -160,7 +195,8 @@ python main.py
 |:---|:---|:---|
 | **首次运行** | 打开浏览器 → 提示登录 → 人工登录 → 保存 `jd_auth.json` | 扫码/密码登录 |
 | **后续运行（登录态有效）** | 自动加载 `jd_auth.json` → 无需重新登录 | **无需操作** |
-| **登录态失效** | 自动检测到失效 → **暂停程序，保留浏览器窗口** → 等待人工登录 → 按回车继续 | 在浏览器中重新登录 |
+| **登录态失效（Web 模式）** | 自动检测到失效 → **弹出"我已登录"弹窗** → 在浏览器中重新登录 → 点击"我已登录，继续" | 在浏览器中重新登录，点击按钮继续 |
+| **登录态失效（命令行模式）** | 自动检测到失效 → **暂停程序，保留浏览器窗口** → 等待人工登录 → 按回车继续 | 在浏览器中重新登录，按回车继续 |
 
 > **注意**：无需手动删除 `jd_auth.json`，程序会自动处理登录态失效。
 
@@ -199,7 +235,11 @@ CONFIG = {
 <details>
 <summary><b>Q2：登录态失效了怎么办？</b></summary>
 
-程序会自动检测登录态是否失效，如果失效会重新打开登录页面引导你重新登录。无需手动删除 `jd_auth.json`。
+**Web GUI 模式**：程序会自动弹出"我已登录"弹窗，请在浏览器中重新登录京东，然后点击弹窗上的"✓ 我已登录，继续"按钮。
+
+**命令行模式**：程序会自动检测到失效，重新打开登录页面，请在浏览器中重新登录后，回到终端按回车键继续。
+
+无需手动删除 `jd_auth.json`。
 </details>
 
 <details>
@@ -232,6 +272,21 @@ CONFIG = {
 会。工具会自动识别商品页面上的系列标签，逐个点击每个系列，再遍历该系列下的所有规格，确保不遗漏。
 </details>
 
+<details>
+<summary><b>Q8：Web GUI 模式和命令行模式有什么区别？</b></summary>
+
+| 对比项 | Web GUI 模式 | 命令行模式 |
+|:---|:---|:---|
+| **操作方式** | 浏览器网页操作 | 终端命令行交互 |
+| **适用人群** | 业务人员（推荐） | 开发者/技术人员 |
+| **启动命令** | `python app.py` 或双击 `启动测价工具.bat` | `python main.py` 或 `start.bat` |
+| **文件选择** | 网页拖拽/点击上传 | 终端输入编号选择 |
+| **进度查看** | 网页实时进度条+日志 | 终端文字输出 |
+| **登录弹窗** | 网页"我已登录"按钮 | 终端按回车确认 |
+
+两种模式功能完全一致，只是交互方式不同。
+</details>
+
 ---
 
 ## 🛠️ 技术栈
@@ -242,6 +297,7 @@ CONFIG = {
 | 🎭 [Playwright](https://playwright.dev/python/) | 浏览器自动化（价格抓取/截图） |
 | 📊 [openpyxl](https://openpyxl.readthedocs.io/) | Excel 读写（结果输出/图片嵌入） |
 | 🖼️ [Pillow](https://pillow.readthedocs.io/) | 图片处理 |
+| 🌐 [Flask](https://flask.palletsprojects.com/) | Web GUI 服务（可视化操作界面） |
 
 ---
 
@@ -249,11 +305,15 @@ CONFIG = {
 
 ```text
 live-sku-price-audit/
-├── main.py                 # 主程序入口
+├── main.py                 # 命令行模式入口
+├── app.py                  # Web GUI 模式入口（Flask 服务）
 ├── config.py               # 配置文件
 ├── requirements.txt        # Python 依赖
-├── start.sh                # macOS/Linux 一键启动脚本
-├── start.bat               # Windows 一键启动脚本
+├── start.sh                # macOS/Linux 命令行启动脚本
+├── start.bat               # Windows 命令行启动脚本
+├── start_web.bat           # Windows Web GUI 启动脚本
+├── templates/              # Web 前端页面
+│   └── index.html          # 主页面（上传/进度/结果）
 ├── utils/                  # 核心逻辑
 │   ├── browser_manager.py  # 浏览器管理（登录态复用/重新登录）
 │   ├── jd_crawler.py       # 京东价格爬取（价格提取/截图/弹窗关闭）
