@@ -1,4 +1,4 @@
-name: Build Windows EXE
+name: Build Live Tools Windows
 
 on:
   push:
@@ -30,43 +30,48 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
+        shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r live-web/requirements.txt
+          pip install -r live-sku-price-audit/requirements.txt
+          pip install -r live-promotion-binding/requirements.txt
           pip install pyinstaller
 
-      - name: Install Playwright Chromium to local dir
+      - name: Install Playwright Chromium
         run: |
           playwright install chromium
 
       - name: Run unit tests
-        run: |
-          python -m unittest discover -s tests -p "test_*.py" -v
-          python -c "import pathlib, py_compile; files=[pathlib.Path('app.py'), pathlib.Path('main.py'), *pathlib.Path('utils').glob('*.py')]; [py_compile.compile(str(p), doraise=True) for p in files]"
-
-      - name: Build Web GUI with PyInstaller
         shell: pwsh
         run: |
-          # 使用绝对路径
-          $templatePath = Join-Path $PWD "templates"
-          $configPath = Join-Path $PWD "config.py"
-          $utilsPath = Join-Path $PWD "utils"
+          Push-Location live-promotion-binding
+          python -m unittest discover -s tests -p "test_*.py" -v
+          Pop-Location
 
-          Write-Host "=== 构建参数 ==="
-          Write-Host "模板路径: $templatePath"
-          Write-Host "配置路径: $configPath"
-          Write-Host "工具路径: $utilsPath"
-          Write-Host "当前目录: $PWD"
+          Push-Location live-web
+          python -m unittest discover -s tests -p "test_*.py" -v
+          Pop-Location
 
-          # 先检查文件是否存在
-          if (Test-Path $templatePath) {
-            Write-Host "✅ templates 目录存在"
-          } else {
-            Write-Host "❌ templates 目录不存在"
-          }
+          Push-Location live-sku-price-audit
+          python -m unittest discover -s tests -p "test_*.py" -v
+          Pop-Location
+
+          python -m unittest discover -s tests -p "test_*.py" -v
+
+      - name: Build Live Tools Web with PyInstaller
+        shell: pwsh
+        run: |
+          $webApp = "live-web/app.py"
+          $webTemplates = "live-web/templates"
+          $bindingAssets = "live-promotion-binding/assets"
+          $bindingPackage = "live-promotion-binding/promotion_binding"
+          $priceUtils = "live-sku-price-audit/utils"
 
           pyinstaller --noconfirm --onedir --console `
-            --name "SKU-Price-Audit-Web" `
+            --name "Live-Tools-Web" `
+            --paths "live-promotion-binding" `
+            --paths "live-sku-price-audit" `
             --collect-all playwright `
             --collect-all flask `
             --collect-all jinja2 `
@@ -76,104 +81,68 @@ jobs:
             --collect-all markupsafe `
             --hidden-import openpyxl `
             --hidden-import PIL `
-            --add-data "$templatePath;templates" `
-            --add-data "$configPath;." `
-            --add-data "$utilsPath;utils" `
-            app.py
+            --hidden-import promotion_binding.service `
+            --hidden-import utils.audit_runner `
+            --hidden-import utils.browser_manager `
+            --hidden-import utils.excel_handler `
+            --hidden-import utils.jd_crawler `
+            --add-data "$webTemplates;live-web/templates" `
+            --add-data "$bindingAssets;live-promotion-binding/assets" `
+            --add-data "$bindingPackage;live-promotion-binding/promotion_binding" `
+            --add-data "$priceUtils;live-sku-price-audit/utils" `
+            $webApp
+
+      - name: Copy launcher and runtime folders
+        shell: pwsh
+        run: |
+          $distPath = "dist/Live-Tools-Web"
+          if (-not (Test-Path $distPath)) {
+            Write-Host "Build output not found: $distPath"
+            exit 1
+          }
+
+          Copy-Item -Path "启动直播工具.bat" -Destination (Join-Path $distPath "启动直播工具.bat") -Force
+          New-Item -ItemType Directory -Path (Join-Path $distPath "runtime") -Force | Out-Null
 
       - name: Verify build output
         shell: pwsh
         run: |
-          Write-Host "=== 检查打包输出 ==="
-          $distPath = "dist/SKU-Price-Audit-Web"
+          $distPath = "dist/Live-Tools-Web"
+          $required = @(
+            "Live-Tools-Web.exe",
+            "启动直播工具.bat",
+            "live-web/templates",
+            "live-promotion-binding/assets",
+            "live-promotion-binding/promotion_binding",
+            "live-sku-price-audit/utils"
+          )
 
-          if (Test-Path $distPath) {
-            Write-Host "✅ 打包目录存在: $distPath"
-            Write-Host "目录内容:"
-            Get-ChildItem $distPath | ForEach-Object { Write-Host "  $($_.Name)" }
-          } else {
-            Write-Host "❌ 打包目录不存在: $distPath"
-            exit 1
+          foreach ($item in $required) {
+            $path = Join-Path $distPath $item
+            if (-not (Test-Path $path)) {
+              Write-Host "Missing required build item: $item"
+              exit 1
+            }
           }
-
-          # 检查关键文件
-          $templatePath = Join-Path $distPath "templates"
-          $configPath = Join-Path $distPath "config.py"
-          $utilsPath = Join-Path $distPath "utils"
-
-          if (Test-Path $templatePath) {
-            Write-Host "✅ templates 目录存在"
-            Get-ChildItem $templatePath | ForEach-Object { Write-Host "    $($_.Name)" }
-          } else {
-            Write-Host "❌ templates 目录不存在"
-          }
-
-          if (Test-Path $configPath) {
-            Write-Host "✅ config.py 存在"
-          } else {
-            Write-Host "❌ config.py 不存在"
-          }
-
-          if (Test-Path $utilsPath) {
-            Write-Host "✅ utils 目录存在"
-          } else {
-            Write-Host "❌ utils 目录不存在"
-          }
-
-      - name: Copy additional files
-        shell: pwsh
-        run: |
-          $distPath = "dist/SKU-Price-Audit-Web"
-
-          # 确保 templates 目录存在
-          $destTemplatePath = Join-Path $distPath "templates"
-          if (-not (Test-Path $destTemplatePath)) {
-            Copy-Item -Path "templates" -Destination $destTemplatePath -Recurse -Force
-            Write-Host "✅ 复制 templates 目录"
-          }
-
-          # 确保 config.py 存在
-          $destConfigPath = Join-Path $distPath "config.py"
-          if (-not (Test-Path $destConfigPath)) {
-            Copy-Item -Path "config.py" -Destination $destConfigPath -Force
-            Write-Host "✅ 复制 config.py"
-          }
-
-          # 确保 utils 目录存在
-          $destUtilsPath = Join-Path $distPath "utils"
-          if (-not (Test-Path $destUtilsPath)) {
-            Copy-Item -Path "utils" -Destination $destUtilsPath -Recurse -Force
-            Write-Host "✅ 复制 utils 目录"
-          }
-
-          # 创建 input 目录（空目录）
-          $inputPath = Join-Path $distPath "input"
-          New-Item -ItemType Directory -Path $inputPath -Force
-          Write-Host "✅ 创建 input 目录"
-
-          # 复制启动脚本
-          Copy-Item -Path "start_web.bat" -Destination (Join-Path $distPath "启动测价工具.bat") -Force
-          Write-Host "✅ 复制启动脚本"
 
       - name: Compress output
         shell: pwsh
         run: |
-          $source = "dist/SKU-Price-Audit-Web"
-          $dest = "dist/SKU-Price-Audit-Web-Windows.zip"
+          $source = "dist/Live-Tools-Web"
+          $dest = "dist/Live-Tools-Windows.zip"
           Compress-Archive -Path $source -DestinationPath $dest -Force
-          Write-Host "✅ 压缩完成: $dest"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SKU-Price-Audit-Web-Windows
-          path: dist/SKU-Price-Audit-Web-Windows.zip
+          name: Live-Tools-Windows
+          path: dist/Live-Tools-Windows.zip
           retention-days: 30
 
       - name: Upload to Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/SKU-Price-Audit-Web-Windows.zip
+          files: dist/Live-Tools-Windows.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

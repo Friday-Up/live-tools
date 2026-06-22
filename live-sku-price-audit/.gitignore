@@ -1,0 +1,35 @@
+# 业务数据文件（含敏感信息，不上传）
+input/*.xlsx
+input/*.xls
+input/*.csv
+
+# 输出目录
+output/
+
+# 文档目录（内部文档不上传）
+docs/*.md
+docs/*.pdf
+docs/*.docx
+docs/*.xlsx
+
+# 登录态文件
+jd_auth.json
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Claude Code
+.claude/

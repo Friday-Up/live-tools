@@ -1,0 +1,38 @@
+from pathlib import Path
+import unittest
+
+
+LIVE_ROOT = Path(__file__).resolve().parents[1]
+
+
+class WindowsPackagingTest(unittest.TestCase):
+    def test_unified_windows_launcher_is_the_only_business_entry(self):
+        launcher = LIVE_ROOT / "启动直播工具.bat"
+
+        self.assertTrue(launcher.exists())
+        content = launcher.read_text(encoding="utf-8")
+        self.assertIn("Live-Tools-Web.exe", content)
+        self.assertIn("live-web", content)
+        self.assertNotIn("启动测价工具", content)
+        self.assertNotIn("SKU-Price-Audit", content)
+
+    def test_github_workflow_builds_live_tools_from_unified_web_entry(self):
+        workflow = LIVE_ROOT / ".github" / "workflows" / "build-windows.yml"
+
+        self.assertTrue(workflow.exists())
+        content = workflow.read_text(encoding="utf-8")
+
+        self.assertIn("Build Live Tools Windows", content)
+        self.assertIn("Live-Tools-Web", content)
+        self.assertIn("live-web/app.py", content)
+        self.assertIn("live-web/templates", content)
+        self.assertIn("live-promotion-binding/assets", content)
+        self.assertIn("live-promotion-binding/promotion_binding", content)
+        self.assertIn("live-sku-price-audit/utils", content)
+        self.assertIn("Live-Tools-Windows.zip", content)
+        self.assertIn("启动直播工具.bat", content)
+        self.assertNotIn("启动测价工具.bat", content)
+
+
+if __name__ == "__main__":
+    unittest.main()

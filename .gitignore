@@ -1,22 +1,30 @@
-# 业务数据文件（含敏感信息，不上传）
-input/*.xlsx
-input/*.xls
-input/*.csv
+# Runtime files
+live-web/runtime/
+live-web/input/
+live-web/output/
+live-web/logs/
+live-web/关闭服务.bat
+logs/
+关闭服务.bat
 
-# 输出目录
-output/
+# Promotion binding generated files
+live-promotion-binding/input/*
+!live-promotion-binding/input/.gitkeep
+live-promotion-binding/output/*
+!live-promotion-binding/output/.gitkeep
 
-# 文档目录（内部文档不上传）
-docs/*.md
-docs/*.pdf
-docs/*.docx
-docs/*.xlsx
+# Price audit business files
+live-sku-price-audit/input/*
+!live-sku-price-audit/input/README.md
+!live-sku-price-audit/input/点菜清单模板.xlsx
+live-sku-price-audit/output/*
+!live-sku-price-audit/output/README.md
+live-sku-price-audit/docs/*.xlsx
+live-sku-price-audit/jd_auth.json
 
-# 登录态文件
-jd_auth.json
-
-# macOS
-.DS_Store
+# Local business source files kept out of the GitHub repo
+/*.xlsx
+/直播-*.md
 
 # Python
 __pycache__/
@@ -25,11 +33,12 @@ __pycache__/
 *.pyd
 .Python
 
-# IDE
+# macOS
+.DS_Store
+
+# IDE and local agent state
 .idea/
 .vscode/
 *.swp
 *.swo
-
-# Claude Code
 .claude/

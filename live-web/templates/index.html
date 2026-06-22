@@ -1,0 +1,971 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>直播 SKU 价格巡检工具</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif;
+            background: #f5f7fa;
+            color: #333;
+            line-height: 1.5;
+        }
+
+        .container {
+            max-width: 960px;
+            margin: 0 auto;
+            padding: 40px 24px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin-bottom: 6px;
+        }
+
+        .header p {
+            color: #888;
+            font-size: 14px;
+        }
+
+        .tool-tabs {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            background: #e9eef5;
+            border-radius: 12px;
+            padding: 6px;
+            margin-bottom: 16px;
+        }
+
+        .tool-tab {
+            border: none;
+            border-radius: 8px;
+            background: transparent;
+            color: #666;
+            cursor: pointer;
+            font-size: 15px;
+            font-weight: 600;
+            height: 42px;
+            transition: all 0.2s;
+        }
+
+        .tool-tab.active {
+            background: white;
+            color: #1a1a1a;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+        }
+
+        .tool-panel { display: none; }
+        .tool-panel.active { display: block; }
+
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+
+        .section-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #666;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .upload-area {
+            border: 2px dashed #ddd;
+            border-radius: 8px;
+            padding: 32px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: #fafafa;
+        }
+
+        .upload-area:hover {
+            border-color: #4a90e2;
+            background: #f0f7ff;
+        }
+
+        .upload-area.dragover {
+            border-color: #4a90e2;
+            background: #e6f0ff;
+        }
+
+        .upload-icon {
+            font-size: 36px;
+            margin-bottom: 8px;
+        }
+
+        .upload-text {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .upload-hint {
+            color: #aaa;
+            font-size: 12px;
+            margin-top: 4px;
+        }
+
+        .file-item {
+            display: flex;
+            align-items: center;
+            padding: 12px;
+            background: #f5f7fa;
+            border-radius: 8px;
+            margin-top: 12px;
+        }
+
+        .file-icon {
+            font-size: 24px;
+            margin-right: 12px;
+        }
+
+        .file-info { flex: 1; }
+
+        .file-name {
+            font-weight: 500;
+            font-size: 14px;
+        }
+
+        .file-status {
+            font-size: 12px;
+            color: #4a90e2;
+        }
+
+        .file-delete {
+            cursor: pointer;
+            opacity: 0.4;
+            font-size: 18px;
+            padding: 4px;
+        }
+
+        .file-delete:hover {
+            opacity: 1;
+            color: #e74c3c;
+        }
+
+        .form-row {
+            display: flex;
+            gap: 12px;
+            align-items: flex-end;
+        }
+
+        .form-group { flex: 1; }
+
+        .form-label {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 13px;
+            color: #666;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 10px 14px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 15px;
+            transition: border-color 0.2s;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: #4a90e2;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 10px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            gap: 6px;
+            height: 42px;
+            text-decoration: none;
+        }
+
+        .btn-primary {
+            background: #4a90e2;
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) { background: #357abd; }
+
+        .btn-primary:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .btn-success {
+            background: #27ae60;
+            color: white;
+        }
+
+        .btn-success:hover { background: #219a52; }
+
+        .btn-secondary {
+            background: #f3f4f6;
+            color: #333;
+            border: 1px solid #e5e7eb;
+        }
+
+        .btn-secondary:hover:not(:disabled) { background: #e5e7eb; }
+
+        .status-message {
+            display: none;
+            margin-top: 12px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            font-size: 13px;
+        }
+
+        .status-message.active { display: block; }
+        .status-message.error { color: #991b1b; background: #fee2e2; }
+        .status-message.info { color: #1e3a8a; background: #dbeafe; }
+        .status-message.success { color: #166534; background: #dcfce7; }
+
+        .progress-section { display: none; }
+        .progress-section.active { display: block; }
+
+        .progress-bar {
+            height: 6px;
+            background: #eee;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-bottom: 12px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: #4a90e2;
+            border-radius: 3px;
+            transition: width 0.3s;
+        }
+
+        .progress-info {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            color: #888;
+            margin-bottom: 16px;
+        }
+
+        .stats {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+
+        .stat { text-align: center; }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: 600;
+            color: #4a90e2;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #888;
+        }
+
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 12px;
+            margin: 16px 0;
+        }
+
+        .summary-item {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 14px;
+            text-align: center;
+        }
+
+        .summary-value {
+            font-size: 22px;
+            font-weight: 600;
+            color: #4a90e2;
+        }
+
+        .summary-label {
+            font-size: 12px;
+            color: #888;
+            margin-top: 4px;
+        }
+
+        .log-wrapper { position: relative; }
+
+        .log-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .log-copy-btn {
+            background: #333;
+            color: #aaa;
+            border: none;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .log-copy-btn:hover {
+            background: #444;
+            color: #fff;
+        }
+
+        .log-copy-btn.copied {
+            background: #27ae60;
+            color: white;
+        }
+
+        .log-container {
+            background: #1e1e1e;
+            border-radius: 8px;
+            padding: 16px;
+            height: 200px;
+            min-height: 120px;
+            max-height: 600px;
+            overflow-y: auto;
+            font-family: 'Consolas', monospace;
+            font-size: 12px;
+            line-height: 1.8;
+            resize: vertical;
+        }
+
+        .log-entry { color: #aaa; }
+        .log-time { color: #666; margin-right: 8px; }
+        .log-success { color: #4ade80; }
+        .log-error { color: #f87171; }
+        .log-warning { color: #fbbf24; }
+
+        .result-section {
+            display: none;
+            text-align: center;
+            padding: 32px;
+        }
+
+        .result-section.active { display: block; }
+
+        .result-icon {
+            font-size: 48px;
+            margin-bottom: 12px;
+        }
+
+        .result-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .result-desc {
+            color: #888;
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+
+        .modal {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            z-index: 1000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.active { display: flex; }
+
+        .modal-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5);
+        }
+
+        .modal-content {
+            position: relative;
+            background: white;
+            border-radius: 12px;
+            padding: 32px;
+            text-align: center;
+            width: 320px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+        }
+
+        .modal-icon {
+            font-size: 40px;
+            margin-bottom: 12px;
+        }
+
+        .modal-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .modal-desc {
+            color: #888;
+            font-size: 13px;
+            margin-bottom: 20px;
+        }
+
+        .hidden { display: none !important; }
+
+        @media (max-width: 720px) {
+            .container { padding: 24px 14px; }
+            .form-row { flex-direction: column; align-items: stretch; }
+            .tool-tabs { grid-template-columns: 1fr; }
+            .stats { flex-wrap: wrap; }
+            .btn { width: 100%; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>直播 SKU 价格巡检工具</h1>
+            <p>测价、绑定券码/促销ID统一入口</p>
+        </div>
+
+        <div class="tool-tabs">
+            <button class="tool-tab active" data-tool="pricePanel">SKU 测价</button>
+            <button class="tool-tab" data-tool="promotionPanel">绑定券码/促销ID</button>
+        </div>
+
+        <section class="tool-panel active" id="pricePanel">
+            <div class="card" id="mainCard">
+                <div class="section-title">选择测价 Excel 文件</div>
+
+                <div class="upload-area" id="uploadArea">
+                    <div class="upload-icon">📄</div>
+                    <div class="upload-text">点击上传或拖拽文件到此处</div>
+                    <div class="upload-hint">支持 .xlsx 格式，需包含「商品SKU」列</div>
+                </div>
+                <input type="file" id="fileInput" accept=".xlsx" class="hidden">
+
+                <div class="file-list" id="fileList"></div>
+                <div class="status-message" id="statusMessage"></div>
+
+                <div style="margin-top: 20px;">
+                    <div class="section-title">测价配置</div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">价格门槛（低于此价格标记为“不符合上菜”）</label>
+                            <input type="number" class="form-input" id="thresholdInput" value="6.0" step="0.1" min="0">
+                        </div>
+                        <button class="btn btn-primary" id="startBtn" disabled>开始测价</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card progress-section" id="progressCard">
+                <div class="section-title">测价进度</div>
+
+                <div class="stats">
+                    <div class="stat">
+                        <div class="stat-value" id="statCurrent">0/0</div>
+                        <div class="stat-label">当前/总数</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-value" id="statUnqualified" style="color: #e74c3c;">0</div>
+                        <div class="stat-label">低于门槛</div>
+                    </div>
+                </div>
+
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+                </div>
+                <div class="progress-info">
+                    <span id="progressText">准备中...</span>
+                    <span id="progressPercent">0%</span>
+                </div>
+
+                <div style="text-align: center; margin-bottom: 16px;">
+                    <button class="btn btn-secondary" id="stopBtn" style="background: #e74c3c; color: white;">停止测价</button>
+                </div>
+
+                <div class="log-wrapper">
+                    <div class="log-header">
+                        <div class="section-title" style="margin-bottom: 0;">实时日志</div>
+                        <button class="log-copy-btn" id="copyLogBtn">复制日志</button>
+                    </div>
+                    <div class="log-container" id="logContainer"></div>
+                </div>
+            </div>
+
+            <div class="card result-section" id="resultCard">
+                <div class="result-icon">✓</div>
+                <div class="result-title">测价完成</div>
+
+                <div class="summary-grid">
+                    <div class="summary-item">
+                        <div class="summary-value" id="resultTotal">0</div>
+                        <div class="summary-label">测价总数</div>
+                    </div>
+                    <div class="summary-item">
+                        <div class="summary-value" id="resultUnqualified" style="color: #e74c3c;">0</div>
+                        <div class="summary-label">低于门槛</div>
+                    </div>
+                    <div class="summary-item">
+                        <div class="summary-value" id="resultPassed" style="color: #27ae60;">0</div>
+                        <div class="summary-label">符合门槛</div>
+                    </div>
+                    <div class="summary-item">
+                        <div class="summary-value" id="resultThreshold" style="color: #666;">¥0</div>
+                        <div class="summary-label">价格门槛</div>
+                    </div>
+                </div>
+
+                <div class="result-desc">结果文件已生成，可下载查看详细数据</div>
+                <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+                    <button class="btn btn-success" id="downloadBtn">下载结果</button>
+                    <button class="btn btn-secondary" id="restartBtn">再次测价</button>
+                    <button class="btn btn-secondary" id="shutdownBtn" style="background: #e74c3c; color: white;">关闭服务</button>
+                </div>
+            </div>
+        </section>
+
+        <section class="tool-panel" id="promotionPanel">
+            <div class="card">
+                <div class="section-title">选择绑定券码/促销ID Excel 文件</div>
+
+                <div class="upload-area" id="promotionUploadArea">
+                    <div class="upload-icon">📄</div>
+                    <div class="upload-text">点击上传或拖拽文件到此处</div>
+                    <div class="upload-hint">支持 .xlsx 格式，需包含「上播·SKU ID」和「券码/价码」列</div>
+                </div>
+                <input type="file" id="promotionFileInput" accept=".xlsx" class="hidden">
+                <div class="file-list" id="promotionFileList"></div>
+                <div class="status-message" id="promotionStatusMessage"></div>
+
+                <div style="margin-top: 20px;">
+                    <div class="section-title">生成配置</div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">输出内容</label>
+                            <input class="form-input" value="京东官方上传模板 + 异常报告" disabled>
+                        </div>
+                        <button class="btn btn-primary" id="promotionGenerateBtn" disabled>生成导入模板</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card result-section" id="promotionResultCard">
+                <div class="result-icon">✓</div>
+                <div class="result-title">模板生成完成</div>
+                <div class="summary-grid" id="promotionSummary"></div>
+                <div class="result-desc">上传模板和异常报告已生成</div>
+                <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+                    <a class="btn btn-success" id="promotionTemplateDownload" href="#">下载京东上传模板</a>
+                    <a class="btn btn-secondary" id="promotionReportDownload" href="#">下载异常报告</a>
+                    <button class="btn btn-secondary" id="promotionRestartBtn">再次生成</button>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <div class="modal" id="loginModal">
+        <div class="modal-overlay"></div>
+        <div class="modal-content">
+            <div class="modal-icon">🔐</div>
+            <div class="modal-title">需要登录京东</div>
+            <div class="modal-desc">登录态已失效，请在浏览器窗口中完成登录后，点击继续</div>
+            <button class="btn btn-primary" id="continueBtn" style="width: 100%;">我已登录，继续</button>
+        </div>
+    </div>
+
+    <script>
+        let selectedFile = null;
+        let statusInterval = null;
+        let lastStatus = null;
+        let selectedPromotionFile = null;
+
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const fileList = document.getElementById('fileList');
+        const startBtn = document.getElementById('startBtn');
+        const statusMessage = document.getElementById('statusMessage');
+
+        const promotionUploadArea = document.getElementById('promotionUploadArea');
+        const promotionFileInput = document.getElementById('promotionFileInput');
+        const promotionFileList = document.getElementById('promotionFileList');
+        const promotionStatusMessage = document.getElementById('promotionStatusMessage');
+        const promotionGenerateBtn = document.getElementById('promotionGenerateBtn');
+
+        document.querySelectorAll('.tool-tab').forEach((button) => {
+            button.addEventListener('click', () => {
+                document.querySelectorAll('.tool-tab').forEach((item) => item.classList.remove('active'));
+                document.querySelectorAll('.tool-panel').forEach((panel) => panel.classList.remove('active'));
+                button.classList.add('active');
+                document.getElementById(button.dataset.tool).classList.add('active');
+            });
+        });
+
+        function escapeHtml(value) {
+            return String(value || '').replace(/[&<>"']/g, (char) => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            }[char]));
+        }
+
+        function showMessage(target, message, type = 'info') {
+            target.textContent = message;
+            target.className = `status-message active ${type}`;
+        }
+
+        function clearMessage(target) {
+            target.textContent = '';
+            target.className = 'status-message';
+        }
+
+        function bindUpload(area, input, handler) {
+            area.addEventListener('click', () => input.click());
+            area.addEventListener('dragover', (event) => {
+                event.preventDefault();
+                area.classList.add('dragover');
+            });
+            area.addEventListener('dragleave', () => area.classList.remove('dragover'));
+            area.addEventListener('drop', (event) => {
+                event.preventDefault();
+                area.classList.remove('dragover');
+                if (event.dataTransfer.files.length > 0) handler(event.dataTransfer.files[0]);
+            });
+            input.addEventListener('change', (event) => {
+                if (event.target.files.length > 0) handler(event.target.files[0]);
+            });
+        }
+
+        bindUpload(uploadArea, fileInput, handleFile);
+        bindUpload(promotionUploadArea, promotionFileInput, handlePromotionFile);
+
+        function handleFile(file) {
+            if (!file.name.endsWith('.xlsx')) {
+                alert('仅支持 .xlsx 格式');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            fetch('/api/upload', { method: 'POST', body: formData })
+                .then((res) => res.json())
+                .then((data) => {
+                    if (data.success) {
+                        selectedFile = data.path;
+                        renderFile(fileList, uploadArea, data.filename, '已选择');
+                        startBtn.disabled = false;
+                        clearMessage(statusMessage);
+                    } else {
+                        showMessage(statusMessage, data.error, 'error');
+                    }
+                })
+                .catch(() => showMessage(statusMessage, '上传失败，请确认服务仍在运行', 'error'));
+        }
+
+        function handlePromotionFile(file) {
+            if (!file.name.endsWith('.xlsx')) {
+                alert('仅支持 .xlsx 格式');
+                return;
+            }
+            selectedPromotionFile = file;
+            renderFile(promotionFileList, promotionUploadArea, file.name, '待生成');
+            promotionGenerateBtn.disabled = false;
+            clearMessage(promotionStatusMessage);
+        }
+
+        function renderFile(targetList, targetUploadArea, name, status) {
+            targetList.innerHTML = `
+                <div class="file-item">
+                    <div class="file-icon">📊</div>
+                    <div class="file-info">
+                        <div class="file-name">${escapeHtml(name)}</div>
+                        <div class="file-status">${escapeHtml(status)}</div>
+                    </div>
+                    <div class="file-delete" data-delete-file>×</div>
+                </div>
+            `;
+            targetUploadArea.style.display = 'none';
+            targetList.querySelector('[data-delete-file]').addEventListener('click', () => {
+                if (targetList === fileList) {
+                    selectedFile = null;
+                    startBtn.disabled = true;
+                    fileInput.value = '';
+                } else {
+                    selectedPromotionFile = null;
+                    promotionGenerateBtn.disabled = true;
+                    promotionFileInput.value = '';
+                }
+                targetList.innerHTML = '';
+                targetUploadArea.style.display = 'block';
+            });
+        }
+
+        startBtn.addEventListener('click', () => {
+            if (!selectedFile) {
+                alert('请先选择文件');
+                return;
+            }
+            const threshold = parseFloat(document.getElementById('thresholdInput').value);
+            if (isNaN(threshold) || threshold < 0) {
+                alert('请输入有效的价格门槛');
+                return;
+            }
+
+            startBtn.disabled = true;
+            clearMessage(statusMessage);
+            document.getElementById('progressCard').classList.add('active');
+            document.getElementById('resultCard').classList.remove('active');
+
+            fetch('/api/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ file: selectedFile, threshold: threshold })
+            })
+            .then((res) => res.json())
+            .then((data) => {
+                if (!data.success) {
+                    showMessage(statusMessage, data.error, 'error');
+                    startBtn.disabled = false;
+                } else {
+                    startStatusPolling();
+                }
+            })
+            .catch(() => {
+                showMessage(statusMessage, '启动失败，请确认服务仍在运行', 'error');
+                startBtn.disabled = false;
+            });
+        });
+
+        function startStatusPolling() {
+            if (statusInterval) clearInterval(statusInterval);
+            document.getElementById('stopBtn').style.display = 'inline-flex';
+            document.getElementById('stopBtn').disabled = false;
+            statusInterval = setInterval(() => {
+                fetch('/api/status')
+                    .then((res) => res.json())
+                    .then((data) => {
+                        lastStatus = data;
+                        updateUI(data);
+                        if (data.need_login) showLoginModal();
+                        else hideLoginModal();
+
+                        if (!data.running && data.result_file && !data.error) {
+                            clearInterval(statusInterval);
+                            showResult(data);
+                            document.getElementById('stopBtn').style.display = 'none';
+                        } else if (!data.running && data.error) {
+                            clearInterval(statusInterval);
+                            showMessage(statusMessage, data.error, 'error');
+                            startBtn.disabled = false;
+                            document.getElementById('stopBtn').style.display = 'none';
+                        } else if (!data.running) {
+                            clearInterval(statusInterval);
+                            showMessage(statusMessage, '测价已停止', 'info');
+                            startBtn.disabled = false;
+                            document.getElementById('stopBtn').style.display = 'none';
+                        }
+                    })
+                    .catch(() => {
+                        clearInterval(statusInterval);
+                        showMessage(statusMessage, '连接服务失败，请重新启动工具', 'error');
+                        startBtn.disabled = false;
+                        document.getElementById('stopBtn').style.display = 'none';
+                    });
+            }, 500);
+        }
+
+        document.getElementById('stopBtn').addEventListener('click', () => {
+            if (confirm('确定要停止测价吗？')) {
+                document.getElementById('stopBtn').disabled = true;
+                showMessage(statusMessage, '正在停止，请等待当前页面处理结束', 'info');
+                fetch('/api/stop', { method: 'POST' })
+                    .catch(() => showMessage(statusMessage, '停止请求发送失败，请稍后刷新页面确认状态', 'error'));
+            }
+        });
+
+        function updateUI(data) {
+            let percent;
+            if (!data.running && data.current >= data.total) {
+                percent = 100;
+            } else {
+                percent = data.total > 0 ? Math.round(((data.current - 1) / data.total) * 100) : 0;
+                percent = Math.max(0, percent);
+            }
+            document.getElementById('progressFill').style.width = percent + '%';
+            document.getElementById('progressText').textContent = data.stopping ? '正在停止...' : (data.running ? `正在处理: ${data.current_sku || '...'}` : '已完成');
+            document.getElementById('progressPercent').textContent = percent + '%';
+            document.getElementById('statCurrent').textContent = `${data.current}/${data.total}`;
+            document.getElementById('statUnqualified').textContent = data.unqualified_count;
+
+            const logContainer = document.getElementById('logContainer');
+            logContainer.innerHTML = data.logs.map((log) => {
+                let cls = '';
+                if (log.message.includes('完成') || log.message.includes('保存') || log.message.includes('价格:')) cls = 'log-success';
+                else if (log.message.includes('失败') || log.message.includes('错误') || log.message.includes('低于门槛')) cls = 'log-error';
+                else if (log.message.includes('登录') || log.message.includes('停止')) cls = 'log-warning';
+                return `<div class="log-entry ${cls}"><span class="log-time">${escapeHtml(log.time)}</span>${escapeHtml(log.message)}</div>`;
+            }).join('');
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+
+        function showResult(data) {
+            document.getElementById('resultCard').classList.add('active');
+            startBtn.disabled = false;
+            clearMessage(statusMessage);
+
+            const total = data.total || 0;
+            const unqualified = data.unqualified_count || 0;
+            const passed = data.success_count ? Math.max(data.success_count - unqualified, 0) : Math.max(total - unqualified - (data.fail_count || 0), 0);
+            const threshold = document.getElementById('thresholdInput').value;
+
+            document.getElementById('resultTotal').textContent = total;
+            document.getElementById('resultUnqualified').textContent = unqualified;
+            document.getElementById('resultPassed').textContent = passed;
+            document.getElementById('resultThreshold').textContent = '¥' + threshold;
+            document.getElementById('resultCard').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function showLoginModal() { document.getElementById('loginModal').classList.add('active'); }
+        function hideLoginModal() { document.getElementById('loginModal').classList.remove('active'); }
+
+        document.getElementById('continueBtn').addEventListener('click', () => {
+            hideLoginModal();
+            fetch('/api/continue', { method: 'POST' });
+        });
+
+        document.getElementById('downloadBtn').addEventListener('click', () => {
+            window.location.href = '/api/download';
+        });
+
+        document.getElementById('restartBtn').addEventListener('click', () => {
+            document.getElementById('resultCard').classList.remove('active');
+            document.getElementById('progressFill').style.width = '0%';
+            document.getElementById('progressText').textContent = '准备中...';
+            document.getElementById('progressPercent').textContent = '0%';
+            document.getElementById('statCurrent').textContent = '0/0';
+            document.getElementById('statUnqualified').textContent = '0';
+            document.getElementById('logContainer').innerHTML = '';
+            clearMessage(statusMessage);
+            document.getElementById('mainCard').scrollIntoView({ behavior: 'smooth' });
+        });
+
+        document.getElementById('shutdownBtn').addEventListener('click', () => {
+            if (confirm('确定要关闭服务吗？关闭后需要重新启动程序。')) {
+                fetch('/api/shutdown', { method: 'POST' })
+                    .then(() => {
+                        alert('服务已关闭，请关闭此页面');
+                        window.close();
+                    })
+                    .catch(() => {
+                        alert('服务已关闭，请关闭此页面');
+                        window.close();
+                    });
+            }
+        });
+
+        document.getElementById('copyLogBtn').addEventListener('click', () => {
+            const logContainer = document.getElementById('logContainer');
+            const logs = Array.from(logContainer.querySelectorAll('.log-entry'))
+                .map((entry) => entry.textContent)
+                .join('\n');
+
+            if (!logs) {
+                alert('暂无日志可复制');
+                return;
+            }
+
+            navigator.clipboard.writeText(logs).then(() => {
+                const btn = document.getElementById('copyLogBtn');
+                btn.textContent = '已复制';
+                btn.classList.add('copied');
+                setTimeout(() => {
+                    btn.textContent = '复制日志';
+                    btn.classList.remove('copied');
+                }, 2000);
+            }).catch(() => alert('复制失败，请手动选择复制'));
+        });
+
+        promotionGenerateBtn.addEventListener('click', () => {
+            if (!selectedPromotionFile) {
+                alert('请先选择文件');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', selectedPromotionFile);
+
+            promotionGenerateBtn.disabled = true;
+            showMessage(promotionStatusMessage, '生成中...', 'info');
+            document.getElementById('promotionResultCard').classList.remove('active');
+
+            fetch('/api/promotion-binding/generate', { method: 'POST', body: formData })
+                .then((res) => res.json())
+                .then((data) => {
+                    if (!data.success) throw new Error(data.error || '生成失败');
+                    showPromotionResult(data);
+                    showMessage(promotionStatusMessage, '生成完成', 'success');
+                })
+                .catch((error) => showMessage(promotionStatusMessage, error.message, 'error'))
+                .finally(() => {
+                    promotionGenerateBtn.disabled = false;
+                });
+        });
+
+        function showPromotionResult(data) {
+            const summary = data.summary;
+            const items = [
+                ['可绑定', summary.success_count],
+                ['KEY', summary.coupon_key_count],
+                ['促销ID', summary.promo_id_count],
+                ['空值', summary.skipped_empty_count],
+                ['异常', summary.invalid_count],
+                ['重复', summary.duplicate_count],
+            ];
+            document.getElementById('promotionSummary').innerHTML = items.map(([label, value]) => `
+                <div class="summary-item">
+                    <div class="summary-value">${escapeHtml(value)}</div>
+                    <div class="summary-label">${escapeHtml(label)}</div>
+                </div>
+            `).join('');
+            document.getElementById('promotionTemplateDownload').href = data.template_download_url;
+            document.getElementById('promotionReportDownload').href = data.report_download_url;
+            document.getElementById('promotionResultCard').classList.add('active');
+            document.getElementById('promotionResultCard').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        document.getElementById('promotionRestartBtn').addEventListener('click', () => {
+            document.getElementById('promotionResultCard').classList.remove('active');
+            clearMessage(promotionStatusMessage);
+            promotionUploadArea.scrollIntoView({ behavior: 'smooth' });
+        });
+    </script>
+</body>
+</html>
