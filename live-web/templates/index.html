@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>直播 SKU 价格巡检工具</title>
+    <title>直播运营工具</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -199,17 +199,8 @@
 
         .mapping-grid {
             display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
+            grid-template-columns: repeat(2, minmax(0, 1fr));
             gap: 12px;
-        }
-
-        .column-preview {
-            margin-top: 12px;
-            padding: 10px 12px;
-            background: #f8f9fa;
-            border-radius: 8px;
-            color: #666;
-            font-size: 12px;
         }
 
         .btn {
@@ -473,8 +464,8 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>直播 SKU 价格巡检工具</h1>
-            <p>测价、绑定券码/促销ID统一入口</p>
+            <h1>直播运营工具</h1>
+            <p>SKU 测价、绑定券码/促销ID统一入口</p>
         </div>
 
         <div class="tool-tabs">
@@ -599,12 +590,7 @@
                             <label class="form-label">券码/促销编码列</label>
                             <select class="form-input" id="promotionCodeColumn"></select>
                         </div>
-                        <div class="form-group">
-                            <label class="form-label">商品名称列</label>
-                            <select class="form-input" id="promotionProductNameColumn"></select>
-                        </div>
                     </div>
-                    <div class="column-preview" id="promotionColumnPreview"></div>
                 </div>
 
                 <div style="margin-top: 20px;">
@@ -665,8 +651,6 @@
         const promotionColumnMapping = document.getElementById('promotionColumnMapping');
         const promotionSkuColumn = document.getElementById('promotionSkuColumn');
         const promotionCodeColumn = document.getElementById('promotionCodeColumn');
-        const promotionProductNameColumn = document.getElementById('promotionProductNameColumn');
-        const promotionColumnPreview = document.getElementById('promotionColumnPreview');
 
         document.querySelectorAll('.tool-tab').forEach((button) => {
             button.addEventListener('click', () => {
@@ -779,20 +763,11 @@
             promotionColumnMapping.classList.remove('active');
             promotionSkuColumn.innerHTML = '';
             promotionCodeColumn.innerHTML = '';
-            promotionProductNameColumn.innerHTML = '';
-            promotionColumnPreview.innerHTML = '';
         }
 
         function renderPromotionColumnOptions(columns, suggestedMapping) {
             promotionSkuColumn.innerHTML = buildColumnOptions(columns, suggestedMapping.sku_col, false);
             promotionCodeColumn.innerHTML = buildColumnOptions(columns, suggestedMapping.code_col, false);
-            promotionProductNameColumn.innerHTML = buildColumnOptions(columns, suggestedMapping.product_name_col, true);
-            promotionColumnPreview.innerHTML = columns.map((column) => {
-                const samples = column.sample_values && column.sample_values.length > 0
-                    ? column.sample_values.join(' / ')
-                    : '无样例';
-                return `${column.index}. ${escapeHtml(column.header || '未命名列')}：${escapeHtml(samples)}`;
-            }).join('<br>');
             promotionColumnMapping.classList.add('active');
         }
 
@@ -1051,8 +1026,7 @@
                     task_id: selectedPromotionTaskId,
                     column_mapping: {
                         sku_col: promotionSkuColumn.value,
-                        code_col: promotionCodeColumn.value,
-                        product_name_col: promotionProductNameColumn.value
+                        code_col: promotionCodeColumn.value
                     }
                 })
             })

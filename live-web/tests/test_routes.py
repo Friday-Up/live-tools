@@ -117,7 +117,6 @@ class PromotionBindingRoutesTest(unittest.TestCase):
                 "task_id": preview_payload["task_id"],
                 "column_mapping": {
                     "sku_col": 2,
-                    "product_name_col": 3,
                     "code_col": 4,
                 },
             },
