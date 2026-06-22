@@ -24,6 +24,7 @@ class WindowsPackagingTest(unittest.TestCase):
 
         self.assertIn("Build Live Tools Windows", content)
         self.assertIn("Live-Tools-Web", content)
+        self.assertIn('--contents-directory "."', content)
         self.assertIn("live-web/app.py", content)
         self.assertIn("live-web/templates", content)
         self.assertIn("live-promotion-binding/assets", content)

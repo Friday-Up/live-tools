@@ -70,6 +70,7 @@ jobs:
 
           pyinstaller --noconfirm --onedir --console `
             --name "Live-Tools-Web" `
+            --contents-directory "." `
             --paths "live-promotion-binding" `
             --paths "live-sku-price-audit" `
             --collect-all playwright `
