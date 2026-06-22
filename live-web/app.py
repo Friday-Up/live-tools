@@ -45,6 +45,7 @@ if str(PRICE_AUDIT_ROOT) not in sys.path:
     sys.path.insert(0, str(PRICE_AUDIT_ROOT))
 
 from promotion_binding.service import generate_binding_files
+from promotion_binding.workbook_reader import ColumnMapping, inspect_business_workbook
 
 
 RUNTIME_RETENTION_DAYS = 7
@@ -69,6 +70,7 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
 
     app = Flask(__name__, template_folder=str(LIVE_WEB_ROOT / "templates"))
     app.config["PROMOTION_RESULTS"] = {}
+    app.config["PROMOTION_UPLOADS"] = {}
     app.config["RUNTIME_DIR"] = runtime_dir
     app.config["RUNTIME_RETENTION_DAYS"] = RUNTIME_RETENTION_DAYS
     app.config["RUNTIME_CLEANUP_ROOTS"] = cleanup_roots
@@ -173,8 +175,8 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
         threading.Thread(target=shutdown_server, daemon=True).start()
         return jsonify({"success": True})
 
-    @app.route("/api/promotion-binding/generate", methods=["POST"])
-    def generate_promotion_binding():
+    @app.route("/api/promotion-binding/preview", methods=["POST"])
+    def preview_promotion_binding():
         _cleanup_runtime_for_app(app)
         uploaded = request.files.get("file")
         if uploaded is None or not uploaded.filename:
@@ -189,10 +191,55 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
         uploaded.save(input_path)
 
         try:
+            inspection = inspect_business_workbook(input_path)
+        except Exception as exc:
+            return _json_error(str(exc), status_code=500)
+
+        app.config["PROMOTION_UPLOADS"][task_id] = input_path
+        return jsonify(
+            {
+                "success": True,
+                "task_id": task_id,
+                "filename": filename,
+                "path": str(input_path),
+                **_inspection_payload(inspection),
+            }
+        )
+
+    @app.route("/api/promotion-binding/generate", methods=["POST"])
+    def generate_promotion_binding():
+        _cleanup_runtime_for_app(app)
+        column_mapping = None
+
+        if request.is_json:
+            data = request.get_json(silent=True) or {}
+            task_id = str(data.get("task_id") or "")
+            input_path = app.config["PROMOTION_UPLOADS"].get(task_id)
+            if not input_path or not Path(input_path).exists():
+                return _json_error("文件不存在，请重新上传", status_code=404)
+            try:
+                column_mapping = _parse_column_mapping(data.get("column_mapping") or {})
+            except ValueError as exc:
+                return _json_error(str(exc))
+        else:
+            uploaded = request.files.get("file")
+            if uploaded is None or not uploaded.filename:
+                return _json_error("未选择文件")
+
+            if not uploaded.filename.lower().endswith(".xlsx"):
+                return _json_error("仅支持 .xlsx 文件")
+
+            task_id = uuid.uuid4().hex
+            filename = _safe_xlsx_name(uploaded.filename, task_id)
+            input_path = app.config["PROMOTION_INPUT_DIR"] / filename
+            uploaded.save(input_path)
+
+        try:
             result = generate_binding_files(
                 business_file=input_path,
                 template_file=app.config["PROMOTION_TEMPLATE_FILE"],
                 output_dir=app.config["PROMOTION_OUTPUT_DIR"] / task_id,
+                column_mapping=column_mapping,
             )
         except Exception as exc:
             return _json_error(str(exc), status_code=500)
@@ -526,6 +573,51 @@ def _preserve_safe_filename(filename: str) -> str:
     if not name.lower().endswith(".xlsx"):
         name = f"{name}.xlsx"
     return name
+
+
+def _inspection_payload(inspection):
+    return {
+        "columns": [
+            {
+                "index": column.index,
+                "header": column.header,
+                "sample_values": column.sample_values,
+            }
+            for column in inspection.columns
+        ],
+        "suggested_mapping": _mapping_payload(inspection.suggested_mapping),
+    }
+
+
+def _mapping_payload(mapping: ColumnMapping):
+    return {
+        "sku_col": mapping.sku_col,
+        "code_col": mapping.code_col,
+        "product_name_col": mapping.product_name_col,
+    }
+
+
+def _parse_column_mapping(raw_mapping) -> ColumnMapping:
+    sku_col = _parse_column_value(raw_mapping.get("sku_col"))
+    code_col = _parse_column_value(raw_mapping.get("code_col"))
+    product_name_col = _parse_column_value(raw_mapping.get("product_name_col"))
+    if sku_col is None:
+        raise ValueError("请选择 SKU 列")
+    if code_col is None:
+        raise ValueError("请选择券码/促销编码列")
+    return ColumnMapping(sku_col=sku_col, code_col=code_col, product_name_col=product_name_col)
+
+
+def _parse_column_value(value):
+    if value in (None, ""):
+        return None
+    try:
+        column_index = int(value)
+    except (TypeError, ValueError):
+        raise ValueError("列选择不是有效数字")
+    if column_index < 1:
+        raise ValueError("列选择超出表格范围")
+    return column_index
 
 
 if __name__ == "__main__":

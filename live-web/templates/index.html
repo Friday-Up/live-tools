@@ -188,6 +188,30 @@
             border-color: #4a90e2;
         }
 
+        .column-mapping {
+            display: none;
+            margin-top: 20px;
+            padding-top: 18px;
+            border-top: 1px solid #eef0f2;
+        }
+
+        .column-mapping.active { display: block; }
+
+        .mapping-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 12px;
+        }
+
+        .column-preview {
+            margin-top: 12px;
+            padding: 10px 12px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            color: #666;
+            font-size: 12px;
+        }
+
         .btn {
             display: inline-flex;
             align-items: center;
@@ -439,6 +463,7 @@
         @media (max-width: 720px) {
             .container { padding: 24px 14px; }
             .form-row { flex-direction: column; align-items: stretch; }
+            .mapping-grid { grid-template-columns: 1fr; }
             .tool-tabs { grid-template-columns: 1fr; }
             .stats { flex-wrap: wrap; }
             .btn { width: 100%; }
@@ -557,11 +582,30 @@
                 <div class="upload-area" id="promotionUploadArea">
                     <div class="upload-icon">📄</div>
                     <div class="upload-text">点击上传或拖拽文件到此处</div>
-                    <div class="upload-hint">支持 .xlsx 格式，需包含「上播·SKU ID」和「券码/价码」列</div>
+                    <div class="upload-hint">支持 .xlsx 格式，需包含 SKU 列（上播·SKU ID 或 skuID）和绑定值列（券码/价码或促销编码）</div>
                 </div>
                 <input type="file" id="promotionFileInput" accept=".xlsx" class="hidden">
                 <div class="file-list" id="promotionFileList"></div>
                 <div class="status-message" id="promotionStatusMessage"></div>
+
+                <div class="column-mapping" id="promotionColumnMapping">
+                    <div class="section-title">列映射确认</div>
+                    <div class="mapping-grid">
+                        <div class="form-group">
+                            <label class="form-label">SKU 列</label>
+                            <select class="form-input" id="promotionSkuColumn"></select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">券码/促销编码列</label>
+                            <select class="form-input" id="promotionCodeColumn"></select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">商品名称列</label>
+                            <select class="form-input" id="promotionProductNameColumn"></select>
+                        </div>
+                    </div>
+                    <div class="column-preview" id="promotionColumnPreview"></div>
+                </div>
 
                 <div style="margin-top: 20px;">
                     <div class="section-title">生成配置</div>
@@ -604,6 +648,8 @@
         let statusInterval = null;
         let lastStatus = null;
         let selectedPromotionFile = null;
+        let selectedPromotionTaskId = null;
+        let promotionColumns = [];
 
         const uploadArea = document.getElementById('uploadArea');
         const fileInput = document.getElementById('fileInput');
@@ -616,6 +662,11 @@
         const promotionFileList = document.getElementById('promotionFileList');
         const promotionStatusMessage = document.getElementById('promotionStatusMessage');
         const promotionGenerateBtn = document.getElementById('promotionGenerateBtn');
+        const promotionColumnMapping = document.getElementById('promotionColumnMapping');
+        const promotionSkuColumn = document.getElementById('promotionSkuColumn');
+        const promotionCodeColumn = document.getElementById('promotionCodeColumn');
+        const promotionProductNameColumn = document.getElementById('promotionProductNameColumn');
+        const promotionColumnPreview = document.getElementById('promotionColumnPreview');
 
         document.querySelectorAll('.tool-tab').forEach((button) => {
             button.addEventListener('click', () => {
@@ -696,9 +747,67 @@
                 return;
             }
             selectedPromotionFile = file;
-            renderFile(promotionFileList, promotionUploadArea, file.name, '待生成');
-            promotionGenerateBtn.disabled = false;
-            clearMessage(promotionStatusMessage);
+            selectedPromotionTaskId = null;
+            promotionColumns = [];
+            hidePromotionColumnMapping();
+            renderFile(promotionFileList, promotionUploadArea, file.name, '正在解析表头');
+            promotionGenerateBtn.disabled = true;
+            showMessage(promotionStatusMessage, '正在读取表头...', 'info');
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            fetch('/api/promotion-binding/preview', { method: 'POST', body: formData })
+                .then((res) => res.json())
+                .then((data) => {
+                    if (!data.success) throw new Error(data.error || '读取表头失败');
+                    selectedPromotionTaskId = data.task_id;
+                    promotionColumns = data.columns || [];
+                    renderPromotionColumnOptions(promotionColumns, data.suggested_mapping || {});
+                    renderFile(promotionFileList, promotionUploadArea, data.filename || file.name, '已解析表头');
+                    promotionGenerateBtn.disabled = false;
+                    clearMessage(promotionStatusMessage);
+                })
+                .catch((error) => {
+                    selectedPromotionTaskId = null;
+                    promotionGenerateBtn.disabled = true;
+                    showMessage(promotionStatusMessage, error.message, 'error');
+                });
+        }
+
+        function hidePromotionColumnMapping() {
+            promotionColumnMapping.classList.remove('active');
+            promotionSkuColumn.innerHTML = '';
+            promotionCodeColumn.innerHTML = '';
+            promotionProductNameColumn.innerHTML = '';
+            promotionColumnPreview.innerHTML = '';
+        }
+
+        function renderPromotionColumnOptions(columns, suggestedMapping) {
+            promotionSkuColumn.innerHTML = buildColumnOptions(columns, suggestedMapping.sku_col, false);
+            promotionCodeColumn.innerHTML = buildColumnOptions(columns, suggestedMapping.code_col, false);
+            promotionProductNameColumn.innerHTML = buildColumnOptions(columns, suggestedMapping.product_name_col, true);
+            promotionColumnPreview.innerHTML = columns.map((column) => {
+                const samples = column.sample_values && column.sample_values.length > 0
+                    ? column.sample_values.join(' / ')
+                    : '无样例';
+                return `${column.index}. ${escapeHtml(column.header || '未命名列')}：${escapeHtml(samples)}`;
+            }).join('<br>');
+            promotionColumnMapping.classList.add('active');
+        }
+
+        function buildColumnOptions(columns, selectedIndex, allowEmpty) {
+            const options = [];
+            options.push(`<option value="">${allowEmpty ? '不使用' : '请选择'}</option>`);
+            columns.forEach((column) => {
+                const samples = column.sample_values && column.sample_values.length > 0
+                    ? `｜${column.sample_values.slice(0, 2).join(' / ')}`
+                    : '';
+                const label = `${column.index}. ${column.header || '未命名列'}${samples}`;
+                const selected = Number(selectedIndex) === Number(column.index) ? ' selected' : '';
+                options.push(`<option value="${column.index}"${selected}>${escapeHtml(label)}</option>`);
+            });
+            return options.join('');
         }
 
         function renderFile(targetList, targetUploadArea, name, status) {
@@ -720,8 +829,12 @@
                     fileInput.value = '';
                 } else {
                     selectedPromotionFile = null;
+                    selectedPromotionTaskId = null;
+                    promotionColumns = [];
                     promotionGenerateBtn.disabled = true;
                     promotionFileInput.value = '';
+                    hidePromotionColumnMapping();
+                    document.getElementById('promotionResultCard').classList.remove('active');
                 }
                 targetList.innerHTML = '';
                 targetUploadArea.style.display = 'block';
@@ -914,19 +1027,35 @@
         });
 
         promotionGenerateBtn.addEventListener('click', () => {
-            if (!selectedPromotionFile) {
+            if (!selectedPromotionTaskId) {
                 alert('请先选择文件');
                 return;
             }
-
-            const formData = new FormData();
-            formData.append('file', selectedPromotionFile);
+            if (!promotionSkuColumn.value) {
+                showMessage(promotionStatusMessage, '请选择 SKU 列', 'error');
+                return;
+            }
+            if (!promotionCodeColumn.value) {
+                showMessage(promotionStatusMessage, '请选择券码/促销编码列', 'error');
+                return;
+            }
 
             promotionGenerateBtn.disabled = true;
             showMessage(promotionStatusMessage, '生成中...', 'info');
             document.getElementById('promotionResultCard').classList.remove('active');
 
-            fetch('/api/promotion-binding/generate', { method: 'POST', body: formData })
+            fetch('/api/promotion-binding/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    task_id: selectedPromotionTaskId,
+                    column_mapping: {
+                        sku_col: promotionSkuColumn.value,
+                        code_col: promotionCodeColumn.value,
+                        product_name_col: promotionProductNameColumn.value
+                    }
+                })
+            })
                 .then((res) => res.json())
                 .then((data) => {
                     if (!data.success) throw new Error(data.error || '生成失败');

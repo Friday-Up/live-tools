@@ -75,6 +75,60 @@ class PromotionBindingRoutesTest(unittest.TestCase):
         template_response.close()
         report_response.close()
 
+    def test_preview_promotion_binding_columns(self):
+        app = create_app(base_dir=Path(tempfile.mkdtemp()))
+        client = app.test_client()
+
+        response = client.post(
+            "/api/promotion-binding/preview",
+            data={"file": (io.BytesIO(self._business_workbook_bytes()), "业务提报.xlsx")},
+            content_type="multipart/form-data",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["success"])
+        self.assertTrue(payload["task_id"])
+        self.assertEqual(payload["suggested_mapping"]["sku_col"], 1)
+        self.assertEqual(payload["suggested_mapping"]["product_name_col"], 2)
+        self.assertEqual(payload["suggested_mapping"]["code_col"], 3)
+        self.assertEqual(payload["columns"][0]["header"], "skuID")
+        self.assertEqual(payload["columns"][0]["sample_values"], ["1001", "1002"])
+        self.assertTrue(Path(payload["path"]).exists())
+
+    def test_generate_promotion_binding_files_with_selected_columns(self):
+        base_dir = Path(tempfile.mkdtemp())
+        app = create_app(base_dir=base_dir)
+        client = app.test_client()
+
+        preview_response = client.post(
+            "/api/promotion-binding/preview",
+            data={"file": (io.BytesIO(self._manual_mapping_workbook_bytes()), "业务提报.xlsx")},
+            content_type="multipart/form-data",
+        )
+        preview_payload = preview_response.get_json()
+        self.assertTrue(preview_payload["success"])
+        self.assertIsNone(preview_payload["suggested_mapping"]["sku_col"])
+        self.assertIsNone(preview_payload["suggested_mapping"]["code_col"])
+
+        response = client.post(
+            "/api/promotion-binding/generate",
+            json={
+                "task_id": preview_payload["task_id"],
+                "column_mapping": {
+                    "sku_col": 2,
+                    "product_name_col": 3,
+                    "code_col": 4,
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["summary"]["success_count"], 2)
+        self.assertIn(payload["task_id"], app.config["PROMOTION_RESULTS"])
+
     def test_create_app_cleans_old_runtime_and_legacy_files(self):
         base_dir = Path(tempfile.mkdtemp())
         old_runtime_file = base_dir / "runtime" / "input" / "promotion-binding" / "old.xlsx"
@@ -142,9 +196,25 @@ class PromotionBindingRoutesTest(unittest.TestCase):
     def _business_workbook_bytes(self):
         wb = Workbook()
         ws = wb.active
-        ws.append(["上播·SKU ID*【必填】", "券码/价码 达人id：22766602"])
-        ws.append(["1001", "vender_BA#a9d94c41368e441094132b17a3b40fd6"])
-        ws.append(["1002", "381421541016"])
+        ws.append(
+            [
+                "skuID",
+                "商品名称",
+                "促销编码 专享券填专享券key码 专享价填ERP促销编码 （达人id：22766602）",
+            ]
+        )
+        ws.append(["1001", "A 商品", "vender_BA#a9d94c41368e441094132b17a3b40fd6"])
+        ws.append(["1002", "B 商品", "381421541016"])
+        output = io.BytesIO()
+        wb.save(output)
+        return output.getvalue()
+
+    def _manual_mapping_workbook_bytes(self):
+        wb = Workbook()
+        ws = wb.active
+        ws.append(["排期", "商品编号", "标题", "权益内容"])
+        ws.append(["2026-06-18", "1001", "A 商品", "vender_BA#a9d94c41368e441094132b17a3b40fd6"])
+        ws.append(["2026-06-19", "1002", "B 商品", "381421541016"])
         output = io.BytesIO()
         wb.save(output)
         return output.getvalue()

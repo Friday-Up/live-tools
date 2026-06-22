@@ -10,7 +10,7 @@ from pathlib import Path
 from promotion_binding.code_parser import IssueType, parse_code_cell
 from promotion_binding.report_writer import IssueRecord, write_report
 from promotion_binding.template_writer import BindingRecord, BindingType, write_upload_template
-from promotion_binding.workbook_reader import BusinessRow, read_business_rows
+from promotion_binding.workbook_reader import BusinessRow, ColumnMapping, read_business_rows
 
 
 @dataclass(frozen=True)
@@ -30,12 +30,13 @@ def generate_binding_files(
     template_file: str | Path,
     output_dir: str | Path,
     generated_at: datetime | None = None,
+    column_mapping: ColumnMapping | None = None,
 ) -> GenerationResult:
     business_file = Path(business_file)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    rows = read_business_rows(business_file)
+    rows = read_business_rows(business_file, column_mapping=column_mapping)
     candidates: list[BindingRecord] = []
     issue_records: list[IssueRecord] = []
     skipped_empty_count = 0
