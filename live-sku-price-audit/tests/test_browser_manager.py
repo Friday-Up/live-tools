@@ -212,7 +212,7 @@ class BrowserManagerLoginTests(unittest.TestCase):
         self.assertEqual(len(context.init_scripts), 1)
         self.assertIn("document.documentElement.style.zoom = '75%'", context.init_scripts[0])
 
-    def test_start_passes_headless_flag_to_chromium_launch(self):
+    def test_start_passes_headless_flag_and_performance_args_to_chromium_launch(self):
         fake_playwright = FakePlaywright()
 
         with patch("utils.browser_manager.sync_playwright", return_value=fake_playwright), \
@@ -220,7 +220,11 @@ class BrowserManagerLoginTests(unittest.TestCase):
             manager = BrowserManager(headless=True)
             manager.start()
 
-        self.assertEqual(fake_playwright.chromium.launch_calls, [{"headless": True}])
+        self.assertEqual(len(fake_playwright.chromium.launch_calls), 1)
+        call = fake_playwright.chromium.launch_calls[0]
+        self.assertTrue(call.get("headless"))
+        self.assertIn("args", call)
+        self.assertIn("--disable-background-timer-throttling", call["args"])
 
     def test_start_can_skip_fast_resource_blocking_for_login_browser(self):
         fake_playwright = FakePlaywright()

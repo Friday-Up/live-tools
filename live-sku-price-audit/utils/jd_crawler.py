@@ -28,11 +28,11 @@ SPEC_ITEM_SELECTORS = [
 ]
 
 CLICK_TIMEOUT_MS = 2500
-FAST_CLICK_TIMEOUT_MS = 800
+FAST_CLICK_TIMEOUT_MS = 500
 PRICE_SETTLE_MIN_WAIT_MS = 2600
 PRICE_STABLE_MS = 900
 PRICE_CHANGE_TIMEOUT_MS = 6000
-FAST_PRICE_RESPONSE_TIMEOUT_MS = 3500
+FAST_PRICE_RESPONSE_TIMEOUT_MS = 2000
 WARE_RESPONSE_POLL_MS = 50
 ELEMENT_TEXT_TIMEOUT_MS = 700
 PAGE_ZOOM = "75%"
@@ -687,7 +687,7 @@ def click_item_by_text_fast(page, get_items_func, item_text, timeout=FAST_CLICK_
     if is_element_selected(element):
         return True
 
-    return click_element_safely(page, element, timeout=timeout)
+    return click_element_fast(page, element, timeout=timeout)
 
 
 def selected_item_text(items):
@@ -724,6 +724,12 @@ def parse_ware_business_price(response):
 
 
 def click_and_collect_ware_business_price(page, click_action, response_timeout):
+    """
+    点击后收集京东 wareBusiness 响应并解析价格。
+
+    使用 Python Queue 的阻塞 get 代替 busy-poll，避免在 Windows 上
+    每 50ms 调用一次 page.wait_for_timeout 带来的事件循环开销。
+    """
     responses = queue.Queue()
 
     def on_response(response):
@@ -738,21 +744,18 @@ def click_and_collect_ware_business_price(page, click_action, response_timeout):
 
         deadline = time.monotonic() + (response_timeout / 1000)
         while True:
-            while True:
-                try:
-                    response = responses.get_nowait()
-                except queue.Empty:
-                    break
-
-                price = parse_ware_business_price(response)
-                if price is not None:
-                    return True, price
-
-            remaining_ms = int((deadline - time.monotonic()) * 1000)
-            if remaining_ms <= 0:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
                 return True, None
 
-            wait_page_event_tick(page, min(WARE_RESPONSE_POLL_MS, remaining_ms))
+            try:
+                response = responses.get(timeout=min(remaining, 0.1))
+            except queue.Empty:
+                continue
+
+            price = parse_ware_business_price(response)
+            if price is not None:
+                return True, price
     finally:
         remove_response_listener(page, on_response)
 
@@ -810,12 +813,27 @@ def select_item_and_read_price_fast(page, get_items_func, item_text, price_type=
     return True, safe_extract_price(page, price_type), "dom-fallback"
 
 
+def click_element_fast(page, element, timeout=FAST_CLICK_TIMEOUT_MS):
+    """
+    快扫模式下的轻量点击：只滚动到可视区并点击，不做状态等待和鼠标移动。
+    """
+    try:
+        element.scroll_into_view_if_needed(timeout=timeout)
+        element.click(timeout=timeout)
+        return True
+    except Exception:
+        # 普通点击被拦截时，降级为 JS 点击
+        try:
+            element.evaluate('el => el.click()', timeout=timeout)
+            return True
+        except Exception:
+            return False
+
+
 def click_element_safely(page, element, timeout=CLICK_TIMEOUT_MS):
     """
-    安全点击元素，处理可能的拦截问题
+    安全点击元素，处理可能的拦截问题（慢路径 / 截图路径使用）。
     """
-    move_mouse_to_safe_area(page)
-
     for state in ("visible", "stable", "enabled"):
         try:
             element.wait_for_element_state(state, timeout=timeout)
@@ -952,17 +970,17 @@ def _select_low_price_detail_for_screenshot(page, result):
 
     if not _is_default_series_label(series_name):
         previous_price_text = get_price_text(page)
-        if click_item_by_text(page, get_series_tabs, series_name):
-            wait_for_spec_items_ready(page, timeout=1500)
-            wait_for_price_change(page, previous_price_text)
+        if click_item_by_text_fast(page, get_series_tabs, series_name):
+            wait_for_spec_items_ready(page, timeout=800)
+            wait_for_price_change(page, previous_price_text, timeout=2000)
         else:
             print(f"  ⚠️ 补截图时未能选中系列: {series_name}")
             return False
 
     if not _is_default_spec_label(spec_name):
         previous_price_text = get_price_text(page)
-        if click_item_by_text(page, get_spec_items, spec_name):
-            wait_for_price_change(page, previous_price_text)
+        if click_item_by_text_fast(page, get_spec_items, spec_name):
+            wait_for_price_change(page, previous_price_text, timeout=2000)
         else:
             print(f"  ⚠️ 补截图时未能选中规格: {spec_name}")
             return False
