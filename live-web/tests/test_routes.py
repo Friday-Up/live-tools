@@ -24,6 +24,12 @@ class PromotionBindingRoutesTest(unittest.TestCase):
         web_root.mkdir()
         self.assertEqual(resolve_web_root(source_root, source_app), web_root)
 
+    def test_web_entry_forces_utf8_stdio_for_windows_log_redirection(self):
+        source = Path("app.py").read_text(encoding="utf-8")
+
+        self.assertIn('sys.stdout.reconfigure(encoding="utf-8", errors="replace")', source)
+        self.assertIn('sys.stderr.reconfigure(encoding="utf-8", errors="replace")', source)
+
     def test_generate_promotion_binding_files(self):
         base_dir = Path(tempfile.mkdtemp())
         app = create_app(base_dir=base_dir)

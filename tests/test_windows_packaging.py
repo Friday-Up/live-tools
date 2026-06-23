@@ -13,6 +13,8 @@ class WindowsPackagingTest(unittest.TestCase):
         content = launcher.read_text(encoding="utf-8")
         self.assertIn("Live-Tools-Web.exe", content)
         self.assertIn("live-web", content)
+        self.assertIn('set "PYTHONUTF8=1"', content)
+        self.assertIn('set "PYTHONIOENCODING=utf-8"', content)
         self.assertNotIn("启动测价工具", content)
         self.assertNotIn("SKU-Price-Audit", content)
 

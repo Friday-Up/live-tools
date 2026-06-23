@@ -10,6 +10,11 @@ import threading
 import time
 import uuid
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 from flask import Flask, jsonify, render_template, request, send_file, url_for
 from werkzeug.utils import secure_filename
 

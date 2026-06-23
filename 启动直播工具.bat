@@ -1,6 +1,8 @@
 @echo off
 setlocal enabledelayedexpansion
 chcp 65001 >nul 2>&1
+set "PYTHONUTF8=1"
+set "PYTHONIOENCODING=utf-8"
 
 set "SCRIPT_DIR=%~dp0"
 cd /d "%SCRIPT_DIR%" || exit /b 1
