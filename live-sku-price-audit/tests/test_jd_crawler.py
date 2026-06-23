@@ -466,14 +466,14 @@ class JdCrawlerWaitTests(unittest.TestCase):
             FakeResponse({"price": {"p": "52.89"}}),
         ])
 
-        def click_and_emit(page, get_items_func, item_text):
+        def click_and_emit(page, element, timeout=None):
             page.emit_responses()
             return True
 
         with patch("utils.jd_crawler.find_item_by_text", return_value=item), \
              patch("utils.jd_crawler.is_element_selected", return_value=False), \
              patch("utils.jd_crawler.get_price_text", return_value="¥99.00"), \
-             patch("utils.jd_crawler.click_item_by_text", side_effect=click_and_emit), \
+             patch("utils.jd_crawler.click_element_safely", side_effect=click_and_emit), \
              patch("utils.jd_crawler.wait_for_price_change", return_value=True), \
              patch("utils.jd_crawler.safe_extract_price", return_value=99.0):
             success, price, source = jd_crawler.select_item_and_read_price_fast(
@@ -486,6 +486,35 @@ class JdCrawlerWaitTests(unittest.TestCase):
         self.assertTrue(success)
         self.assertEqual(price, 52.89)
         self.assertEqual(source, "ware-business")
+
+    def test_fast_read_does_not_wait_for_selected_state_after_click(self):
+        from utils import jd_crawler
+
+        item = (0, FakeSeriesElement("规格 A", ""), "规格 A")
+        page = FakeNetworkPage([
+            FakeResponse({"price": {"p": "25.00"}}),
+        ])
+
+        def click_and_emit(page, element, timeout=None):
+            page.emit_responses()
+            return True
+
+        with patch("utils.jd_crawler.find_item_by_text", return_value=item), \
+             patch("utils.jd_crawler.is_element_selected", return_value=False), \
+             patch("utils.jd_crawler.get_price_text", return_value="¥99.00"), \
+             patch("utils.jd_crawler.click_element_safely", side_effect=click_and_emit), \
+             patch("utils.jd_crawler.wait_for_item_selected") as wait_selected:
+            success, price, source = jd_crawler.select_item_and_read_price_fast(
+                page,
+                lambda page: [item],
+                "规格 A",
+                response_timeout=200,
+            )
+
+        self.assertTrue(success)
+        self.assertEqual(price, 25.0)
+        self.assertEqual(source, "ware-business")
+        wait_selected.assert_not_called()
 
     def test_check_product_unavailable_detects_off_shelf_panel_before_recommendation_price(self):
         page = FakeTextPage(

@@ -28,6 +28,7 @@ SPEC_ITEM_SELECTORS = [
 ]
 
 CLICK_TIMEOUT_MS = 2500
+FAST_CLICK_TIMEOUT_MS = 800
 PRICE_SETTLE_MIN_WAIT_MS = 2600
 PRICE_STABLE_MS = 900
 PRICE_CHANGE_TIMEOUT_MS = 6000
@@ -671,6 +672,24 @@ def click_item_by_text(page, get_items_func, item_text, timeout=CLICK_TIMEOUT_MS
     return wait_for_item_selected(page, get_items_func, item_text, timeout=timeout)
 
 
+def click_item_by_text_fast(page, get_items_func, item_text, timeout=FAST_CLICK_TIMEOUT_MS):
+    """
+    快扫模式只负责发出点击，不等待 selected 状态。
+
+    Windows 上京东规格项 selected 状态更新慢或类名不稳定时，等待 selected
+    会把每个规格拖慢数秒；快扫价格以 wareBusiness 响应为准。
+    """
+    item = find_item_by_text(get_items_func(page), item_text)
+    if not item:
+        return False
+
+    _, element, _ = item
+    if is_element_selected(element):
+        return True
+
+    return click_element_safely(page, element, timeout=timeout)
+
+
 def selected_item_text(items):
     for _, element, text in items:
         if is_element_selected(element):
@@ -763,7 +782,7 @@ def select_item_and_read_price_fast(page, get_items_func, item_text, price_type=
     if hasattr(page, "on"):
         clicked, price = click_and_collect_ware_business_price(
             page,
-            lambda: click_item_by_text(page, get_items_func, item_text),
+            lambda: click_item_by_text_fast(page, get_items_func, item_text),
             response_timeout,
         )
         if not clicked:
@@ -773,7 +792,7 @@ def select_item_and_read_price_fast(page, get_items_func, item_text, price_type=
     else:
         try:
             with page.expect_response(is_ware_business_response, timeout=response_timeout) as response_info:
-                clicked = click_item_by_text(page, get_items_func, item_text)
+                clicked = click_item_by_text_fast(page, get_items_func, item_text)
 
             if not clicked:
                 return False, None, "click_failed"
@@ -783,7 +802,7 @@ def select_item_and_read_price_fast(page, get_items_func, item_text, price_type=
                 return True, price, "ware-business"
         except Exception:
             if not clicked:
-                clicked = click_item_by_text(page, get_items_func, item_text)
+                clicked = click_item_by_text_fast(page, get_items_func, item_text)
             if not clicked:
                 return False, None, "click_failed"
 
