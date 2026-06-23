@@ -62,8 +62,22 @@ class AppApiTests(unittest.TestCase):
         app_source = Path("app.py").read_text(encoding="utf-8")
         main_source = Path("main.py").read_text(encoding="utf-8")
 
-        self.assertIn("worker_browser = BrowserManager(CONFIG['auth_file'], headless=True)", app_source)
+        worker_factory_source = app_source[app_source.index("def create_worker_page"):app_source.index("def on_result")]
+        self.assertIn("headless=True", worker_factory_source)
         self.assertIn("worker_browser = BrowserManager(CONFIG['auth_file'], headless=True)", main_source)
+
+    def test_price_audit_scan_workers_block_images_but_screenshot_workers_keep_images(self):
+        app_source = Path("app.py").read_text(encoding="utf-8")
+
+        self.assertIn("block_images=block_images", app_source)
+        self.assertIn(
+            "page_factory=lambda worker_index: create_worker_page(worker_index, block_images=True)",
+            app_source,
+        )
+        self.assertIn(
+            "page_factory=lambda worker_index: create_worker_page(worker_index, block_images=False)",
+            app_source,
+        )
 
     def test_price_audit_closes_login_browser_and_returns_to_headless_after_login(self):
         app_source = Path("app.py").read_text(encoding="utf-8")

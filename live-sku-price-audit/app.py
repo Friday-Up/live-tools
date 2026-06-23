@@ -339,8 +339,8 @@ def run_audit_task(input_file, threshold_price):
                 should_stop=stop_flag.is_set
             )
 
-        def create_worker_page(worker_index):
-            worker_browser = BrowserManager(CONFIG['auth_file'], headless=True)
+        def create_worker_page(worker_index, block_images=False):
+            worker_browser = BrowserManager(CONFIG['auth_file'], headless=True, block_images=block_images)
             try:
                 worker_page = worker_browser.start()
             except Exception:
@@ -415,7 +415,7 @@ def run_audit_task(input_file, threshold_price):
             crawl_func=crawl_one,
             recover_login_func=wait_for_web_login,
             stop_event=stop_flag,
-            page_factory=create_worker_page,
+            page_factory=lambda worker_index: create_worker_page(worker_index, block_images=True),
             worker_count=CONCURRENT_WORKERS,
             on_item_start=on_item_start,
             on_result=on_result,
@@ -430,7 +430,7 @@ def run_audit_task(input_file, threshold_price):
                 results=results,
                 screenshot_dir=CONFIG['screenshot_dir'],
                 threshold_price=threshold_price,
-                page_factory=create_worker_page,
+                page_factory=lambda worker_index: create_worker_page(worker_index, block_images=False),
                 worker_count=CONCURRENT_WORKERS,
                 should_stop=stop_flag.is_set,
             )

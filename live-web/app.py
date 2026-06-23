@@ -453,8 +453,12 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                     should_stop=stop_flag.is_set,
                 )
 
-            def create_worker_page(worker_index):
-                worker_browser = BrowserManager(str(app.config["PRICE_AUTH_FILE"]), headless=True)
+            def create_worker_page(worker_index, block_images=False):
+                worker_browser = BrowserManager(
+                    str(app.config["PRICE_AUTH_FILE"]),
+                    headless=True,
+                    block_images=block_images,
+                )
                 try:
                     worker_page = worker_browser.start()
                 except Exception:
@@ -525,7 +529,7 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                 crawl_func=crawl_one,
                 recover_login_func=lambda: wait_for_web_login(browser),
                 stop_event=stop_flag,
-                page_factory=create_worker_page,
+                page_factory=lambda worker_index: create_worker_page(worker_index, block_images=True),
                 worker_count=PRICE_AUDIT_CONCURRENT_WORKERS,
                 on_item_start=on_item_start,
                 on_result=on_result,
@@ -538,7 +542,7 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                     results=batch.results,
                     screenshot_dir=str(app.config["PRICE_SCREENSHOT_DIR"]),
                     threshold_price=threshold_price,
-                    page_factory=create_worker_page,
+                    page_factory=lambda worker_index: create_worker_page(worker_index, block_images=False),
                     worker_count=PRICE_AUDIT_CONCURRENT_WORKERS,
                     should_stop=stop_flag.is_set,
                 )

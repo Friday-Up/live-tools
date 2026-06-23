@@ -177,6 +177,20 @@ class BrowserManagerLoginTests(unittest.TestCase):
         self.assertFalse(should_block_request(FakeRequest("image", "https://img10.360buyimg.com/item/a.jpg")))
         self.assertFalse(should_block_request(FakeRequest("script", "https://item.jd.com/item.js")))
 
+    def test_fast_resource_blocking_can_skip_images_for_scan_workers(self):
+        self.assertTrue(
+            should_block_request(
+                FakeRequest("image", "https://img10.360buyimg.com/item/a.jpg"),
+                block_images=True,
+            )
+        )
+        self.assertFalse(
+            should_block_request(
+                FakeRequest("xhr", "https://item.jd.com/functionId=pc_detailpage_wareBusiness"),
+                block_images=True,
+            )
+        )
+
     def test_enable_fast_resource_blocking_registers_context_route(self):
         manager = BrowserManager()
         context = FakeContext()

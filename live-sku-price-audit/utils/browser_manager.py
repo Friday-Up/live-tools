@@ -26,19 +26,22 @@ BLOCKED_URL_KEYWORDS = (
 )
 
 
-def should_block_request(request):
+def should_block_request(request, block_images=False):
     resource_type = getattr(request, "resource_type", "")
     url = getattr(request, "url", "")
+    if block_images and resource_type == "image":
+        return True
     if resource_type in BLOCKED_RESOURCE_TYPES:
         return True
     return any(keyword in url for keyword in BLOCKED_URL_KEYWORDS)
 
 
 class BrowserManager:
-    def __init__(self, auth_file=AUTH_FILE, headless=False, block_resources=True):
+    def __init__(self, auth_file=AUTH_FILE, headless=False, block_resources=True, block_images=False):
         self.auth_file = auth_file
         self.headless = headless
         self.block_resources = block_resources
+        self.block_images = block_images
         self.playwright = None
         self.browser = None
         self.context = None
@@ -111,13 +114,13 @@ class BrowserManager:
 
     def enable_fast_resource_blocking(self):
         """
-        拦截字体、视频和埋点请求，保留商品图片以保证低价截图可读。
+        拦截字体、视频和埋点请求；扫描 worker 可额外拦截图片，截图 worker 保留图片。
         """
         if not self.context:
             raise RuntimeError("浏览器上下文未启动")
 
         def route_handler(route):
-            if should_block_request(route.request):
+            if should_block_request(route.request, block_images=self.block_images):
                 route.abort()
             else:
                 route.continue_()
