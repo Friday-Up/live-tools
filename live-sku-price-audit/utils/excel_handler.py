@@ -109,7 +109,7 @@ def write_results(file_path, results, threshold_price, output_dir='output',
         if not row_index:
             continue
 
-        if result['status'] == 'success':
+        if result['status'] in ('success', 'partial'):
             # 写入价格
             ws.cell(row=row_index, column=price_col, value=result['price'])
 
@@ -127,8 +127,11 @@ def write_results(file_path, results, threshold_price, output_dir='output',
                 except Exception as e:
                     print(f"  ⚠️ 嵌入图片失败: {e}")
 
-            # 标记不合格
-            if result['price'] is not None and result['price'] < threshold_price:
+            # 标记不合格或需人工复核
+            if result['status'] == 'partial':
+                ws.cell(row=row_index, column=remark_col,
+                       value=result.get('message') or "需人工复核")
+            elif result['price'] is not None and result['price'] < threshold_price:
                 ws.cell(row=row_index, column=remark_col, value="不符合上菜")
 
         elif result['status'] == 'need_login':

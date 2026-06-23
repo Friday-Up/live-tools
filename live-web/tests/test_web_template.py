@@ -30,6 +30,27 @@ class WebTemplateTest(unittest.TestCase):
         self.assertIn("progress-section", html)
         self.assertIn("log-container", html)
 
+    def test_price_audit_progress_uses_completed_count_for_concurrent_runs(self):
+        app = create_app(base_dir=Path(tempfile.mkdtemp()))
+        response = app.test_client().get("/")
+
+        self.assertEqual(response.status_code, 200)
+        html = response.data.decode("utf-8")
+        self.assertIn("const completed = Math.min(data.current || 0, data.total || 0);", html)
+        self.assertIn("(completed / data.total) * 100", html)
+        self.assertNotIn("data.current - 1", html)
+
+    def test_price_audit_result_summary_shows_failed_count(self):
+        app = create_app(base_dir=Path(tempfile.mkdtemp()))
+        response = app.test_client().get("/")
+
+        self.assertEqual(response.status_code, 200)
+        html = response.data.decode("utf-8")
+        self.assertIn('id="resultFailed"', html)
+        self.assertIn("异常数量", html)
+        self.assertIn("const failed = data.fail_count || 0;", html)
+        self.assertIn("document.getElementById('resultFailed').textContent = failed;", html)
+
 
 if __name__ == "__main__":
     unittest.main()

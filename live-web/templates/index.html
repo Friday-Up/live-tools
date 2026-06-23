@@ -552,6 +552,10 @@
                         <div class="summary-label">符合门槛</div>
                     </div>
                     <div class="summary-item">
+                        <div class="summary-value" id="resultFailed" style="color: #f39c12;">0</div>
+                        <div class="summary-label">异常数量</div>
+                    </div>
+                    <div class="summary-item">
                         <div class="summary-value" id="resultThreshold" style="color: #666;">¥0</div>
                         <div class="summary-label">价格门槛</div>
                     </div>
@@ -900,17 +904,12 @@
         });
 
         function updateUI(data) {
-            let percent;
-            if (!data.running && data.current >= data.total) {
-                percent = 100;
-            } else {
-                percent = data.total > 0 ? Math.round(((data.current - 1) / data.total) * 100) : 0;
-                percent = Math.max(0, percent);
-            }
+            const completed = Math.min(data.current || 0, data.total || 0);
+            const percent = data.total > 0 ? Math.round((completed / data.total) * 100) : 0;
             document.getElementById('progressFill').style.width = percent + '%';
             document.getElementById('progressText').textContent = data.stopping ? '正在停止...' : (data.running ? `正在处理: ${data.current_sku || '...'}` : '已完成');
             document.getElementById('progressPercent').textContent = percent + '%';
-            document.getElementById('statCurrent').textContent = `${data.current}/${data.total}`;
+            document.getElementById('statCurrent').textContent = `${completed}/${data.total}`;
             document.getElementById('statUnqualified').textContent = data.unqualified_count;
 
             const logContainer = document.getElementById('logContainer');
@@ -931,12 +930,14 @@
 
             const total = data.total || 0;
             const unqualified = data.unqualified_count || 0;
-            const passed = data.success_count ? Math.max(data.success_count - unqualified, 0) : Math.max(total - unqualified - (data.fail_count || 0), 0);
+            const failed = data.fail_count || 0;
+            const passed = Math.max((data.success_count || 0) - unqualified, 0);
             const threshold = document.getElementById('thresholdInput').value;
 
             document.getElementById('resultTotal').textContent = total;
             document.getElementById('resultUnqualified').textContent = unqualified;
             document.getElementById('resultPassed').textContent = passed;
+            document.getElementById('resultFailed').textContent = failed;
             document.getElementById('resultThreshold').textContent = '¥' + threshold;
             document.getElementById('resultCard').scrollIntoView({ behavior: 'smooth' });
         }

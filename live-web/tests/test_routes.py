@@ -192,6 +192,32 @@ class PromotionBindingRoutesTest(unittest.TestCase):
         self.assertEqual(status_response.status_code, 200)
         self.assertIn("running", status_response.get_json())
 
+    def test_price_audit_captures_low_price_screenshots_before_writing_results(self):
+        source = Path("app.py").read_text(encoding="utf-8")
+
+        self.assertIn("capture_low_price_result_screenshots_with_page_factory", source)
+        self.assertLess(
+            source.index("capture_low_price_result_screenshots_with_page_factory("),
+            source.index("write_results("),
+        )
+
+    def test_price_audit_worker_browsers_run_headless(self):
+        source = Path("app.py").read_text(encoding="utf-8")
+
+        self.assertIn('worker_browser = BrowserManager(str(app.config["PRICE_AUTH_FILE"]), headless=True)', source)
+
+    def test_price_audit_closes_login_browser_and_returns_to_headless_after_login(self):
+        source = Path("app.py").read_text(encoding="utf-8")
+
+        self.assertGreaterEqual(
+            source.count('browser = BrowserManager(str(app.config["PRICE_AUTH_FILE"]), headless=True)'),
+            2,
+        )
+        self.assertIn("登录成功后切回无头浏览器", source)
+        self.assertIn("检查无头浏览器登录状态", source)
+        self.assertIn("登录状态未能同步到无头浏览器", source)
+        self.assertIn("低价截图：应补", source)
+
     def _business_workbook_bytes(self):
         wb = Workbook()
         ws = wb.active

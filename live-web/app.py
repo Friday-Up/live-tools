@@ -49,6 +49,7 @@ from promotion_binding.workbook_reader import ColumnMapping, inspect_business_wo
 
 
 RUNTIME_RETENTION_DAYS = 7
+PRICE_AUDIT_CONCURRENT_WORKERS = 3
 
 
 def create_app(base_dir: str | Path | None = None) -> Flask:
@@ -335,10 +336,10 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
     def run_price_audit_task(input_file: Path, threshold_price: float):
         browser = None
         try:
-            from utils.audit_runner import run_sku_batch
+            from utils.audit_runner import run_sku_batch_with_page_factory
             from utils.browser_manager import BrowserManager
             from utils.excel_handler import read_sku_list, write_results
-            from utils.jd_crawler import crawl_sku
+            from utils.jd_crawler import capture_low_price_result_screenshots_with_page_factory, crawl_sku
 
             with status_lock:
                 price_status.clear()
@@ -371,28 +372,53 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                 if file_path.is_file():
                     file_path.unlink()
 
-            browser = BrowserManager(str(app.config["PRICE_AUTH_FILE"]))
+            browser = BrowserManager(str(app.config["PRICE_AUTH_FILE"]), headless=True)
             with browser_lock:
-                current_browser["browser"] = browser
+                current_browser["browser"] = [browser]
             page = browser.start()
 
             add_price_log("检查登录状态...")
             is_logged_in = browser.check_login_status()
             add_price_log(f"登录状态检查结果: {'已登录' if is_logged_in else '未登录'}")
-            if not is_logged_in and not wait_for_web_login(browser):
-                with status_lock:
-                    price_status["error"] = "登录失败，请重新运行"
-                return
+            if not is_logged_in:
+                try:
+                    browser.close(force=True)
+                except Exception:
+                    pass
+                browser = BrowserManager(str(app.config["PRICE_AUTH_FILE"]), headless=False)
+                with browser_lock:
+                    current_browser["browser"] = [browser]
+                page = browser.start()
+                if not wait_for_web_login(browser):
+                    with status_lock:
+                        price_status["error"] = "登录失败，请重新运行"
+                    return
+                try:
+                    browser.close(force=True)
+                except Exception:
+                    pass
+                add_price_log("登录成功后切回无头浏览器")
+                browser = BrowserManager(str(app.config["PRICE_AUTH_FILE"]), headless=True)
+                with browser_lock:
+                    current_browser["browser"] = [browser]
+                page = browser.start()
+                add_price_log("检查无头浏览器登录状态...")
+                if not browser.check_login_status(recheck_seconds=10):
+                    with status_lock:
+                        price_status["error"] = "登录状态未能同步到无头浏览器，请重新运行"
+                    add_price_log("登录状态未能同步到无头浏览器，请重新运行")
+                    return
+
+            add_price_log(f"启用快扫响应取价 + {PRICE_AUDIT_CONCURRENT_WORKERS} 浏览器并发")
 
             def on_item_start(i, total, row_index, sku):
                 with status_lock:
-                    price_status["current"] = i
                     price_status["current_sku"] = sku
                 add_price_log(f"[{i}/{total}] 处理 SKU: {sku}")
 
-            def crawl_one(row_index, sku):
+            def crawl_one(worker_page, row_index, sku):
                 return crawl_sku(
-                    page=page,
+                    page=worker_page,
                     sku=sku,
                     screenshot_dir=str(app.config["PRICE_SCREENSHOT_DIR"]),
                     delay_min=1,
@@ -401,9 +427,55 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                     should_stop=stop_flag.is_set,
                 )
 
+            def create_worker_page(worker_index):
+                worker_browser = BrowserManager(str(app.config["PRICE_AUTH_FILE"]), headless=True)
+                try:
+                    worker_page = worker_browser.start()
+                except Exception:
+                    worker_browser.close(force=True)
+                    raise
+                with browser_lock:
+                    browsers = current_browser.get("browser")
+                    if isinstance(browsers, list):
+                        browsers.append(worker_browser)
+
+                def cleanup_worker():
+                    try:
+                        worker_browser.close(force=True)
+                    finally:
+                        with browser_lock:
+                            browsers = current_browser.get("browser")
+                            if isinstance(browsers, list) and worker_browser in browsers:
+                                browsers.remove(worker_browser)
+
+                def recover_worker_login():
+                    login_browser = BrowserManager(str(app.config["PRICE_AUTH_FILE"]), headless=False)
+                    try:
+                        login_browser.start()
+                    except Exception:
+                        login_browser.close(force=True)
+                        raise
+                    with browser_lock:
+                        browsers = current_browser.get("browser")
+                        if isinstance(browsers, list):
+                            browsers.append(login_browser)
+                    try:
+                        return wait_for_web_login(login_browser)
+                    finally:
+                        try:
+                            login_browser.close(force=True)
+                        finally:
+                            with browser_lock:
+                                browsers = current_browser.get("browser")
+                                if isinstance(browsers, list) and login_browser in browsers:
+                                    browsers.remove(login_browser)
+
+                return worker_page, cleanup_worker, recover_worker_login
+
             def on_result(result):
                 if result["status"] == "success":
                     with status_lock:
+                        price_status["current"] += 1
                         price_status["success_count"] += 1
                     if result["price"] is not None and result["price"] < threshold_price:
                         with status_lock:
@@ -411,20 +483,48 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                         add_price_log(f"低于门槛价: ¥{result['price']}")
                     else:
                         add_price_log(f"价格: ¥{result['price']}")
+                elif result["status"] == "partial":
+                    with status_lock:
+                        price_status["current"] += 1
+                        price_status["fail_count"] += 1
+                    add_price_log(f"需人工复核: {result['message']}")
                 else:
                     with status_lock:
+                        price_status["current"] += 1
                         price_status["fail_count"] += 1
                     add_price_log(f"失败: {result.get('message', '')}")
 
-            batch = run_sku_batch(
+            batch = run_sku_batch_with_page_factory(
                 sku_data=sku_data,
                 crawl_func=crawl_one,
                 recover_login_func=lambda: wait_for_web_login(browser),
                 stop_event=stop_flag,
+                page_factory=create_worker_page,
+                worker_count=PRICE_AUDIT_CONCURRENT_WORKERS,
                 on_item_start=on_item_start,
                 on_result=on_result,
                 on_login_required=lambda row_index, sku, result: add_price_log(f"SKU {sku} 需要重新登录"),
             )
+
+            if batch.results and not batch.stopped and not batch.login_failed and not stop_flag.is_set():
+                add_price_log(f"正在为低于门槛的商品并发补充截图（{PRICE_AUDIT_CONCURRENT_WORKERS} 个窗口）...")
+                screenshot_summary = capture_low_price_result_screenshots_with_page_factory(
+                    results=batch.results,
+                    screenshot_dir=str(app.config["PRICE_SCREENSHOT_DIR"]),
+                    threshold_price=threshold_price,
+                    page_factory=create_worker_page,
+                    worker_count=PRICE_AUDIT_CONCURRENT_WORKERS,
+                    should_stop=stop_flag.is_set,
+                )
+                add_price_log(
+                    f"低价截图：应补 {screenshot_summary.total} 张，"
+                    f"成功 {screenshot_summary.captured} 张，失败 {screenshot_summary.failed} 张"
+                )
+                if screenshot_summary.failed_skus:
+                    failed_skus_text = ", ".join(screenshot_summary.failed_skus[:20])
+                    if len(screenshot_summary.failed_skus) > 20:
+                        failed_skus_text += "..."
+                    add_price_log(f"低价截图失败 SKU: {failed_skus_text}")
 
             if batch.results:
                 add_price_log("正在写入结果...")
@@ -476,10 +576,16 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
         stop_flag.set()
         login_event.set()
         with browser_lock:
-            browser = current_browser.get("browser")
-            if browser:
+            browsers = current_browser.get("browser")
+            if browsers:
                 try:
-                    browser.close(force=True)
+                    if not isinstance(browsers, list):
+                        browsers = [browsers]
+                    for browser in list(browsers):
+                        try:
+                            browser.close(force=True)
+                        except Exception:
+                            pass
                 except Exception:
                     pass
                 current_browser["browser"] = None

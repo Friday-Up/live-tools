@@ -8,11 +8,36 @@ import time
 from playwright.sync_api import sync_playwright
 
 AUTH_FILE = "jd_auth.json"
+DEFAULT_PAGE_ZOOM = "75%"
+DEFAULT_CONTEXT_OPTIONS = {
+    "viewport": {"width": 1600, "height": 1100},
+}
+
+BLOCKED_RESOURCE_TYPES = {"font", "media"}
+BLOCKED_URL_KEYWORDS = (
+    "wl.jd.com",
+    "gia.jd.com",
+    "jrad.jd.com",
+    "jzt.jd.com",
+    "uranus.jd.com",
+    "mercury.jd.com",
+    "blackhole",
+    "joya.js",
+)
+
+
+def should_block_request(request):
+    resource_type = getattr(request, "resource_type", "")
+    url = getattr(request, "url", "")
+    if resource_type in BLOCKED_RESOURCE_TYPES:
+        return True
+    return any(keyword in url for keyword in BLOCKED_URL_KEYWORDS)
 
 
 class BrowserManager:
-    def __init__(self, auth_file=AUTH_FILE):
+    def __init__(self, auth_file=AUTH_FILE, headless=False):
         self.auth_file = auth_file
+        self.headless = headless
         self.playwright = None
         self.browser = None
         self.context = None
@@ -25,40 +50,95 @@ class BrowserManager:
         如果存在登录态文件则复用，否则需要人工登录
         """
         self.playwright = sync_playwright().start()
-        # 必须可视化运行，方便人工登录
-        self.browser = self.playwright.chromium.launch(headless=False)
+        # 登录窗口需要可视化；批量测价 worker 可用无头模式避免抢占桌面。
+        self.browser = self.playwright.chromium.launch(headless=self.headless)
 
         if os.path.exists(self.auth_file):
             # 复用已有登录态
             try:
-                self.context = self.browser.new_context(storage_state=self.auth_file)
+                self.context = self.browser.new_context(
+                    storage_state=self.auth_file,
+                    **DEFAULT_CONTEXT_OPTIONS,
+                )
+                self.configure_page_display()
+                self.enable_fast_resource_blocking()
                 print("✅ 已加载登录状态")
             except Exception as e:
                 print(f"⚠️ 登录状态文件不可用，将重新登录: {e}")
-                self.context = self.browser.new_context()
+                self.context = self.browser.new_context(**DEFAULT_CONTEXT_OPTIONS)
+                self.configure_page_display()
+                self.enable_fast_resource_blocking()
         else:
             # 首次运行，需要人工登录
-            self.context = self.browser.new_context()
+            self.context = self.browser.new_context(**DEFAULT_CONTEXT_OPTIONS)
+            self.configure_page_display()
+            self.enable_fast_resource_blocking()
             print("⚠️ 首次运行，请登录京东...")
 
         self.page = self.context.new_page()
         return self.page
 
-    def check_login_status(self):
+    def new_page(self):
+        """
+        从当前浏览器上下文创建一个新页面。
+        """
+        if not self.context:
+            raise RuntimeError("浏览器上下文未启动")
+        return self.context.new_page()
+
+    def configure_page_display(self):
+        """
+        商品规格较多时右侧购买栏容易挡住点击点；默认使用更大视口和 75% 页面缩放。
+        """
+        if not self.context:
+            raise RuntimeError("浏览器上下文未启动")
+
+        self.context.add_init_script(f"""
+            (() => {{
+                const applyZoom = () => {{
+                    if (document.documentElement) {{
+                        document.documentElement.style.zoom = '{DEFAULT_PAGE_ZOOM}';
+                    }}
+                }};
+                applyZoom();
+                document.addEventListener('DOMContentLoaded', applyZoom);
+            }})();
+        """)
+
+    def enable_fast_resource_blocking(self):
+        """
+        拦截字体、视频和埋点请求，保留商品图片以保证低价截图可读。
+        """
+        if not self.context:
+            raise RuntimeError("浏览器上下文未启动")
+
+        def route_handler(route):
+            if should_block_request(route.request):
+                route.abort()
+            else:
+                route.continue_()
+
+        self.context.route("**/*", route_handler)
+
+    def check_login_status(self, recheck_seconds=20, recheck_interval=2):
         """
         检查当前是否处于登录状态
         访问需要登录的购物车页面验证登录态。
         首页 DOM 和历史 cookie 都可能误判，只把能正常进入购物车作为已登录依据。
         """
         try:
-            self.page.goto("https://cart.jd.com/cart_index", wait_until="domcontentloaded", timeout=15000)
-            time.sleep(1)
+            self.page.goto("https://cart.jd.com/cart_index", wait_until="domcontentloaded", timeout=30000)
+            deadline = time.time() + recheck_seconds
 
-            if self._is_login_page():
-                return False
+            while True:
+                if not self._is_login_page():
+                    print("   可访问购物车，已登录")
+                    return True
 
-            print("   可访问购物车，已登录")
-            return True
+                if time.time() >= deadline:
+                    return False
+
+                time.sleep(recheck_interval)
 
         except Exception as e:
             print(f"⚠️ 检查登录状态出错: {e}")
@@ -110,8 +190,8 @@ class BrowserManager:
 
         self._closed = True
 
-        # 保存登录状态
-        if self.context:
+        # 常规关闭时保存登录态；强制关闭要优先释放浏览器，避免被 storage_state 卡住。
+        if self.context and not force:
             try:
                 self.context.storage_state(path=self.auth_file)
                 print(f"✅ 登录状态已保存到 {self.auth_file}")

@@ -92,6 +92,7 @@ stop_flag = threading.Event()
 # 全局浏览器实例（用于强制关闭）
 current_browser = None
 browser_lock = threading.Lock()
+CONCURRENT_WORKERS = 3
 
 
 def json_error(message, status_code=400):
@@ -151,9 +152,9 @@ def run_audit_task(input_file, threshold_price):
     try:
         # 延迟导入，避免启动时加载失败
         from utils.browser_manager import BrowserManager
-        from utils.jd_crawler import crawl_sku
+        from utils.jd_crawler import capture_low_price_result_screenshots_with_page_factory, crawl_sku
         from utils.excel_handler import read_sku_list, write_results
-        from utils.audit_runner import run_sku_batch
+        from utils.audit_runner import run_sku_batch_with_page_factory
 
         with status_lock:
             audit_status['running'] = True
@@ -194,10 +195,10 @@ def run_audit_task(input_file, threshold_price):
 
         # 2. 启动浏览器
         add_log('🌐 正在启动浏览器...')
-        browser = BrowserManager(CONFIG['auth_file'])
+        browser = BrowserManager(CONFIG['auth_file'], headless=True)
 
         with browser_lock:
-            current_browser = browser
+            current_browser = [browser]
 
         page = browser.start()
 
@@ -206,7 +207,8 @@ def run_audit_task(input_file, threshold_price):
         is_logged_in = browser.check_login_status()
         add_log(f'   登录状态检查结果: {"已登录" if is_logged_in else "未登录"}')
 
-        def wait_for_web_login():
+        def wait_for_web_login(login_browser=None):
+            login_browser = login_browser or browser
             add_log('⚠️ 登录态已失效，请登录')
             with status_lock:
                 audit_status['need_login'] = True
@@ -217,7 +219,7 @@ def run_audit_task(input_file, threshold_price):
             # 循环等待，检查是否停止
             wait_count = 0
             try:
-                browser.open_login_page()
+                login_browser.open_login_page()
             except Exception as e:
                 add_log(f'⚠️ 打开登录页失败: {e}')
 
@@ -238,7 +240,7 @@ def run_audit_task(input_file, threshold_price):
 
             # 再次检查登录状态
             add_log('🔐 重新检查登录状态...')
-            is_logged_in = browser.check_login_status()
+            is_logged_in = login_browser.check_login_status()
             add_log(f'   登录状态检查结果: {"已登录" if is_logged_in else "未登录"}')
 
             if not is_logged_in:
@@ -246,7 +248,7 @@ def run_audit_task(input_file, threshold_price):
                 return False
 
             try:
-                browser.save_auth_state()
+                login_browser.save_auth_state()
             except Exception as e:
                 add_log(f'⚠️ 保存登录状态失败: {e}')
 
@@ -254,11 +256,36 @@ def run_audit_task(input_file, threshold_price):
             return True
 
         if not is_logged_in:
-            if not wait_for_web_login():
+            try:
+                browser.close(force=True)
+            except Exception:
+                pass
+            browser = BrowserManager(CONFIG['auth_file'], headless=False)
+            with browser_lock:
+                current_browser = [browser]
+            page = browser.start()
+            if not wait_for_web_login(browser):
                 with status_lock:
                     audit_status['error'] = '登录失败，请重新运行'
                 return
+            try:
+                browser.close(force=True)
+            except Exception:
+                pass
+            add_log('✅ 登录成功后切回无头浏览器')
+            browser = BrowserManager(CONFIG['auth_file'], headless=True)
+            with browser_lock:
+                current_browser = [browser]
+            page = browser.start()
+            add_log('🔐 检查无头浏览器登录状态...')
+            if not browser.check_login_status(recheck_seconds=10):
+                with status_lock:
+                    audit_status['error'] = '登录状态未能同步到无头浏览器，请重新运行'
+                add_log('❌ 登录状态未能同步到无头浏览器，请重新运行')
+                return
         add_log('✅ 登录状态正常')
+
+        add_log(f'⚡ 启用快扫响应取价 + {CONCURRENT_WORKERS} 浏览器并发')
 
         # 4. 创建输出目录
         if os.path.exists(CONFIG['screenshot_dir']):
@@ -271,13 +298,12 @@ def run_audit_task(input_file, threshold_price):
         # 5. 批量测价
         def on_item_start(i, total, row_index, sku):
             with status_lock:
-                audit_status['current'] = i
                 audit_status['current_sku'] = sku
             add_log(f'[{i}/{len(sku_data)}] 处理 SKU: {sku}')
 
-        def crawl_one(row_index, sku):
+        def crawl_one(worker_page, row_index, sku):
             return crawl_sku(
-                page=page,
+                page=worker_page,
                 sku=sku,
                 screenshot_dir=CONFIG['screenshot_dir'],
                 delay_min=CONFIG['delay_min'],
@@ -286,9 +312,51 @@ def run_audit_task(input_file, threshold_price):
                 should_stop=stop_flag.is_set
             )
 
+        def create_worker_page(worker_index):
+            worker_browser = BrowserManager(CONFIG['auth_file'], headless=True)
+            try:
+                worker_page = worker_browser.start()
+            except Exception:
+                worker_browser.close(force=True)
+                raise
+            with browser_lock:
+                if isinstance(current_browser, list):
+                    current_browser.append(worker_browser)
+
+            def cleanup_worker():
+                try:
+                    worker_browser.close(force=True)
+                finally:
+                    with browser_lock:
+                        if isinstance(current_browser, list) and worker_browser in current_browser:
+                            current_browser.remove(worker_browser)
+
+            def recover_worker_login():
+                login_browser = BrowserManager(CONFIG['auth_file'], headless=False)
+                try:
+                    login_browser.start()
+                except Exception:
+                    login_browser.close(force=True)
+                    raise
+                with browser_lock:
+                    if isinstance(current_browser, list):
+                        current_browser.append(login_browser)
+                try:
+                    return wait_for_web_login(login_browser)
+                finally:
+                    try:
+                        login_browser.close(force=True)
+                    finally:
+                        with browser_lock:
+                            if isinstance(current_browser, list) and login_browser in current_browser:
+                                current_browser.remove(login_browser)
+
+            return worker_page, cleanup_worker, recover_worker_login
+
         def on_result(result):
             if result['status'] == 'success':
                 with status_lock:
+                    audit_status['current'] += 1
                     audit_status['success_count'] += 1
                 if result['price'] is not None and result['price'] < threshold_price:
                     with status_lock:
@@ -298,28 +366,58 @@ def run_audit_task(input_file, threshold_price):
                     add_log(f'  ✅ 价格: ¥{result["price"]}')
             elif result['status'] == 'need_login':
                 with status_lock:
+                    audit_status['current'] += 1
                     audit_status['fail_count'] += 1
                 add_log(f'  ❌ 需要登录: {result["message"]}')
+            elif result['status'] == 'partial':
+                with status_lock:
+                    audit_status['current'] += 1
+                    audit_status['fail_count'] += 1
+                add_log(f'  ⚠️ 需人工复核: {result["message"]}')
             else:
                 with status_lock:
+                    audit_status['current'] += 1
                     audit_status['fail_count'] += 1
                 add_log(f'  ❌ 失败: {result["message"]}')
 
         def on_login_required(row_index, sku, result):
             add_log(f'⚠️ SKU {sku} 需要重新登录')
 
-        batch = run_sku_batch(
+        batch = run_sku_batch_with_page_factory(
             sku_data=sku_data,
             crawl_func=crawl_one,
             recover_login_func=wait_for_web_login,
             stop_event=stop_flag,
+            page_factory=create_worker_page,
+            worker_count=CONCURRENT_WORKERS,
             on_item_start=on_item_start,
             on_result=on_result,
             on_login_required=on_login_required,
         )
         results = batch.results
 
-        # 6. 写入结果
+        # 6. 测价结束后集中为低价 SKU 补截图，再写入结果表。
+        if results and not batch.stopped and not batch.login_failed and not stop_flag.is_set():
+            add_log(f'📸 正在为低于门槛的商品并发补充截图（{CONCURRENT_WORKERS} 个窗口）...')
+            screenshot_summary = capture_low_price_result_screenshots_with_page_factory(
+                results=results,
+                screenshot_dir=CONFIG['screenshot_dir'],
+                threshold_price=threshold_price,
+                page_factory=create_worker_page,
+                worker_count=CONCURRENT_WORKERS,
+                should_stop=stop_flag.is_set,
+            )
+            add_log(
+                f'📸 低价截图：应补 {screenshot_summary.total} 张，'
+                f'成功 {screenshot_summary.captured} 张，失败 {screenshot_summary.failed} 张'
+            )
+            if screenshot_summary.failed_skus:
+                failed_skus_text = ', '.join(screenshot_summary.failed_skus[:20])
+                if len(screenshot_summary.failed_skus) > 20:
+                    failed_skus_text += '...'
+                add_log(f'⚠️ 低价截图失败 SKU: {failed_skus_text}')
+
+        # 7. 写入结果
         if results:
             add_log('📝 正在写入结果...')
             output_path = write_results(
@@ -336,7 +434,7 @@ def run_audit_task(input_file, threshold_price):
                 audit_status['result_file'] = output_path
             add_log(f'✅ 结果已保存: {os.path.basename(output_path)}')
 
-        # 7. 检查是否因停止而结束
+        # 8. 检查是否因停止而结束
         if batch.stopped or stop_flag.is_set():
             add_log('🛑 测价已停止')
         elif batch.login_failed:
@@ -510,7 +608,12 @@ def shutdown_server():
     with browser_lock:
         if current_browser:
             try:
-                current_browser.close(force=True)
+                browsers = current_browser if isinstance(current_browser, list) else [current_browser]
+                for browser in list(browsers):
+                    try:
+                        browser.close(force=True)
+                    except:
+                        pass
             except:
                 pass
             finally:
