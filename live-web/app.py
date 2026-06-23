@@ -90,6 +90,26 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
     browser_lock = threading.Lock()
     current_browser = {"browser": None}
 
+    def close_current_browsers():
+        with browser_lock:
+            browsers = current_browser.get("browser")
+            current_browser["browser"] = None
+
+        if not browsers:
+            return 0
+
+        if not isinstance(browsers, list):
+            browsers = [browsers]
+
+        closed_count = 0
+        for browser in list(browsers):
+            try:
+                browser.close(force=True)
+                closed_count += 1
+            except Exception:
+                pass
+        return closed_count
+
     @app.route("/")
     def index():
         return render_template("index.html")
@@ -169,6 +189,9 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
         with status_lock:
             price_status["stopping"] = True
             price_status["need_login"] = False
+        closed_count = close_current_browsers()
+        if closed_count:
+            add_price_log(f"已关闭 {closed_count} 个测价浏览器，正在退出当前步骤")
         return jsonify({"success": True})
 
     @app.route("/api/shutdown", methods=["POST"])
@@ -385,7 +408,7 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                     browser.close(force=True)
                 except Exception:
                     pass
-                browser = BrowserManager(str(app.config["PRICE_AUTH_FILE"]), headless=False)
+                browser = BrowserManager(str(app.config["PRICE_AUTH_FILE"]), headless=False, block_resources=False)
                 with browser_lock:
                     current_browser["browser"] = [browser]
                 page = browser.start()
@@ -449,7 +472,7 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                                 browsers.remove(worker_browser)
 
                 def recover_worker_login():
-                    login_browser = BrowserManager(str(app.config["PRICE_AUTH_FILE"]), headless=False)
+                    login_browser = BrowserManager(str(app.config["PRICE_AUTH_FILE"]), headless=False, block_resources=False)
                     try:
                         login_browser.start()
                     except Exception:
@@ -575,20 +598,7 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
         add_price_log("正在关闭服务...")
         stop_flag.set()
         login_event.set()
-        with browser_lock:
-            browsers = current_browser.get("browser")
-            if browsers:
-                try:
-                    if not isinstance(browsers, list):
-                        browsers = [browsers]
-                    for browser in list(browsers):
-                        try:
-                            browser.close(force=True)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-                current_browser["browser"] = None
+        close_current_browsers()
         os.kill(os.getpid(), signal.SIGTERM)
 
     return app

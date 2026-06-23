@@ -175,7 +175,7 @@ def main():
 
     # 3. 启动浏览器
     print("\n🌐 正在启动浏览器...")
-    browser = BrowserManager(CONFIG['auth_file'])
+    browser = BrowserManager(CONFIG['auth_file'], block_resources=False)
     page = browser.start()
 
     # 4. 检查登录状态

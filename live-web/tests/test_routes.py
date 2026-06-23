@@ -218,6 +218,20 @@ class PromotionBindingRoutesTest(unittest.TestCase):
         self.assertIn("登录状态未能同步到无头浏览器", source)
         self.assertIn("低价截图：应补", source)
 
+    def test_price_audit_login_browser_disables_resource_blocking(self):
+        source = Path("app.py").read_text(encoding="utf-8")
+
+        self.assertGreaterEqual(
+            source.count("headless=False, block_resources=False"),
+            2,
+        )
+
+    def test_stop_request_closes_active_browsers(self):
+        source = Path("app.py").read_text(encoding="utf-8")
+
+        self.assertIn("def close_current_browsers", source)
+        self.assertIn("close_current_browsers()", source[source.index("def stop_price_audit"):])
+
     def _business_workbook_bytes(self):
         wb = Workbook()
         ws = wb.active

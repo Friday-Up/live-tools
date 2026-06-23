@@ -208,6 +208,18 @@ class BrowserManagerLoginTests(unittest.TestCase):
 
         self.assertEqual(fake_playwright.chromium.launch_calls, [{"headless": True}])
 
+    def test_start_can_skip_fast_resource_blocking_for_login_browser(self):
+        fake_playwright = FakePlaywright()
+
+        with patch("utils.browser_manager.sync_playwright", return_value=fake_playwright), \
+             patch("utils.browser_manager.os.path.exists", return_value=False):
+            manager = BrowserManager(headless=False, block_resources=False)
+            manager.start()
+
+        context = fake_playwright.chromium.browser.contexts[0]
+        self.assertEqual(context.routes, [])
+        self.assertEqual(len(context.init_scripts), 1)
+
     def test_force_close_skips_storage_state_to_exit_quickly(self):
         manager = BrowserManager(auth_file="auth.json")
         context = FakeContext()

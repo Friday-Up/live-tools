@@ -77,6 +77,20 @@ class AppApiTests(unittest.TestCase):
         self.assertIn("登录状态未能同步到无头浏览器", app_source)
         self.assertIn("低价截图：应补", app_source)
 
+    def test_price_audit_login_browser_disables_resource_blocking(self):
+        app_source = Path("app.py").read_text(encoding="utf-8")
+
+        self.assertGreaterEqual(
+            app_source.count("headless=False, block_resources=False"),
+            2,
+        )
+
+    def test_stop_request_closes_active_browsers(self):
+        app_source = Path("app.py").read_text(encoding="utf-8")
+
+        self.assertIn("def close_current_browsers", app_source)
+        self.assertIn("close_current_browsers()", app_source[app_source.index("def stop_audit"):])
+
 
 if __name__ == "__main__":
     unittest.main()

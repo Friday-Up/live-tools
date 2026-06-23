@@ -35,9 +35,10 @@ def should_block_request(request):
 
 
 class BrowserManager:
-    def __init__(self, auth_file=AUTH_FILE, headless=False):
+    def __init__(self, auth_file=AUTH_FILE, headless=False, block_resources=True):
         self.auth_file = auth_file
         self.headless = headless
+        self.block_resources = block_resources
         self.playwright = None
         self.browser = None
         self.context = None
@@ -61,18 +62,21 @@ class BrowserManager:
                     **DEFAULT_CONTEXT_OPTIONS,
                 )
                 self.configure_page_display()
-                self.enable_fast_resource_blocking()
+                if self.block_resources:
+                    self.enable_fast_resource_blocking()
                 print("✅ 已加载登录状态")
             except Exception as e:
                 print(f"⚠️ 登录状态文件不可用，将重新登录: {e}")
                 self.context = self.browser.new_context(**DEFAULT_CONTEXT_OPTIONS)
                 self.configure_page_display()
-                self.enable_fast_resource_blocking()
+                if self.block_resources:
+                    self.enable_fast_resource_blocking()
         else:
             # 首次运行，需要人工登录
             self.context = self.browser.new_context(**DEFAULT_CONTEXT_OPTIONS)
             self.configure_page_display()
-            self.enable_fast_resource_blocking()
+            if self.block_resources:
+                self.enable_fast_resource_blocking()
             print("⚠️ 首次运行，请登录京东...")
 
         self.page = self.context.new_page()

@@ -141,6 +141,30 @@ def add_log(message):
     print(f"[{time.strftime('%H:%M:%S')}] {message}")
 
 
+def close_current_browsers():
+    """主动关闭当前测价浏览器，用于停止长时间页面等待。"""
+    global current_browser
+
+    with browser_lock:
+        browsers = current_browser
+        current_browser = None
+
+    if not browsers:
+        return 0
+
+    if not isinstance(browsers, list):
+        browsers = [browsers]
+
+    closed_count = 0
+    for browser in list(browsers):
+        try:
+            browser.close(force=True)
+            closed_count += 1
+        except Exception:
+            pass
+    return closed_count
+
+
 def run_audit_task(input_file, threshold_price):
     """在后台线程运行测价任务"""
     global audit_status
@@ -260,7 +284,7 @@ def run_audit_task(input_file, threshold_price):
                 browser.close(force=True)
             except Exception:
                 pass
-            browser = BrowserManager(CONFIG['auth_file'], headless=False)
+            browser = BrowserManager(CONFIG['auth_file'], headless=False, block_resources=False)
             with browser_lock:
                 current_browser = [browser]
             page = browser.start()
@@ -332,7 +356,7 @@ def run_audit_task(input_file, threshold_price):
                             current_browser.remove(worker_browser)
 
             def recover_worker_login():
-                login_browser = BrowserManager(CONFIG['auth_file'], headless=False)
+                login_browser = BrowserManager(CONFIG['auth_file'], headless=False, block_resources=False)
                 try:
                     login_browser.start()
                 except Exception:
@@ -591,6 +615,9 @@ def stop_audit():
         audit_status['stopping'] = True
         audit_status['need_login'] = False
     add_log('🛑 已请求停止，正在等待当前步骤结束')
+    closed_count = close_current_browsers()
+    if closed_count:
+        add_log(f'🛑 已关闭 {closed_count} 个测价浏览器，正在退出当前步骤')
 
     return jsonify({'success': True})
 
@@ -604,20 +631,7 @@ def shutdown_server():
     login_event.set()
 
     # 关闭浏览器
-    global current_browser
-    with browser_lock:
-        if current_browser:
-            try:
-                browsers = current_browser if isinstance(current_browser, list) else [current_browser]
-                for browser in list(browsers):
-                    try:
-                        browser.close(force=True)
-                    except:
-                        pass
-            except:
-                pass
-            finally:
-                current_browser = None
+    close_current_browsers()
 
     # 优雅退出
     import signal
