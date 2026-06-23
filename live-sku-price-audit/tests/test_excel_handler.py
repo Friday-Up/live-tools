@@ -101,6 +101,38 @@ class ExcelHandlerTests(unittest.TestCase):
         self.assertEqual(ws.cell(2, 5).value, 5.5)
         self.assertEqual(ws.cell(2, 7).value, "不符合上菜")
 
+    def test_write_results_records_partial_price_and_manual_review_remark(self):
+        path = make_workbook(
+            ["提交时间", "商品SKU", "提交者"],
+            [["2026-06-11", "48279162646", "张三"]],
+        )
+        out_dir = tempfile.mkdtemp()
+
+        output = write_results(
+            file_path=str(path),
+            results=[
+                {
+                    "row_index": 2,
+                    "sku": "48279162646",
+                    "price": 8.0,
+                    "screenshot_path": None,
+                    "status": "partial",
+                    "message": "需人工复核: 部分系列/规格未完成检测；已检测 1 个规格，最低 ¥8.0",
+                }
+            ],
+            threshold_price=6,
+            output_dir=out_dir,
+        )
+
+        from openpyxl import load_workbook
+
+        ws = load_workbook(output).active
+        self.assertEqual(ws.cell(2, 4).value, 8.0)
+        self.assertEqual(
+            ws.cell(2, 6).value,
+            "需人工复核: 部分系列/规格未完成检测；已检测 1 个规格，最低 ¥8.0",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

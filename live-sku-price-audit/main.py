@@ -18,10 +18,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import CONFIG
 from utils.browser_manager import BrowserManager
-from utils.jd_crawler import crawl_sku
+from utils.jd_crawler import capture_low_price_result_screenshots_with_page_factory, crawl_sku
 from utils.excel_handler import read_sku_list, write_results
 from utils.cleanup import auto_cleanup
 from utils.audit_runner import run_sku_batch
+
+
+SCREENSHOT_WORKERS = 3
 
 
 def list_input_files():
@@ -239,8 +242,41 @@ def main():
 
     print("\n" + "="*60)
 
-    # 7. 写入结果
+    # 7. 测价结束后集中为低价 SKU 补截图，再写入结果表。
     if results:
+        if not batch.stopped and not batch.login_failed:
+            print(f"\n📸 正在为低于门槛的商品并发补充截图（{SCREENSHOT_WORKERS} 个窗口）...")
+
+            def create_screenshot_page(worker_index):
+                worker_browser = BrowserManager(CONFIG['auth_file'], headless=True)
+                try:
+                    worker_page = worker_browser.start()
+                except Exception:
+                    worker_browser.close(force=True)
+                    raise
+
+                def cleanup_worker():
+                    worker_browser.close(force=True)
+
+                return worker_page, cleanup_worker
+
+            screenshot_summary = capture_low_price_result_screenshots_with_page_factory(
+                results=results,
+                screenshot_dir=CONFIG['screenshot_dir'],
+                threshold_price=threshold_price,
+                page_factory=create_screenshot_page,
+                worker_count=SCREENSHOT_WORKERS,
+            )
+            print(
+                f"📸 低价截图：应补 {screenshot_summary.total} 张，"
+                f"成功 {screenshot_summary.captured} 张，失败 {screenshot_summary.failed} 张"
+            )
+            if screenshot_summary.failed_skus:
+                failed_skus_text = ", ".join(screenshot_summary.failed_skus[:20])
+                if len(screenshot_summary.failed_skus) > 20:
+                    failed_skus_text += "..."
+                print(f"⚠️ 低价截图失败 SKU: {failed_skus_text}")
+
         print("\n📝 正在写入结果...")
         output_path = write_results(
             file_path=input_file,
