@@ -1043,6 +1043,15 @@ def crawl_sku_with_series(page, sku, screenshot_dir, delay_min=1, delay_max=3,
     """
     url = f"https://item.jd.com/{sku}.html"
     should_stop = should_stop or (lambda: False)
+    sku_started_at = time.monotonic()
+    price_source_counts = {}
+
+    def build_diagnostics(spec_count=0):
+        return {
+            'duration_ms': int((time.monotonic() - sku_started_at) * 1000),
+            'spec_count': spec_count,
+            'price_source_counts': dict(price_source_counts),
+        }
 
     try:
         if should_stop():
@@ -1109,10 +1118,13 @@ def crawl_sku_with_series(page, sku, screenshot_dir, delay_min=1, delay_max=3,
             scan_incomplete = True
             incomplete_reasons.append(reason)
 
-        def record_spec_price(series_name, spec_name, price):
+        def record_spec_price(series_name, spec_name, price, price_source=None):
             nonlocal lowest_price, lowest_spec_info
             if price is None:
                 return False
+
+            if price_source:
+                price_source_counts[price_source] = price_source_counts.get(price_source, 0) + 1
 
             all_spec_prices.append({
                 'series': series_name,
@@ -1135,7 +1147,7 @@ def crawl_sku_with_series(page, sku, screenshot_dir, delay_min=1, delay_max=3,
             current_page_price = safe_extract_price(page, price_type)
             if current_page_price is not None:
                 print(f"  💰 当前页面价格: ¥{current_page_price}")
-                found_below_threshold = record_spec_price('当前页面', '当前SKU', current_page_price)
+                found_below_threshold = record_spec_price('当前页面', '当前SKU', current_page_price, 'dom')
                 if found_below_threshold:
                     print(f"  🛑 当前页面已低于门槛价 ¥{threshold_price}，停止遍历该 SKU")
             else:
@@ -1158,7 +1170,7 @@ def crawl_sku_with_series(page, sku, screenshot_dir, delay_min=1, delay_max=3,
                         continue
                     print(f"     🔘 当前规格: {selected_spec_name} - ¥{price} (selected-dom)")
                     recorded_selected_spec_names.append(selected_spec_name)
-                    if record_spec_price('默认', selected_spec_name, price):
+                    if record_spec_price('默认', selected_spec_name, price, 'selected-dom'):
                         print(f"     🛑 发现低于门槛价 ¥{threshold_price}，停止遍历该 SKU")
                         break
 
@@ -1207,7 +1219,7 @@ def crawl_sku_with_series(page, sku, screenshot_dir, delay_min=1, delay_max=3,
                                 mark_incomplete(f"规格「{spec_name}」价格未提取")
                                 continue
 
-                            is_below_threshold = record_spec_price('默认', spec_name, price)
+                            is_below_threshold = record_spec_price('默认', spec_name, price, price_source)
                             print(f" - ¥{price} ({price_source})")
 
                             if is_below_threshold and screenshot_path is None and not fast_threshold_scan:
@@ -1229,7 +1241,7 @@ def crawl_sku_with_series(page, sku, screenshot_dir, delay_min=1, delay_max=3,
                 print(f"  ℹ️  该 SKU 无多系列，直接提取当前价格")
                 try:
                     price = extract_price(page, price_type)
-                    record_spec_price('默认', '默认规格', price)
+                    record_spec_price('默认', '默认规格', price, 'dom')
 
                     # 立即判断是否需要截图
                     if threshold_price is not None and price < threshold_price and not fast_threshold_scan:
@@ -1294,7 +1306,7 @@ def crawl_sku_with_series(page, sku, screenshot_dir, delay_min=1, delay_max=3,
                             price = extract_price(page, price_type)
                             price_source = "dom"
 
-                        is_below_threshold = record_spec_price(series_name, '默认', price)
+                        is_below_threshold = record_spec_price(series_name, '默认', price, price_source)
                         print(f"     💰 价格: ¥{price} ({price_source})")
 
                         # 立即判断是否需要截图
@@ -1314,7 +1326,7 @@ def crawl_sku_with_series(page, sku, screenshot_dir, delay_min=1, delay_max=3,
                         f"     🔘 当前规格: {selected_spec_name} - ¥{series_default_price}"
                         f" ({series_price_source})"
                     )
-                    if record_spec_price(series_name, selected_spec_name, series_default_price):
+                    if record_spec_price(series_name, selected_spec_name, series_default_price, series_price_source):
                         print(f"     🛑 发现低于门槛价 ¥{threshold_price}，停止遍历该 SKU")
                         break
 
@@ -1364,7 +1376,7 @@ def crawl_sku_with_series(page, sku, screenshot_dir, delay_min=1, delay_max=3,
                             mark_incomplete(f"规格「{spec_name}」价格未提取")
                             continue
 
-                        is_below_threshold = record_spec_price(series_name, spec_name, price)
+                        is_below_threshold = record_spec_price(series_name, spec_name, price, price_source)
                         print(f" - ¥{price} ({price_source})")
 
                         # 立即判断是否需要截图（发现低于门槛价时立即截图，确保截图与价格一致）
@@ -1438,7 +1450,8 @@ def crawl_sku_with_series(page, sku, screenshot_dir, delay_min=1, delay_max=3,
             'spec_details': all_spec_prices,
             'screenshot_path': screenshot_path,
             'status': status,
-            'message': message
+            'message': message,
+            'diagnostics': build_diagnostics(len(all_spec_prices)),
         }
 
     except Exception as e:
@@ -1452,7 +1465,8 @@ def crawl_sku_with_series(page, sku, screenshot_dir, delay_min=1, delay_max=3,
             'spec_details': [],
             'screenshot_path': None,
             'status': 'error',
-            'message': str(e)
+            'message': str(e),
+            'diagnostics': build_diagnostics(),
         }
 
 

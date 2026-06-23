@@ -611,6 +611,9 @@ class JdCrawlerWaitTests(unittest.TestCase):
         self.assertEqual(page.goto_calls[0][1]["timeout"], 60000)
         self.assertEqual(clicked_specs, ["规格 A", "规格 B", "规格 C"])
         self.assertNotIn("快扫超过", output.getvalue())
+        self.assertEqual(result["diagnostics"]["spec_count"], 3)
+        self.assertEqual(result["diagnostics"]["price_source_counts"]["ware-business"], 3)
+        self.assertGreaterEqual(result["diagnostics"]["duration_ms"], 0)
 
     def test_capture_low_price_result_screenshots_only_after_audit_for_missing_low_price_images(self):
         page = FakeCrawlPage("https://item.jd.com/100224684985.html")

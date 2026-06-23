@@ -528,6 +528,9 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                         price_status["current"] += 1
                         price_status["fail_count"] += 1
                     add_price_log(f"失败: {result.get('message', '')}")
+                diagnostics_log = _format_price_diagnostics(result.get("diagnostics"))
+                if diagnostics_log:
+                    add_price_log(diagnostics_log)
 
             batch = run_sku_batch_with_page_factory(
                 sku_data=sku_data,
@@ -618,6 +621,22 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
 
 def _json_error(message: str, status_code: int = 400):
     return jsonify({"success": False, "error": message}), status_code
+
+
+def _format_price_diagnostics(diagnostics) -> str:
+    if not diagnostics:
+        return ""
+
+    source_counts = diagnostics.get("price_source_counts") or {}
+    dom_count = source_counts.get("dom-fallback", 0) + source_counts.get("dom", 0)
+    duration_seconds = (diagnostics.get("duration_ms") or 0) / 1000
+    spec_count = diagnostics.get("spec_count") or 0
+    return (
+        f"诊断: 耗时 {duration_seconds:.1f}s，规格 {spec_count}，"
+        f"取价 ware={source_counts.get('ware-business', 0)}/"
+        f"dom={dom_count}/"
+        f"selected={source_counts.get('selected-dom', 0)}"
+    )
 
 
 def _initial_price_status():

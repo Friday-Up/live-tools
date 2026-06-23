@@ -8,7 +8,7 @@ from urllib.parse import unquote
 
 from openpyxl import Workbook
 
-from app import create_app, resolve_live_dir, resolve_web_root
+from app import create_app, resolve_live_dir, resolve_web_root, _format_price_diagnostics
 
 
 class PromotionBindingRoutesTest(unittest.TestCase):
@@ -29,6 +29,23 @@ class PromotionBindingRoutesTest(unittest.TestCase):
 
         self.assertIn('sys.stdout.reconfigure(encoding="utf-8", errors="replace")', source)
         self.assertIn('sys.stderr.reconfigure(encoding="utf-8", errors="replace")', source)
+
+    def test_price_diagnostics_log_format_includes_source_counts(self):
+        diagnostics = {
+            "duration_ms": 12345,
+            "spec_count": 24,
+            "price_source_counts": {
+                "ware-business": 20,
+                "dom-fallback": 3,
+                "dom": 2,
+                "selected-dom": 1,
+            },
+        }
+
+        self.assertEqual(
+            _format_price_diagnostics(diagnostics),
+            "诊断: 耗时 12.3s，规格 24，取价 ware=20/dom=5/selected=1",
+        )
 
     def test_generate_promotion_binding_files(self):
         base_dir = Path(tempfile.mkdtemp())

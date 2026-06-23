@@ -141,6 +141,22 @@ def add_log(message):
     print(f"[{time.strftime('%H:%M:%S')}] {message}")
 
 
+def _format_price_diagnostics(diagnostics):
+    if not diagnostics:
+        return ''
+
+    source_counts = diagnostics.get('price_source_counts') or {}
+    dom_count = source_counts.get('dom-fallback', 0) + source_counts.get('dom', 0)
+    duration_seconds = (diagnostics.get('duration_ms') or 0) / 1000
+    spec_count = diagnostics.get('spec_count') or 0
+    return (
+        f"诊断: 耗时 {duration_seconds:.1f}s，规格 {spec_count}，"
+        f"取价 ware={source_counts.get('ware-business', 0)}/"
+        f"dom={dom_count}/"
+        f"selected={source_counts.get('selected-dom', 0)}"
+    )
+
+
 def close_current_browsers():
     """主动关闭当前测价浏览器，用于停止长时间页面等待。"""
     global current_browser
@@ -406,6 +422,9 @@ def run_audit_task(input_file, threshold_price):
                     audit_status['current'] += 1
                     audit_status['fail_count'] += 1
                 add_log(f'  ❌ 失败: {result["message"]}')
+            diagnostics_log = _format_price_diagnostics(result.get('diagnostics'))
+            if diagnostics_log:
+                add_log(f'  {diagnostics_log}')
 
         def on_login_required(row_index, sku, result):
             add_log(f'⚠️ SKU {sku} 需要重新登录')
