@@ -158,9 +158,11 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
         if threshold < 0:
             return _json_error("价格门槛不能为负数")
 
+        show_browser = bool(data.get("show_browser"))
+
         stop_flag.clear()
         login_event.clear()
-        thread = threading.Thread(target=run_price_audit_task, args=(input_file, threshold))
+        thread = threading.Thread(target=run_price_audit_task, args=(input_file, threshold, show_browser))
         thread.daemon = False
         thread.start()
         return jsonify({"success": True})
@@ -361,7 +363,7 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
         add_price_log("登录恢复，继续运行")
         return True
 
-    def run_price_audit_task(input_file: Path, threshold_price: float):
+    def run_price_audit_task(input_file: Path, threshold_price: float, show_browser: bool = False):
         browser = None
         try:
             from utils.audit_runner import run_sku_batch_with_page_factory
@@ -377,6 +379,8 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
             add_price_log("开始批量测价")
             add_price_log(f"输入文件: {input_file.name}")
             add_price_log(f"价格门槛: ¥{threshold_price}")
+            worker_headless = not show_browser
+            add_price_log(f"浏览器模式: {'有头' if show_browser else '无头'}")
 
             try:
                 sku_data = read_sku_list(str(input_file), "商品SKU")
@@ -400,7 +404,7 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                 if file_path.is_file():
                     file_path.unlink()
 
-            browser = BrowserManager(str(app.config["PRICE_AUTH_FILE"]), headless=True)
+            browser = BrowserManager(str(app.config["PRICE_AUTH_FILE"]), headless=worker_headless)
             with browser_lock:
                 current_browser["browser"] = [browser]
             page = browser.start()
@@ -428,16 +432,16 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                     browser.close(force=True)
                 except Exception:
                     pass
-                add_price_log("登录成功后切回无头浏览器")
-                browser = BrowserManager(str(app.config["PRICE_AUTH_FILE"]), headless=True)
+                add_price_log("登录成功后切回测价浏览器")
+                browser = BrowserManager(str(app.config["PRICE_AUTH_FILE"]), headless=worker_headless)
                 with browser_lock:
                     current_browser["browser"] = [browser]
                 page = browser.start()
-                add_price_log("检查无头浏览器登录状态...")
+                add_price_log("检查测价浏览器登录状态...")
                 if not browser.check_login_status(recheck_seconds=10):
                     with status_lock:
-                        price_status["error"] = "登录状态未能同步到无头浏览器，请重新运行"
-                    add_price_log("登录状态未能同步到无头浏览器，请重新运行")
+                        price_status["error"] = "登录状态未能同步到测价浏览器，请重新运行"
+                    add_price_log("登录状态未能同步到测价浏览器，请重新运行")
                     return
 
             add_price_log(f"启用快扫响应取价 + {PRICE_AUDIT_CONCURRENT_WORKERS} 浏览器并发")
@@ -461,7 +465,7 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
             def create_worker_page(worker_index, block_images=False):
                 worker_browser = BrowserManager(
                     str(app.config["PRICE_AUTH_FILE"]),
-                    headless=True,
+                    headless=worker_headless,
                     block_images=block_images,
                 )
                 try:

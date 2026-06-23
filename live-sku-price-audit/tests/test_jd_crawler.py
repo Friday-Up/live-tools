@@ -266,6 +266,11 @@ class FakeCrawlPage:
         self.screenshot_calls.append(kwargs)
 
 
+class FakeRedirectCrawlPage(FakeCrawlPage):
+    def goto(self, url, **kwargs):
+        self.goto_calls.append((url, kwargs))
+
+
 class JdCrawlerWaitTests(unittest.TestCase):
     def test_wait_for_price_ready_uses_price_locator_wait(self):
         page = FakePage()
@@ -525,6 +530,19 @@ class JdCrawlerWaitTests(unittest.TestCase):
         page = FakeUrlPage("https://www.jd.com/?d")
 
         self.assertFalse(is_expected_item_page(page, "6082"))
+
+    def test_crawl_treats_jd_risk_handler_as_manual_verification(self):
+        page = FakeRedirectCrawlPage(
+            "https://cfe.m.jd.com/privatedomain/risk_handler/03101900/"
+            "?returnurl=https%3A%2F%2Fitem.jd.com%2F10431252171.html"
+        )
+
+        with patch("utils.jd_crawler.apply_page_zoom", return_value=True), \
+             patch("utils.jd_crawler.move_mouse_to_safe_area", return_value=True):
+            result = crawl_sku_with_series(page, "10431252171", "/tmp", threshold_price=6.0)
+
+        self.assertEqual(result["status"], "need_login")
+        self.assertIn("风险验证", result["message"])
 
     def test_check_need_login_ignores_transient_title_navigation_error(self):
         self.assertFalse(check_need_login(FakeTitleErrorPage()))

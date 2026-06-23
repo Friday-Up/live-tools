@@ -181,7 +181,7 @@ def close_current_browsers():
     return closed_count
 
 
-def run_audit_task(input_file, threshold_price):
+def run_audit_task(input_file, threshold_price, show_browser=False):
     """在后台线程运行测价任务"""
     global audit_status
     global current_browser
@@ -213,6 +213,8 @@ def run_audit_task(input_file, threshold_price):
         add_log('🚀 开始批量测价')
         add_log(f'📁 输入文件: {os.path.basename(input_file)}')
         add_log(f'💰 价格门槛: ¥{threshold_price}')
+        worker_headless = not show_browser
+        add_log(f'🌐 浏览器模式: {"有头" if show_browser else "无头"}')
 
         # 1. 读取 SKU 列表
         add_log('📖 正在读取 Excel...')
@@ -235,7 +237,7 @@ def run_audit_task(input_file, threshold_price):
 
         # 2. 启动浏览器
         add_log('🌐 正在启动浏览器...')
-        browser = BrowserManager(CONFIG['auth_file'], headless=True)
+        browser = BrowserManager(CONFIG['auth_file'], headless=worker_headless)
 
         with browser_lock:
             current_browser = [browser]
@@ -315,16 +317,16 @@ def run_audit_task(input_file, threshold_price):
                 browser.close(force=True)
             except Exception:
                 pass
-            add_log('✅ 登录成功后切回无头浏览器')
-            browser = BrowserManager(CONFIG['auth_file'], headless=True)
+            add_log('✅ 登录成功后切回测价浏览器')
+            browser = BrowserManager(CONFIG['auth_file'], headless=worker_headless)
             with browser_lock:
                 current_browser = [browser]
             page = browser.start()
-            add_log('🔐 检查无头浏览器登录状态...')
+            add_log('🔐 检查测价浏览器登录状态...')
             if not browser.check_login_status(recheck_seconds=10):
                 with status_lock:
-                    audit_status['error'] = '登录状态未能同步到无头浏览器，请重新运行'
-                add_log('❌ 登录状态未能同步到无头浏览器，请重新运行')
+                    audit_status['error'] = '登录状态未能同步到测价浏览器，请重新运行'
+                add_log('❌ 登录状态未能同步到测价浏览器，请重新运行')
                 return
         add_log('✅ 登录状态正常')
 
@@ -356,7 +358,7 @@ def run_audit_task(input_file, threshold_price):
             )
 
         def create_worker_page(worker_index, block_images=False):
-            worker_browser = BrowserManager(CONFIG['auth_file'], headless=True, block_images=block_images)
+            worker_browser = BrowserManager(CONFIG['auth_file'], headless=worker_headless, block_images=block_images)
             try:
                 worker_page = worker_browser.start()
             except Exception:
@@ -569,6 +571,7 @@ def start_audit():
     data = request.get_json(silent=True) or {}
     input_file = data.get('file')
     threshold = data.get('threshold', CONFIG['threshold_price'])
+    show_browser = bool(data.get('show_browser'))
 
     try:
         threshold = float(threshold)
@@ -588,7 +591,7 @@ def start_audit():
     # 启动后台线程
     thread = threading.Thread(
         target=run_audit_task,
-        args=(input_file, threshold)
+        args=(input_file, threshold, show_browser)
     )
     thread.daemon = False  # 改为非守护线程，确保能正常完成
     thread.start()

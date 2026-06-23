@@ -46,6 +46,9 @@ SUPPORTED_ITEM_NETLOCS = {
     "item.jingdonghealth.cn",
     "npcitem.jd.hk",
 }
+RISK_HANDLER_NETLOCS = {
+    "cfe.m.jd.com",
+}
 UNAVAILABLE_PRODUCT_MARKERS = (
     '商品已下架',
     '商品已停售',
@@ -486,6 +489,18 @@ def is_expected_item_page(page, sku):
     )
 
 
+def is_jd_risk_handler_page(page):
+    try:
+        parsed = urlparse(page.url or "")
+    except Exception:
+        return False
+
+    return (
+        parsed.netloc in RISK_HANDLER_NETLOCS
+        and "/privatedomain/risk_handler/" in parsed.path
+    )
+
+
 def check_need_login(page):
     """
     检查页面是否需要登录
@@ -846,6 +861,21 @@ def _invalid_sku_result(sku, current_url):
     }
 
 
+def _risk_verification_result(sku, current_url):
+    return {
+        'sku': sku,
+        'price': None,
+        'all_prices': None,
+        'spec_details': [],
+        'screenshot_path': None,
+        'status': 'need_login',
+        'message': (
+            '京东触发风险验证，请在测价浏览器窗口完成验证后点击“我已登录，继续”；'
+            f'当前页面: {current_url or "未知页面"}'
+        )
+    }
+
+
 def _lowest_price_detail(result):
     lowest_detail = None
     lowest_price = None
@@ -1134,6 +1164,8 @@ def crawl_sku_with_series(page, sku, screenshot_dir, delay_min=1, delay_max=3,
         page.goto(url, wait_until="domcontentloaded", timeout=60000)
         apply_page_zoom(page)
         move_mouse_to_safe_area(page)
+        if is_jd_risk_handler_page(page):
+            return _risk_verification_result(sku, page.url)
         if not is_expected_item_page(page, sku):
             return _invalid_sku_result(sku, page.url)
 
@@ -1153,6 +1185,8 @@ def crawl_sku_with_series(page, sku, screenshot_dir, delay_min=1, delay_max=3,
 
         # 3. 等待价格区域就绪，避免每个 SKU 固定等待 1-3 秒
         wait_for_price_ready(page, timeout=5000)
+        if is_jd_risk_handler_page(page):
+            return _risk_verification_result(sku, page.url)
         if not is_expected_item_page(page, sku):
             return _invalid_sku_result(sku, page.url)
         if should_stop():

@@ -224,11 +224,15 @@ class PromotionBindingRoutesTest(unittest.TestCase):
             source.index("write_results("),
         )
 
-    def test_price_audit_worker_browsers_run_headless(self):
+    def test_price_audit_worker_browser_visibility_is_configurable(self):
         source = Path("app.py").read_text(encoding="utf-8")
 
         worker_factory_source = source[source.index("def create_worker_page"):source.index("def on_result")]
-        self.assertIn("headless=True", worker_factory_source)
+        self.assertIn("show_browser = bool(data.get(\"show_browser\"))", source)
+        self.assertIn("args=(input_file, threshold, show_browser)", source)
+        self.assertIn("worker_headless = not show_browser", source)
+        self.assertIn("headless=worker_headless", worker_factory_source)
+        self.assertIn("浏览器模式", source)
 
     def test_price_audit_scan_workers_block_images_but_screenshot_workers_keep_images(self):
         source = Path("app.py").read_text(encoding="utf-8")
@@ -243,16 +247,16 @@ class PromotionBindingRoutesTest(unittest.TestCase):
             source,
         )
 
-    def test_price_audit_closes_login_browser_and_returns_to_headless_after_login(self):
+    def test_price_audit_closes_login_browser_and_returns_to_worker_browser_mode_after_login(self):
         source = Path("app.py").read_text(encoding="utf-8")
 
         self.assertGreaterEqual(
-            source.count('browser = BrowserManager(str(app.config["PRICE_AUTH_FILE"]), headless=True)'),
+            source.count('browser = BrowserManager(str(app.config["PRICE_AUTH_FILE"]), headless=worker_headless)'),
             2,
         )
-        self.assertIn("登录成功后切回无头浏览器", source)
-        self.assertIn("检查无头浏览器登录状态", source)
-        self.assertIn("登录状态未能同步到无头浏览器", source)
+        self.assertIn("登录成功后切回测价浏览器", source)
+        self.assertIn("检查测价浏览器登录状态", source)
+        self.assertIn("登录状态未能同步到测价浏览器", source)
         self.assertIn("低价截图：应补", source)
 
     def test_price_audit_login_browser_disables_resource_blocking(self):

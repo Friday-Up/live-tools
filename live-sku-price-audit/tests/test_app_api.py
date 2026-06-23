@@ -58,13 +58,14 @@ class AppApiTests(unittest.TestCase):
             main_source.index("write_results("),
         )
 
-    def test_price_audit_worker_browsers_run_headless(self):
+    def test_price_audit_worker_browser_visibility_is_configurable(self):
         app_source = Path("app.py").read_text(encoding="utf-8")
-        main_source = Path("main.py").read_text(encoding="utf-8")
 
         worker_factory_source = app_source[app_source.index("def create_worker_page"):app_source.index("def on_result")]
-        self.assertIn("headless=True", worker_factory_source)
-        self.assertIn("worker_browser = BrowserManager(CONFIG['auth_file'], headless=True)", main_source)
+        self.assertIn("show_browser = bool(data.get('show_browser'))", app_source)
+        self.assertIn("args=(input_file, threshold, show_browser)", app_source)
+        self.assertIn("worker_headless = not show_browser", app_source)
+        self.assertIn("headless=worker_headless", worker_factory_source)
 
     def test_price_audit_scan_workers_block_images_but_screenshot_workers_keep_images(self):
         app_source = Path("app.py").read_text(encoding="utf-8")
@@ -79,16 +80,16 @@ class AppApiTests(unittest.TestCase):
             app_source,
         )
 
-    def test_price_audit_closes_login_browser_and_returns_to_headless_after_login(self):
+    def test_price_audit_closes_login_browser_and_returns_to_worker_browser_mode_after_login(self):
         app_source = Path("app.py").read_text(encoding="utf-8")
 
         self.assertGreaterEqual(
-            app_source.count("browser = BrowserManager(CONFIG['auth_file'], headless=True)"),
+            app_source.count("browser = BrowserManager(CONFIG['auth_file'], headless=worker_headless)"),
             2,
         )
-        self.assertIn("登录成功后切回无头浏览器", app_source)
-        self.assertIn("检查无头浏览器登录状态", app_source)
-        self.assertIn("登录状态未能同步到无头浏览器", app_source)
+        self.assertIn("登录成功后切回测价浏览器", app_source)
+        self.assertIn("检查测价浏览器登录状态", app_source)
+        self.assertIn("登录状态未能同步到测价浏览器", app_source)
         self.assertIn("低价截图：应补", app_source)
 
     def test_price_audit_login_browser_disables_resource_blocking(self):

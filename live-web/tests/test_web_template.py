@@ -51,6 +51,16 @@ class WebTemplateTest(unittest.TestCase):
         self.assertIn("const failed = data.fail_count || 0;", html)
         self.assertIn("document.getElementById('resultFailed').textContent = failed;", html)
 
+    def test_price_audit_can_request_visible_browser_mode(self):
+        app = create_app(base_dir=Path(tempfile.mkdtemp()))
+        response = app.test_client().get("/")
+
+        self.assertEqual(response.status_code, 200)
+        html = response.data.decode("utf-8")
+        self.assertIn('id="showBrowserInput"', html)
+        self.assertIn("显示测价浏览器窗口", html)
+        self.assertIn("show_browser: document.getElementById('showBrowserInput').checked", html)
+
 
 if __name__ == "__main__":
     unittest.main()
