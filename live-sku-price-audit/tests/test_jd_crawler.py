@@ -87,6 +87,25 @@ class FakeSeriesElement:
         return self.class_name
 
 
+class TimeoutAwareSeriesElement(FakeSeriesElement):
+    def __init__(self, text, class_name=""):
+        super().__init__(text, class_name)
+        self.text_content_calls = []
+        self.evaluate_calls = []
+
+    def text_content(self, **kwargs):
+        self.text_content_calls.append(kwargs)
+        if "timeout" not in kwargs:
+            raise AssertionError("text_content must use a bounded timeout")
+        return self.text
+
+    def evaluate(self, expression, **kwargs):
+        self.evaluate_calls.append(kwargs)
+        if "timeout" not in kwargs:
+            raise AssertionError("evaluate must use a bounded timeout")
+        return self.class_name
+
+
 class FakeSelectedSpecElement(FakeSeriesElement):
     def locator(self, selector):
         return FakeTextFirstLocator(None)
@@ -235,6 +254,16 @@ class JdCrawlerWaitTests(unittest.TestCase):
         tabs = get_series_tabs(page)
 
         self.assertEqual([text for _, _, text in tabs], ["限时直降"])
+
+    def test_series_tabs_read_text_with_bounded_timeout(self):
+        element = TimeoutAwareSeriesElement("限时直降")
+        page = FakeSeriesPage({".specification-series-item": [element]})
+
+        tabs = get_series_tabs(page)
+
+        self.assertEqual([text for _, _, text in tabs], ["限时直降"])
+        self.assertTrue(element.text_content_calls)
+        self.assertIn("timeout", element.text_content_calls[0])
 
     def test_series_tabs_ignore_specification_group_labels(self):
         page = FakeSeriesPage(
@@ -548,6 +577,39 @@ class JdCrawlerWaitTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["price"], 9.0)
+
+    def test_fast_threshold_scan_returns_partial_when_sku_time_budget_is_exceeded(self):
+        page = FakeCrawlPage("https://item.jd.com/100361964982.html")
+        spec_items = [(0, object(), "规格 A"), (1, object(), "规格 B"), (2, object(), "规格 C")]
+        clicked_specs = []
+
+        def fake_fast_read(page, get_items_func, item_text, price_type='current'):
+            clicked_specs.append(item_text)
+            return True, 9.0, "ware-business"
+
+        def fake_monotonic():
+            if len(clicked_specs) >= 1:
+                return 1000.0
+            return 100.0
+
+        output = io.StringIO()
+        with redirect_stdout(output), \
+             patch("utils.jd_crawler.time.monotonic", side_effect=fake_monotonic), \
+             patch("utils.jd_crawler.apply_page_zoom", return_value=True), \
+             patch("utils.jd_crawler.move_mouse_to_safe_area", return_value=True), \
+             patch("utils.jd_crawler.check_need_login", return_value=False), \
+             patch("utils.jd_crawler.check_product_unavailable", return_value=False), \
+             patch("utils.jd_crawler.wait_for_price_ready", return_value=True), \
+             patch("utils.jd_crawler.close_popups", return_value=None), \
+             patch("utils.jd_crawler.get_series_tabs", return_value=[]), \
+             patch("utils.jd_crawler.get_spec_items", return_value=spec_items), \
+             patch("utils.jd_crawler.select_item_and_read_price_fast", side_effect=fake_fast_read):
+            result = crawl_sku_with_series(page, "100361964982", "/tmp", threshold_price=6.0)
+
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["price"], 9.0)
+        self.assertEqual(clicked_specs, ["规格 A"])
+        self.assertIn("快扫超过", output.getvalue())
 
     def test_capture_low_price_result_screenshots_only_after_audit_for_missing_low_price_images(self):
         page = FakeCrawlPage("https://item.jd.com/100224684985.html")

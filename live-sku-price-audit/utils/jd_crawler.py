@@ -32,6 +32,9 @@ PRICE_SETTLE_MIN_WAIT_MS = 2600
 PRICE_STABLE_MS = 900
 PRICE_CHANGE_TIMEOUT_MS = 6000
 FAST_PRICE_RESPONSE_TIMEOUT_MS = 3500
+PAGE_GOTO_TIMEOUT_MS = 25000
+ELEMENT_TEXT_TIMEOUT_MS = 700
+FAST_SCAN_SKU_BUDGET_SECONDS = 18
 PAGE_ZOOM = "75%"
 SELECTED_CLASS_KEYWORDS = ("selected", "active", "current", "checked")
 THREAD_JOIN_POLL_SECONDS = 0.05
@@ -138,6 +141,31 @@ def get_price_text(page):
         except Exception:
             continue
     return ""
+
+
+def _element_text_content(element, timeout=ELEMENT_TEXT_TIMEOUT_MS):
+    try:
+        return element.text_content(timeout=timeout).strip()
+    except TypeError:
+        try:
+            return element.text_content().strip()
+        except Exception:
+            return ""
+    except Exception:
+        return ""
+
+
+def _element_class_name(element, timeout=ELEMENT_TEXT_TIMEOUT_MS):
+    expression = "el => typeof el.className === 'string' ? el.className : String(el.className)"
+    try:
+        return element.evaluate(expression, timeout=timeout)
+    except TypeError:
+        try:
+            return element.evaluate(expression)
+        except Exception:
+            return ""
+    except Exception:
+        return ""
 
 
 def wait_for_price_change(page, previous_text, timeout=PRICE_CHANGE_TIMEOUT_MS):
@@ -514,7 +542,7 @@ def get_series_tabs(page):
             if elements:
                 tabs = []
                 for i, el in enumerate(elements):
-                    text = el.text_content().strip()
+                    text = _element_text_content(el)
                     # 过滤掉无效标签（如评价、详情等导航标签）
                     if (
                         text
@@ -550,9 +578,9 @@ def get_spec_items(page):
                     # 尝试获取文本（可能是图片+文字结构）
                     text_el = el.locator('[class*="text"], .name, .title').first
                     if text_el.count() > 0:
-                        text = text_el.text_content().strip()
+                        text = _element_text_content(text_el)
                     else:
-                        text = el.text_content().strip()
+                        text = _element_text_content(el)
                     # 过滤无货项
                     if text and '无货' not in text and '缺货' not in text:
                         items.append((i, el, text))
@@ -578,7 +606,7 @@ def find_item_by_text(items, target_text):
 
 def is_element_selected(element):
     try:
-        class_name = element.evaluate("el => typeof el.className === 'string' ? el.className : String(el.className)")
+        class_name = _element_class_name(element)
         class_name = (class_name or "").lower()
         return any(keyword in class_name for keyword in SELECTED_CLASS_KEYWORDS)
     except Exception:
@@ -1024,7 +1052,8 @@ def crawl_sku_with_series(page, sku, screenshot_dir, delay_min=1, delay_max=3,
 
         # 1. 打开页面
         print(f"  📦 正在处理 SKU: {sku}")
-        page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        sku_started_at = time.monotonic()
+        page.goto(url, wait_until="domcontentloaded", timeout=PAGE_GOTO_TIMEOUT_MS)
         apply_page_zoom(page)
         move_mouse_to_safe_area(page)
         if not is_expected_item_page(page, sku):
@@ -1100,6 +1129,17 @@ def crawl_sku_with_series(page, sku, screenshot_dir, delay_min=1, delay_max=3,
 
             return threshold_price is not None and price < threshold_price
 
+        def fast_scan_budget_exceeded():
+            if not fast_threshold_scan:
+                return False
+            if lowest_price is not None and threshold_price is not None and lowest_price < threshold_price:
+                return False
+            if time.monotonic() - sku_started_at <= FAST_SCAN_SKU_BUDGET_SECONDS:
+                return False
+            mark_incomplete(f"快扫超过 {FAST_SCAN_SKU_BUDGET_SECONDS} 秒，剩余系列/规格未继续检测")
+            print(f"  ⏱️ 快扫超过 {FAST_SCAN_SKU_BUDGET_SECONDS} 秒，剩余系列/规格转人工复核")
+            return True
+
         # 5. 获取系列标签。若后续系列点击失败，至少保留当前 SKU 页面已展示的主价格。
         series_tabs = get_series_tabs(page)
         print(f"  🏷️  发现 {len(series_tabs)} 个系列标签")
@@ -1145,6 +1185,8 @@ def crawl_sku_with_series(page, sku, screenshot_dir, delay_min=1, delay_max=3,
                     for spec_idx, spec_name in enumerate(spec_names):
                         if should_stop():
                             return _stopped_result(sku)
+                        if fast_scan_budget_exceeded():
+                            break
                         if any(
                             normalize_option_text(spec_name) == normalize_option_text(selected_name)
                             for selected_name in recorded_selected_spec_names
@@ -1223,6 +1265,8 @@ def crawl_sku_with_series(page, sku, screenshot_dir, delay_min=1, delay_max=3,
             for series_idx, series_name in enumerate(series_names):
                 if should_stop():
                     return _stopped_result(sku)
+                if fast_scan_budget_exceeded():
+                    break
                 print(f"\n  📂 系列 [{series_idx + 1}/{len(series_names)}]: {series_name}")
 
                 # 点击系列标签（每个系列都点击，确保规格列表正确刷新）
@@ -1296,6 +1340,8 @@ def crawl_sku_with_series(page, sku, screenshot_dir, delay_min=1, delay_max=3,
                 for spec_idx, spec_name in enumerate(spec_names):
                     if should_stop():
                         return _stopped_result(sku)
+                    if fast_scan_budget_exceeded():
+                        break
 
                     if (
                         fast_threshold_scan
