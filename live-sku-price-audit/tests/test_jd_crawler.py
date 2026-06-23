@@ -149,11 +149,60 @@ class FakeClickElement:
 
 
 class FakeResponse:
-    def __init__(self, payload):
+    def __init__(self, payload, url="https://api.m.jd.com/?functionId=pc_detailpage_wareBusiness"):
         self.payload = payload
+        self.url = url
 
     def json(self):
         return self.payload
+
+
+class FakeResponseInfo:
+    def __init__(self, value=None):
+        self.value = value
+
+
+class FakeExpectResponse:
+    def __init__(self, page, predicate):
+        self.page = page
+        self.predicate = predicate
+        self.info = FakeResponseInfo()
+
+    def __enter__(self):
+        return self.info
+
+    def __exit__(self, exc_type, exc, tb):
+        for response in self.page.responses:
+            if self.predicate(response):
+                self.info.value = response
+                return False
+        raise TimeoutError("response timeout")
+
+
+class FakeNetworkPage:
+    def __init__(self, responses):
+        self.responses = responses
+        self.listeners = []
+        self.wait_for_timeout_calls = []
+
+    def expect_response(self, predicate, **kwargs):
+        return FakeExpectResponse(self, predicate)
+
+    def on(self, event, handler):
+        if event == "response":
+            self.listeners.append(handler)
+
+    def remove_listener(self, event, handler):
+        if event == "response" and handler in self.listeners:
+            self.listeners.remove(handler)
+
+    def emit_responses(self):
+        for response in self.responses:
+            for handler in list(self.listeners):
+                handler(response)
+
+    def wait_for_timeout(self, timeout):
+        self.wait_for_timeout_calls.append(timeout)
 
 
 class FakeTextFirstLocator:
@@ -402,6 +451,36 @@ class JdCrawlerWaitTests(unittest.TestCase):
         self.assertEqual(price, 5.5)
         self.assertEqual(source, "selected-dom")
         wait_ready.assert_called_once()
+
+    def test_fast_read_uses_later_ware_response_when_first_has_no_price(self):
+        from utils import jd_crawler
+
+        item = (0, FakeSeriesElement("规格 A", ""), "规格 A")
+        page = FakeNetworkPage([
+            FakeResponse({"price": {"p": "-1.00"}}),
+            FakeResponse({"price": {"p": "52.89"}}),
+        ])
+
+        def click_and_emit(page, get_items_func, item_text):
+            page.emit_responses()
+            return True
+
+        with patch("utils.jd_crawler.find_item_by_text", return_value=item), \
+             patch("utils.jd_crawler.is_element_selected", return_value=False), \
+             patch("utils.jd_crawler.get_price_text", return_value="¥99.00"), \
+             patch("utils.jd_crawler.click_item_by_text", side_effect=click_and_emit), \
+             patch("utils.jd_crawler.wait_for_price_change", return_value=True), \
+             patch("utils.jd_crawler.safe_extract_price", return_value=99.0):
+            success, price, source = jd_crawler.select_item_and_read_price_fast(
+                page,
+                lambda page: [item],
+                "规格 A",
+                response_timeout=200,
+            )
+
+        self.assertTrue(success)
+        self.assertEqual(price, 52.89)
+        self.assertEqual(source, "ware-business")
 
     def test_check_product_unavailable_detects_off_shelf_panel_before_recommendation_price(self):
         page = FakeTextPage(
