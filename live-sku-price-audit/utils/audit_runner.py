@@ -13,6 +13,8 @@ from typing import Callable, Iterable, List, Optional, Sequence, Tuple
 
 SkuRow = Tuple[int, str]
 Result = dict
+JOIN_POLL_SECONDS = 0.05
+STOP_JOIN_GRACE_SECONDS = 0.05
 
 
 @dataclass
@@ -428,6 +430,9 @@ def run_sku_batch_with_page_factory(
                                     on_item_start(position, len(rows), row_index, sku)
 
                             result = crawl_func(page, row_index, sku)
+                            if stop_event.is_set():
+                                set_stopped()
+                                return
 
                             if result.get("status") == "stopped":
                                 set_stopped()
@@ -464,16 +469,31 @@ def run_sku_batch_with_page_factory(
         finally:
             close_page()
 
-    threads = [threading.Thread(target=worker, args=(worker_index,)) for worker_index in range(worker_count)]
+    threads = [
+        threading.Thread(target=worker, args=(worker_index,), daemon=True)
+        for worker_index in range(worker_count)
+    ]
     for thread in threads:
         thread.start()
-    for thread in threads:
-        thread.join()
+
+    while True:
+        alive_threads = [thread for thread in threads if thread.is_alive()]
+        if not alive_threads:
+            break
+
+        if stop_event.is_set():
+            set_stopped()
+            for thread in alive_threads:
+                thread.join(timeout=STOP_JOIN_GRACE_SECONDS)
+            break
+
+        for thread in alive_threads:
+            thread.join(timeout=JOIN_POLL_SECONDS)
 
     if stop_event.is_set():
         set_stopped()
 
     with state_lock:
-        if worker_errors:
+        if worker_errors and not stop_event.is_set():
             raise RuntimeError(f"SKU 并发 worker 出错: {worker_errors[0]}")
-        return BatchResult(results=results, stopped=stopped, login_failed=login_failed)
+        return BatchResult(results=list(results), stopped=stopped, login_failed=login_failed)

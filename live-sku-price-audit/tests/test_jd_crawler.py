@@ -1,5 +1,6 @@
 import unittest
 import io
+import threading
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
@@ -764,6 +765,46 @@ class JdCrawlerWaitTests(unittest.TestCase):
         self.assertEqual(summary.captured, 0)
         self.assertEqual(summary.failed, 0)
         self.assertEqual(calls, [])
+
+    def test_capture_low_price_result_screenshots_with_page_factory_returns_promptly_when_stopped_during_capture(self):
+        stop_event = threading.Event()
+        capture_started = threading.Event()
+        release_capture = threading.Event()
+        results = [
+            {"sku": "100000000001", "status": "success", "price": 5.45, "screenshot_path": None},
+        ]
+        summary_holder = []
+
+        def blocked_capture(**kwargs):
+            capture_started.set()
+            release_capture.wait(timeout=2)
+            return 1
+
+        runner_thread = threading.Thread(
+            target=lambda: summary_holder.append(
+                capture_low_price_result_screenshots_with_page_factory(
+                    results=results,
+                    screenshot_dir="/tmp/screens",
+                    threshold_price=6.0,
+                    page_factory=lambda worker_index: (FakeCrawlPage("about:blank"), lambda: None),
+                    worker_count=1,
+                    should_stop=stop_event.is_set,
+                )
+            )
+        )
+
+        with patch("utils.jd_crawler.capture_low_price_result_screenshots", side_effect=blocked_capture):
+            runner_thread.start()
+            self.assertTrue(capture_started.wait(timeout=1))
+            stop_event.set()
+            try:
+                runner_thread.join(timeout=0.3)
+                self.assertFalse(runner_thread.is_alive())
+                self.assertEqual(summary_holder[0].total, 1)
+                self.assertEqual(summary_holder[0].captured, 0)
+            finally:
+                release_capture.set()
+                runner_thread.join(timeout=2)
 
 
 if __name__ == "__main__":

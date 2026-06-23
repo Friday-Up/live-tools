@@ -230,6 +230,9 @@ def run_audit_task(input_file, threshold_price):
         add_log('🔐 检查登录状态...')
         is_logged_in = browser.check_login_status()
         add_log(f'   登录状态检查结果: {"已登录" if is_logged_in else "未登录"}')
+        if stop_flag.is_set():
+            add_log('🛑 测价已停止')
+            return
 
         def wait_for_web_login(login_browser=None):
             login_browser = login_browser or browser

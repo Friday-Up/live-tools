@@ -403,6 +403,9 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
             add_price_log("检查登录状态...")
             is_logged_in = browser.check_login_status()
             add_price_log(f"登录状态检查结果: {'已登录' if is_logged_in else '未登录'}")
+            if stop_flag.is_set():
+                add_price_log("测价已停止")
+                return
             if not is_logged_in:
                 try:
                     browser.close(force=True)

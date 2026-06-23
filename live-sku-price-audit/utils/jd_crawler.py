@@ -34,6 +34,8 @@ PRICE_CHANGE_TIMEOUT_MS = 6000
 FAST_PRICE_RESPONSE_TIMEOUT_MS = 3500
 PAGE_ZOOM = "75%"
 SELECTED_CLASS_KEYWORDS = ("selected", "active", "current", "checked")
+THREAD_JOIN_POLL_SECONDS = 0.05
+STOP_JOIN_GRACE_SECONDS = 0.05
 
 INVALID_SERIES_LABELS = {'买家评价', '商品详情', '售后保障', '推荐'}
 INVALID_SERIES_KEYWORDS = ('进店逛逛', '联系客服', '商品详情', '本品由', '买家评价', '问大家', '我要提问')
@@ -938,6 +940,8 @@ def capture_low_price_result_screenshots_with_page_factory(
                         threshold_price=threshold_price,
                         should_stop=should_stop,
                     )
+                    if should_stop():
+                        return
                     if count:
                         with captured_lock:
                             captured += count
@@ -953,13 +957,22 @@ def capture_low_price_result_screenshots_with_page_factory(
                     pass
 
     threads = [
-        threading.Thread(target=worker, args=(worker_index,))
+        threading.Thread(target=worker, args=(worker_index,), daemon=True)
         for worker_index in range(worker_count)
     ]
     for thread in threads:
         thread.start()
-    for thread in threads:
-        thread.join()
+
+    while True:
+        alive_threads = [thread for thread in threads if thread.is_alive()]
+        if not alive_threads:
+            break
+        if should_stop():
+            for thread in alive_threads:
+                thread.join(timeout=STOP_JOIN_GRACE_SECONDS)
+            break
+        for thread in alive_threads:
+            thread.join(timeout=THREAD_JOIN_POLL_SECONDS)
 
     failed_skus = [
         str(result.get('sku') or '').strip()

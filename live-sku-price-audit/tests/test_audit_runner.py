@@ -368,6 +368,42 @@ class AuditRunnerTests(unittest.TestCase):
         self.assertEqual(created, [0])
         self.assertEqual(len(result.results), 1)
 
+    def test_page_factory_runner_returns_promptly_when_stop_requested_during_blocked_crawl(self):
+        stop_event = threading.Event()
+        crawl_started = threading.Event()
+        release_crawl = threading.Event()
+        result_holder = []
+
+        def crawl(page, row_index, sku):
+            crawl_started.set()
+            release_crawl.wait(timeout=2)
+            return {"sku": sku, "status": "success", "price": 8, "message": "ok"}
+
+        runner_thread = threading.Thread(
+            target=lambda: result_holder.append(
+                run_sku_batch_with_page_factory(
+                    sku_data=[(2, "sku-1")],
+                    crawl_func=crawl,
+                    recover_login_func=lambda: True,
+                    stop_event=stop_event,
+                    page_factory=lambda worker_index: (f"page-{worker_index}", lambda: None),
+                    worker_count=1,
+                )
+            )
+        )
+        runner_thread.start()
+        self.assertTrue(crawl_started.wait(timeout=1))
+
+        stop_event.set()
+        try:
+            runner_thread.join(timeout=0.3)
+            self.assertFalse(runner_thread.is_alive())
+            self.assertTrue(result_holder[0].stopped)
+            self.assertEqual(result_holder[0].results, [])
+        finally:
+            release_crawl.set()
+            runner_thread.join(timeout=2)
+
     def test_page_factory_runner_surfaces_worker_start_errors(self):
         def page_factory(worker_index):
             raise RuntimeError("browser failed")
