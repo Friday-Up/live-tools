@@ -429,7 +429,7 @@ def run_audit_task(input_file, threshold_price, show_browser=False):
                 add_log(f'  {diagnostics_log}')
 
         def on_login_required(row_index, sku, result):
-            add_log(f'⚠️ SKU {sku} 需要重新登录')
+            add_log(f'⚠️ SKU {sku} 需要人工处理: {result.get("message", "登录态已失效")}')
 
         batch = run_sku_batch_with_page_factory(
             sku_data=sku_data,

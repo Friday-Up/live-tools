@@ -545,7 +545,9 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                 worker_count=PRICE_AUDIT_CONCURRENT_WORKERS,
                 on_item_start=on_item_start,
                 on_result=on_result,
-                on_login_required=lambda row_index, sku, result: add_price_log(f"SKU {sku} 需要重新登录"),
+                on_login_required=lambda row_index, sku, result: add_price_log(
+                    f"SKU {sku} 需要人工处理: {result.get('message', '登录态已失效')}"
+                ),
             )
 
             if batch.results and not batch.stopped and not batch.login_failed and not stop_flag.is_set():
