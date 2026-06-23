@@ -578,7 +578,7 @@ class JdCrawlerWaitTests(unittest.TestCase):
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["price"], 9.0)
 
-    def test_fast_threshold_scan_returns_partial_when_sku_time_budget_is_exceeded(self):
+    def test_fast_threshold_scan_continues_until_all_specs_are_checked_without_time_budget(self):
         page = FakeCrawlPage("https://item.jd.com/100361964982.html")
         spec_items = [(0, object(), "规格 A"), (1, object(), "规格 B"), (2, object(), "规格 C")]
         clicked_specs = []
@@ -606,10 +606,11 @@ class JdCrawlerWaitTests(unittest.TestCase):
              patch("utils.jd_crawler.select_item_and_read_price_fast", side_effect=fake_fast_read):
             result = crawl_sku_with_series(page, "100361964982", "/tmp", threshold_price=6.0)
 
-        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["status"], "success")
         self.assertEqual(result["price"], 9.0)
-        self.assertEqual(clicked_specs, ["规格 A"])
-        self.assertIn("快扫超过", output.getvalue())
+        self.assertEqual(page.goto_calls[0][1]["timeout"], 60000)
+        self.assertEqual(clicked_specs, ["规格 A", "规格 B", "规格 C"])
+        self.assertNotIn("快扫超过", output.getvalue())
 
     def test_capture_low_price_result_screenshots_only_after_audit_for_missing_low_price_images(self):
         page = FakeCrawlPage("https://item.jd.com/100224684985.html")
