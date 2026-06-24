@@ -698,7 +698,7 @@ def click_item_by_text_fast(page, get_items_func, item_text, timeout=FAST_CLICK_
     if is_element_selected(element):
         return True
 
-    return click_element_safely(page, element, timeout=timeout)
+    return click_element_fast(page, element, timeout=timeout)
 
 
 def selected_item_text(items):
@@ -759,11 +759,12 @@ def select_item_and_read_price_fast(page, get_items_func, item_text, price_type=
     return True, safe_extract_price(page, price_type), "dom-fallback"
 
 
-def click_element_safely(page, element, timeout=CLICK_TIMEOUT_MS):
+def click_element_safely(page, element, timeout=CLICK_TIMEOUT_MS, skip_mouse_move=False):
     """
     安全点击元素，处理可能的拦截问题
     """
-    move_mouse_to_safe_area(page)
+    if not skip_mouse_move:
+        move_mouse_to_safe_area(page)
 
     for state in ("visible", "stable", "enabled"):
         try:
@@ -791,6 +792,19 @@ def click_element_safely(page, element, timeout=CLICK_TIMEOUT_MS):
             return True
         except:
             return False
+
+
+def click_element_fast(page, element, timeout=FAST_CLICK_TIMEOUT_MS):
+    """
+    快扫模式轻量点击：先把鼠标移出主图，再直接 element.click()。
+    失败时回退到 click_element_safely，不影响正确性。
+    """
+    move_mouse_to_safe_area(page)
+    try:
+        element.click(timeout=timeout)
+        return True
+    except Exception:
+        return click_element_safely(page, element, timeout=CLICK_TIMEOUT_MS, skip_mouse_move=True)
 
 
 def _stopped_result(sku):
