@@ -8,7 +8,6 @@ from utils.jd_crawler import (
     CLICK_TIMEOUT_MS,
     PRICE_SETTLE_MIN_WAIT_MS,
     apply_page_zoom,
-    click_element_fast,
     click_element_safely,
     extract_price_from_ware_business,
     check_product_unavailable,
@@ -126,14 +125,6 @@ class FakeSeriesPage:
 
     def locator(self, selector):
         return FakeAllLocator(self.elements_by_selector.get(selector, []))
-
-
-class FakeFastClickElement:
-    def __init__(self):
-        self.click_calls = []
-
-    def click(self, **kwargs):
-        self.click_calls.append(kwargs)
 
 
 class FakeClickElement:
@@ -421,27 +412,6 @@ class JdCrawlerWaitTests(unittest.TestCase):
         self.assertTrue(click_element_safely(page, element))
 
         self.assertEqual(page.mouse.moves, [(1580, 20)])
-
-    def test_click_element_fast_succeeds_with_light_click(self):
-        page = FakePage()
-        element = FakeFastClickElement()
-
-        self.assertTrue(click_element_fast(page, element))
-
-        # 轻量点击成功，不应走 fallback 的 wait_for_element_state
-        self.assertEqual(page.mouse.moves, [(1580, 20)])
-        self.assertEqual(len(element.click_calls), 1)
-
-    def test_click_element_fast_falls_back_to_safe_click(self):
-        page = FakePage()
-        element = FakeClickElement()
-
-        self.assertTrue(click_element_fast(page, element))
-
-        # 先尝试轻量点击（含一次 mouse move），失败后回退到完整点击（跳过重复 mouse move）
-        self.assertEqual(page.mouse.moves, [(1580, 20)])
-        self.assertEqual(len(element.click_calls), 1)
-        self.assertEqual(len(element.wait_state_calls), 3)
 
     def test_extract_price_from_ware_business_prefers_current_price(self):
         response = FakeResponse({"price": {"p": "52.89"}})
