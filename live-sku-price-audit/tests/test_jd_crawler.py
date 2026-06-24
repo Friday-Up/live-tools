@@ -8,7 +8,6 @@ from utils.jd_crawler import (
     CLICK_TIMEOUT_MS,
     PRICE_SETTLE_MIN_WAIT_MS,
     apply_page_zoom,
-    click_element_fast,
     click_element_safely,
     extract_price_from_ware_business,
     check_product_unavailable,
@@ -406,11 +405,13 @@ class JdCrawlerWaitTests(unittest.TestCase):
         self.assertEqual(page.mouse.moves, [(1580, 20)])
         self.assertEqual(page.wait_for_timeout_calls, [100])
 
-    def test_click_element_safely_scrolls_and_clicks(self):
+    def test_click_element_safely_moves_mouse_away_before_clicking(self):
         page = FakePage()
         element = FakeClickElement()
 
         self.assertTrue(click_element_safely(page, element))
+
+        self.assertEqual(page.mouse.moves, [(1580, 20)])
 
     def test_extract_price_from_ware_business_prefers_current_price(self):
         response = FakeResponse({"price": {"p": "52.89"}})
@@ -472,7 +473,7 @@ class JdCrawlerWaitTests(unittest.TestCase):
         with patch("utils.jd_crawler.find_item_by_text", return_value=item), \
              patch("utils.jd_crawler.is_element_selected", return_value=False), \
              patch("utils.jd_crawler.get_price_text", return_value="¥99.00"), \
-             patch("utils.jd_crawler.click_element_fast", side_effect=click_and_emit), \
+             patch("utils.jd_crawler.click_element_safely", side_effect=click_and_emit), \
              patch("utils.jd_crawler.wait_for_price_change", return_value=True), \
              patch("utils.jd_crawler.safe_extract_price", return_value=99.0):
             success, price, source = jd_crawler.select_item_and_read_price_fast(
@@ -501,7 +502,7 @@ class JdCrawlerWaitTests(unittest.TestCase):
         with patch("utils.jd_crawler.find_item_by_text", return_value=item), \
              patch("utils.jd_crawler.is_element_selected", return_value=False), \
              patch("utils.jd_crawler.get_price_text", return_value="¥99.00"), \
-             patch("utils.jd_crawler.click_element_fast", side_effect=click_and_emit), \
+             patch("utils.jd_crawler.click_element_safely", side_effect=click_and_emit), \
              patch("utils.jd_crawler.wait_for_item_selected") as wait_selected:
             success, price, source = jd_crawler.select_item_and_read_price_fast(
                 page,
@@ -769,7 +770,7 @@ class JdCrawlerWaitTests(unittest.TestCase):
              patch("utils.jd_crawler.close_popups", return_value=None), \
              patch("utils.jd_crawler.wait_for_price_change", return_value=True), \
              patch("utils.jd_crawler.get_price_text", return_value="¥32.5"), \
-             patch("utils.jd_crawler.click_item_by_text_fast", side_effect=fake_click):
+             patch("utils.jd_crawler.click_item_by_text", side_effect=fake_click):
             count = capture_low_price_result_screenshots(page, results, "/tmp/screens", 6.0)
 
         self.assertEqual(count, 1)
@@ -797,7 +798,7 @@ class JdCrawlerWaitTests(unittest.TestCase):
              patch("utils.jd_crawler.wait_for_price_ready", return_value=True), \
              patch("utils.jd_crawler.close_popups", return_value=None), \
              patch("utils.jd_crawler.get_price_text", return_value="¥32.5"), \
-             patch("utils.jd_crawler.click_item_by_text_fast", return_value=False):
+             patch("utils.jd_crawler.click_item_by_text", return_value=False):
             count = capture_low_price_result_screenshots(page, results, "/tmp/screens", 6.0)
 
         self.assertEqual(count, 0)
