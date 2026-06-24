@@ -116,6 +116,8 @@ def apply_page_zoom(page, zoom=PAGE_ZOOM):
 def move_mouse_to_safe_area(page):
     """
     避免人工鼠标停在主图上触发放大/悬浮层，导致后续规格点击被遮挡。
+    这里只做鼠标移开动作，不再固定等待 100ms；每个规格省一次等待，
+    对 600 SKU x 20 规格的规模可节省大量时间。
     """
     if not page:
         return False
@@ -124,10 +126,6 @@ def move_mouse_to_safe_area(page):
         viewport_size = getattr(page, "viewport_size", None) or {}
         width = viewport_size.get("width", 1600)
         page.mouse.move(max(width - 20, 20), 20)
-        try:
-            page.wait_for_timeout(100)
-        except Exception:
-            pass
         return True
     except Exception:
         return False

@@ -403,7 +403,7 @@ class JdCrawlerWaitTests(unittest.TestCase):
         self.assertTrue(move_mouse_to_safe_area(page))
 
         self.assertEqual(page.mouse.moves, [(1580, 20)])
-        self.assertEqual(page.wait_for_timeout_calls, [100])
+        self.assertEqual(page.wait_for_timeout_calls, [])
 
     def test_click_element_safely_moves_mouse_away_before_clicking(self):
         page = FakePage()

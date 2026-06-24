@@ -54,7 +54,22 @@ from promotion_binding.workbook_reader import ColumnMapping, inspect_business_wo
 
 
 RUNTIME_RETENTION_DAYS = 7
-PRICE_AUDIT_CONCURRENT_WORKERS = 3
+
+
+def _load_price_audit_concurrent_workers() -> int:
+    """从 live-sku-price-audit/config.py 读取并发数，保持统一配置入口。"""
+    try:
+        import importlib.util
+        config_path = PRICE_AUDIT_ROOT / "config.py"
+        spec = importlib.util.spec_from_file_location("price_audit_config", config_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return max(1, int(module.CONFIG.get("concurrent_workers", 3)))
+    except Exception:
+        return 3
+
+
+PRICE_AUDIT_CONCURRENT_WORKERS = _load_price_audit_concurrent_workers()
 
 
 def create_app(base_dir: str | Path | None = None) -> Flask:

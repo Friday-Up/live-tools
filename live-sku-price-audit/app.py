@@ -92,7 +92,7 @@ stop_flag = threading.Event()
 # 全局浏览器实例（用于强制关闭）
 current_browser = None
 browser_lock = threading.Lock()
-CONCURRENT_WORKERS = 3
+CONCURRENT_WORKERS = max(1, int(CONFIG.get('concurrent_workers', 3)))
 
 
 def json_error(message, status_code=400):
