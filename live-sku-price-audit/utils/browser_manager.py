@@ -4,6 +4,7 @@
 """
 
 import os
+import re
 import time
 from playwright.sync_api import sync_playwright
 
@@ -24,6 +25,19 @@ BLOCKED_URL_KEYWORDS = (
     "blackhole",
     "joya.js",
 )
+
+_BLOCKED_URL_PATTERN = re.compile("|".join(map(re.escape, BLOCKED_URL_KEYWORDS)))
+
+
+def _chromium_launch_args(block_images=False):
+    """
+    浏览器级资源控制参数，避免把每个请求都送到 Python route handler 处理。
+    图片在扫描 worker 中通过 blink settings 直接禁用，节省大量 IPC 往返。
+    """
+    args = []
+    if block_images:
+        args.append("--blink-settings=imagesEnabled=false")
+    return args if args else None
 
 
 def should_block_request(request, block_images=False):
@@ -55,7 +69,11 @@ class BrowserManager:
         """
         self.playwright = sync_playwright().start()
         # 登录窗口需要可视化；批量测价 worker 可用无头模式避免抢占桌面。
-        self.browser = self.playwright.chromium.launch(headless=self.headless)
+        launch_kwargs = {"headless": self.headless}
+        args = _chromium_launch_args(self.block_images)
+        if args:
+            launch_kwargs["args"] = args
+        self.browser = self.playwright.chromium.launch(**launch_kwargs)
 
         if os.path.exists(self.auth_file):
             # 复用已有登录态
@@ -115,17 +133,28 @@ class BrowserManager:
     def enable_fast_resource_blocking(self):
         """
         拦截字体、视频和埋点请求；扫描 worker 可额外拦截图片，截图 worker 保留图片。
+
+        为降低 Windows 上 Playwright route 拦截的 IPC 开销：
+        1. 图片在浏览器级禁用（--blink-settings=imagesEnabled=false）。
+        2. 字体/媒体等按 resource_type 快速 abort，不取 URL。
+        3. 埋点/广告 URL 用精准正则 route 拦截，只有命中关键字的请求才进 Python。
         """
         if not self.context:
             raise RuntimeError("浏览器上下文未启动")
 
-        def route_handler(route):
-            if should_block_request(route.request, block_images=self.block_images):
+        # 按资源类型快速拦截（不做 URL 字符串扫描）。
+        def resource_type_handler(route):
+            resource_type = route.request.resource_type
+            if resource_type in BLOCKED_RESOURCE_TYPES:
                 route.abort()
             else:
                 route.continue_()
 
-        self.context.route("**/*", route_handler)
+        self.context.route("**/*", resource_type_handler)
+
+        # 精准拦截埋点/广告域名，只有命中关键字的请求才会进入 Python handler。
+        if BLOCKED_URL_KEYWORDS:
+            self.context.route(_BLOCKED_URL_PATTERN, lambda route: route.abort())
 
     def check_login_status(self, recheck_seconds=20, recheck_interval=2):
         """

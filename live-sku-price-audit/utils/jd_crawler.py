@@ -293,6 +293,19 @@ def is_ware_business_response(response):
     return "functionId=pc_detailpage_wareBusiness" in getattr(response, "url", "")
 
 
+def _ware_business_has_price(response):
+    """
+    expect_response 的谓词：只匹配带有效价格的 wareBusiness 响应。
+    这样 Playwright 无需把每个响应事件都送到 Python 处理，降低 Windows IPC 开销。
+    """
+    if not is_ware_business_response(response):
+        return False
+    try:
+        return extract_price_from_ware_business(response) is not None
+    except Exception:
+        return False
+
+
 def safe_extract_price(page, price_type='current'):
     try:
         return extract_price(page, price_type)
@@ -704,59 +717,6 @@ def wait_page_event_tick(page, timeout_ms):
         time.sleep(timeout_ms / 1000)
 
 
-def remove_response_listener(page, handler):
-    for method_name in ("remove_listener", "off"):
-        method = getattr(page, method_name, None)
-        if not method:
-            continue
-        try:
-            method("response", handler)
-            return
-        except Exception:
-            pass
-
-
-def parse_ware_business_price(response):
-    try:
-        return extract_price_from_ware_business(response)
-    except Exception:
-        return None
-
-
-def click_and_collect_ware_business_price(page, click_action, response_timeout):
-    responses = queue.Queue()
-
-    def on_response(response):
-        if is_ware_business_response(response):
-            responses.put(response)
-
-    page.on("response", on_response)
-    try:
-        clicked = click_action()
-        if not clicked:
-            return False, None
-
-        deadline = time.monotonic() + (response_timeout / 1000)
-        while True:
-            while True:
-                try:
-                    response = responses.get_nowait()
-                except queue.Empty:
-                    break
-
-                price = parse_ware_business_price(response)
-                if price is not None:
-                    return True, price
-
-            remaining_ms = int((deadline - time.monotonic()) * 1000)
-            if remaining_ms <= 0:
-                return True, None
-
-            wait_page_event_tick(page, min(WARE_RESPONSE_POLL_MS, remaining_ms))
-    finally:
-        remove_response_listener(page, on_response)
-
-
 def select_item_and_read_price_fast(page, get_items_func, item_text, price_type='current',
                                     response_timeout=FAST_PRICE_RESPONSE_TIMEOUT_MS):
     """
@@ -779,32 +739,23 @@ def select_item_and_read_price_fast(page, get_items_func, item_text, price_type=
     previous_price_text = get_price_text(page)
     clicked = False
 
-    if hasattr(page, "on"):
-        clicked, price = click_and_collect_ware_business_price(
-            page,
-            lambda: click_item_by_text_fast(page, get_items_func, item_text),
-            response_timeout,
-        )
+    try:
+        # 使用 expect_response + 价格谓词：只有命中 wareBusiness 且含有效价格的响应才会回调 Python。
+        # 相比 page.on("response", ...) 全量监听，Windows 上可显著减少 IPC 事件量。
+        with page.expect_response(_ware_business_has_price, timeout=response_timeout) as response_info:
+            clicked = click_item_by_text_fast(page, get_items_func, item_text)
+
         if not clicked:
             return False, None, "click_failed"
+
+        price = extract_price_from_ware_business(response_info.value)
         if price is not None:
             return True, price, "ware-business"
-    else:
-        try:
-            with page.expect_response(is_ware_business_response, timeout=response_timeout) as response_info:
-                clicked = click_item_by_text_fast(page, get_items_func, item_text)
-
-            if not clicked:
-                return False, None, "click_failed"
-
-            price = extract_price_from_ware_business(response_info.value)
-            if price is not None:
-                return True, price, "ware-business"
-        except Exception:
-            if not clicked:
-                clicked = click_item_by_text_fast(page, get_items_func, item_text)
-            if not clicked:
-                return False, None, "click_failed"
+    except Exception:
+        if not clicked:
+            clicked = click_item_by_text_fast(page, get_items_func, item_text)
+        if not clicked:
+            return False, None, "click_failed"
 
     wait_for_price_change(page, previous_price_text)
     return True, safe_extract_price(page, price_type), "dom-fallback"
