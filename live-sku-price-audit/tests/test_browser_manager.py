@@ -192,25 +192,18 @@ class BrowserManagerLoginTests(unittest.TestCase):
             )
         )
 
-    def test_enable_fast_resource_blocking_registers_context_route(self):
+    def test_enable_fast_resource_blocking_uses_font_media_url_patterns(self):
         manager = BrowserManager()
         context = FakeContext()
         manager.context = context
 
         manager.enable_fast_resource_blocking()
 
-        self.assertEqual(context.routes[0][0], "**/*")
-
-    def test_enable_fast_resource_blocking_uses_targeted_url_pattern(self):
-        manager = BrowserManager()
-        context = FakeContext()
-        manager.context = context
-
-        manager.enable_fast_resource_blocking()
-
-        # 第二条 route 是针对埋点/广告 URL 的正则，只有命中关键字的请求才会进 Python
-        self.assertEqual(len(context.routes), 2)
-        self.assertIsInstance(context.routes[1][0], type(re.compile("")))
+        # 不再使用 catch-all "**/*"，而是字体、媒体、埋点/广告三条精准正则 route
+        self.assertEqual(len(context.routes), 3)
+        patterns = [pattern for pattern, _ in context.routes]
+        self.assertNotIn("**/*", patterns)
+        self.assertTrue(all(isinstance(p, type(re.compile(""))) for p in patterns))
 
     def test_configure_page_display_installs_zoom_init_script(self):
         manager = BrowserManager()

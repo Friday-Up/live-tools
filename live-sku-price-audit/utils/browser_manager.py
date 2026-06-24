@@ -136,21 +136,21 @@ class BrowserManager:
 
         为降低 Windows 上 Playwright route 拦截的 IPC 开销：
         1. 图片在浏览器级禁用（--blink-settings=imagesEnabled=false）。
-        2. 字体/媒体等按 resource_type 快速 abort，不取 URL。
+        2. 字体/媒体按 URL 后缀/路径用精准正则 route 拦截，不再用 catch-all handler。
         3. 埋点/广告 URL 用精准正则 route 拦截，只有命中关键字的请求才进 Python。
         """
         if not self.context:
             raise RuntimeError("浏览器上下文未启动")
 
-        # 按资源类型快速拦截（不做 URL 字符串扫描）。
-        def resource_type_handler(route):
-            resource_type = route.request.resource_type
-            if resource_type in BLOCKED_RESOURCE_TYPES:
-                route.abort()
-            else:
-                route.continue_()
-
-        self.context.route("**/*", resource_type_handler)
+        # 字体/媒体按 URL 匹配，避免 catch-all handler 对每个请求都做 IPC。
+        self.context.route(
+            re.compile(r".*\.(woff2?|ttf|otf|eot)(\?.*)?$", re.IGNORECASE),
+            lambda route: route.abort(),
+        )
+        self.context.route(
+            re.compile(r".*\.(mp4|webm|ogg|mp3|wav|flv)(\?.*)?$", re.IGNORECASE),
+            lambda route: route.abort(),
+        )
 
         # 精准拦截埋点/广告域名，只有命中关键字的请求才会进入 Python handler。
         if BLOCKED_URL_KEYWORDS:
