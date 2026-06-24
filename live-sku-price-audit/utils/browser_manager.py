@@ -4,7 +4,6 @@
 """
 
 import os
-import re
 import time
 from playwright.sync_api import sync_playwright
 
@@ -26,8 +25,6 @@ BLOCKED_URL_KEYWORDS = (
     "joya.js",
 )
 
-_BLOCKED_URL_PATTERN = re.compile("|".join(map(re.escape, BLOCKED_URL_KEYWORDS)))
-
 
 def should_block_request(request, block_images=False):
     resource_type = getattr(request, "resource_type", "")
@@ -36,22 +33,7 @@ def should_block_request(request, block_images=False):
         return True
     if resource_type in BLOCKED_RESOURCE_TYPES:
         return True
-    return bool(_BLOCKED_URL_PATTERN.search(url))
-
-
-def _chromium_launch_args(headless):
-    """
-    Windows 无头/后台模式下 Chromium 默认会节流 timer/renderer。
-    这些参数禁止后台节流，避免京东页面 JS 延迟发送 wareBusiness 请求。
-    """
-    args = [
-        "--disable-background-timer-throttling",
-        "--disable-renderer-backgrounding",
-        "--disable-backgrounding-occluded-windows",
-        "--disable-features=CalculateNativeWinOcclusion",
-        "--disable-ipc-flooding-protection",
-    ]
-    return args
+    return any(keyword in url for keyword in BLOCKED_URL_KEYWORDS)
 
 
 class BrowserManager:
@@ -73,10 +55,7 @@ class BrowserManager:
         """
         self.playwright = sync_playwright().start()
         # 登录窗口需要可视化；批量测价 worker 可用无头模式避免抢占桌面。
-        self.browser = self.playwright.chromium.launch(
-            headless=self.headless,
-            args=_chromium_launch_args(self.headless),
-        )
+        self.browser = self.playwright.chromium.launch(headless=self.headless)
 
         if os.path.exists(self.auth_file):
             # 复用已有登录态
