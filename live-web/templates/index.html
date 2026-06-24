@@ -508,6 +508,8 @@
                         <div class="form-group">
                             <label class="form-label">价格门槛（低于此价格标记为“不符合上菜”）</label>
                             <input type="number" class="form-input" id="thresholdInput" value="6.0" step="0.1" min="0">
+                            <label class="form-label" style="margin-top: 12px;">并发浏览器数（Mac 可设 4-5，Windows 建议 3）</label>
+                            <input type="number" class="form-input" id="concurrentWorkersInput" value="3" step="1" min="1" max="10">
                             <label class="checkbox-row">
                                 <input type="checkbox" id="showBrowserInput">
                                 <span>显示测价浏览器窗口</span>
@@ -855,13 +857,16 @@
             document.getElementById('progressCard').classList.add('active');
             document.getElementById('resultCard').classList.remove('active');
 
+            const concurrentWorkers = parseInt(document.getElementById('concurrentWorkersInput').value, 10);
+
             fetch('/api/start', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     file: selectedFile,
                     threshold: threshold,
-                    show_browser: document.getElementById('showBrowserInput').checked
+                    show_browser: document.getElementById('showBrowserInput').checked,
+                    concurrent_workers: isNaN(concurrentWorkers) || concurrentWorkers < 1 ? 3 : concurrentWorkers
                 })
             })
             .then((res) => res.json())

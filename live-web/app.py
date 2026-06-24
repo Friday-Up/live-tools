@@ -175,9 +175,18 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
 
         show_browser = bool(data.get("show_browser"))
 
+        try:
+            concurrent_workers = int(data.get("concurrent_workers", PRICE_AUDIT_CONCURRENT_WORKERS))
+        except (TypeError, ValueError):
+            concurrent_workers = PRICE_AUDIT_CONCURRENT_WORKERS
+        concurrent_workers = max(1, min(10, concurrent_workers))
+
         stop_flag.clear()
         login_event.clear()
-        thread = threading.Thread(target=run_price_audit_task, args=(input_file, threshold, show_browser))
+        thread = threading.Thread(
+            target=run_price_audit_task,
+            args=(input_file, threshold, show_browser, concurrent_workers),
+        )
         thread.daemon = False
         thread.start()
         return jsonify({"success": True})
@@ -378,7 +387,7 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
         add_price_log("登录恢复，继续运行")
         return True
 
-    def run_price_audit_task(input_file: Path, threshold_price: float, show_browser: bool = False):
+    def run_price_audit_task(input_file: Path, threshold_price: float, show_browser: bool = False, concurrent_workers: int = PRICE_AUDIT_CONCURRENT_WORKERS):
         browser = None
         try:
             from utils.audit_runner import run_sku_batch_with_page_factory
@@ -394,6 +403,7 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
             add_price_log("开始批量测价")
             add_price_log(f"输入文件: {input_file.name}")
             add_price_log(f"价格门槛: ¥{threshold_price}")
+            add_price_log(f"并发浏览器数: {concurrent_workers}")
             worker_headless = not show_browser
             add_price_log(f"浏览器模式: {'有头' if show_browser else '无头'}")
 
@@ -459,7 +469,7 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                     add_price_log("登录状态未能同步到测价浏览器，请重新运行")
                     return
 
-            add_price_log(f"启用快扫响应取价 + {PRICE_AUDIT_CONCURRENT_WORKERS} 浏览器并发")
+            add_price_log(f"启用快扫响应取价 + {concurrent_workers} 浏览器并发")
 
             def on_item_start(i, total, row_index, sku):
                 with status_lock:
@@ -557,7 +567,7 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                 recover_login_func=lambda: wait_for_web_login(browser),
                 stop_event=stop_flag,
                 page_factory=lambda worker_index: create_worker_page(worker_index, block_images=True),
-                worker_count=PRICE_AUDIT_CONCURRENT_WORKERS,
+                worker_count=concurrent_workers,
                 on_item_start=on_item_start,
                 on_result=on_result,
                 on_login_required=lambda row_index, sku, result: add_price_log(
@@ -566,13 +576,13 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
             )
 
             if batch.results and not batch.stopped and not batch.login_failed and not stop_flag.is_set():
-                add_price_log(f"正在为低于门槛的商品并发补充截图（{PRICE_AUDIT_CONCURRENT_WORKERS} 个窗口）...")
+                add_price_log(f"正在为低于门槛的商品并发补充截图（{concurrent_workers} 个窗口）...")
                 screenshot_summary = capture_low_price_result_screenshots_with_page_factory(
                     results=batch.results,
                     screenshot_dir=str(app.config["PRICE_SCREENSHOT_DIR"]),
                     threshold_price=threshold_price,
                     page_factory=lambda worker_index: create_worker_page(worker_index, block_images=False),
-                    worker_count=PRICE_AUDIT_CONCURRENT_WORKERS,
+                    worker_count=concurrent_workers,
                     should_stop=stop_flag.is_set,
                 )
                 add_price_log(

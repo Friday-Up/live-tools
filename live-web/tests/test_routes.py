@@ -229,9 +229,10 @@ class PromotionBindingRoutesTest(unittest.TestCase):
 
         worker_factory_source = source[source.index("def create_worker_page"):source.index("def on_result")]
         self.assertIn("show_browser = bool(data.get(\"show_browser\"))", source)
-        self.assertIn("args=(input_file, threshold, show_browser)", source)
+        self.assertIn("args=(input_file, threshold, show_browser, concurrent_workers)", source)
         self.assertIn("worker_headless = not show_browser", source)
         self.assertIn("headless=worker_headless", worker_factory_source)
+        self.assertIn("并发浏览器数", source)
         self.assertIn("浏览器模式", source)
 
     def test_price_audit_scan_workers_block_images_but_screenshot_workers_keep_images(self):
