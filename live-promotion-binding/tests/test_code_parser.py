@@ -61,5 +61,43 @@ class CodeParserTest(unittest.TestCase):
         self.assertEqual(result.issues, [IssueType.KEY_PROMO_CONFLICT])
 
 
+    def test_parses_ba_key(self):
+        result = parse_code_cell("BA_9t7zua1")
+        self.assertEqual(result.keys, ["BA_9t7zua1"])
+        self.assertEqual(result.promo_ids, [])
+        self.assertEqual(result.issues, [])
+
+    def test_parses_ba_key_case_insensitive(self):
+        result = parse_code_cell("ba_9T7ZUA1")
+        self.assertEqual(result.keys, ["BA_9T7ZUA1"])
+        self.assertEqual(result.promo_ids, [])
+        self.assertEqual(result.issues, [])
+
+    def test_marks_multiple_ba_keys_as_issue(self):
+        result = parse_code_cell("BA_9t7zua1 BA_9bz63kn")
+        self.assertEqual(result.keys, ["BA_9t7zua1", "BA_9bz63kn"])
+        self.assertEqual(result.promo_ids, [])
+        self.assertEqual(result.issues, [IssueType.MULTIPLE_KEYS])
+
+    def test_marks_ba_key_and_promo_conflict(self):
+        result = parse_code_cell("BA_9t7zua1 381421541016")
+        self.assertEqual(result.keys, ["BA_9t7zua1"])
+        self.assertEqual(result.promo_ids, ["381421541016"])
+        self.assertEqual(result.issues, [IssueType.KEY_PROMO_CONFLICT])
+
+    def test_parses_mixed_vender_and_ba_keys_as_multiple_keys(self):
+        result = parse_code_cell(
+            "vender_BA#a9d94c41368e441094132b17a3b40fd6 BA_9t7zua1"
+        )
+        self.assertEqual(
+            result.keys,
+            [
+                "vender_BA#a9d94c41368e441094132b17a3b40fd6",
+                "BA_9t7zua1",
+            ],
+        )
+        self.assertEqual(result.promo_ids, [])
+        self.assertEqual(result.issues, [IssueType.MULTIPLE_KEYS])
+
 if __name__ == "__main__":
     unittest.main()

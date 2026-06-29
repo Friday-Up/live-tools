@@ -271,7 +271,7 @@ def _filename_timestamp(generated_at: datetime | None = None) -> str:
 
 def _message_for_issue(issue_type: str) -> str:
     return {
-        IssueType.INVALID_CODE.value: "未识别到专享券KEY或专享价促销ID",
+        IssueType.INVALID_CODE.value: "未识别到专享券KEY（vender_BA# 或 BA_ 开头）或专享价促销ID",
         IssueType.MULTIPLE_KEYS.value: "同一单元格出现多个专享券KEY",
         IssueType.MULTIPLE_PROMO_IDS.value: "同一单元格出现多个专享价促销ID",
         IssueType.KEY_PROMO_CONFLICT.value: "同一单元格同时出现专享券KEY和专享价促销ID",

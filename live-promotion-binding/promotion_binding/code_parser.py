@@ -22,6 +22,7 @@ class ParsedCode:
 
 
 KEY_RE = re.compile(r"vender[_\s-]*BA\s*#\s*([A-Za-z0-9]{32})", re.IGNORECASE)
+BA_KEY_RE = re.compile(r"BA_([A-Za-z0-9]{6,})", re.IGNORECASE)
 PROMO_ID_RE = re.compile(r"(?<!\d)(\d{10,})(?!\d)")
 
 
@@ -41,8 +42,16 @@ def _extract_keys(text: str) -> tuple[list[str], str]:
     remaining_parts = []
     last_end = 0
 
-    for match in KEY_RE.finditer(text):
-        keys.append(f"vender_BA#{match.group(1)}")
+    all_matches = sorted(
+        list(KEY_RE.finditer(text)) + list(BA_KEY_RE.finditer(text)),
+        key=lambda m: m.start(),
+    )
+
+    for match in all_matches:
+        if match.re is KEY_RE:
+            keys.append(f"vender_BA#{match.group(1)}")
+        else:
+            keys.append(f"BA_{match.group(1)}")
         start, end = match.span()
         remaining_parts.append(text[last_end:start])
         last_end = end
