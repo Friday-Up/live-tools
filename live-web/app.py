@@ -64,9 +64,9 @@ def _load_price_audit_concurrent_workers() -> int:
         spec = importlib.util.spec_from_file_location("price_audit_config", config_path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        return max(1, int(module.CONFIG.get("concurrent_workers", 3)))
+        return max(1, int(module.CONFIG.get("concurrent_workers", 5)))
     except Exception:
-        return 3
+        return 5
 
 
 PRICE_AUDIT_CONCURRENT_WORKERS = _load_price_audit_concurrent_workers()
@@ -265,6 +265,7 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
     def generate_promotion_binding():
         _cleanup_runtime_for_app(app)
         column_mapping = None
+        enable_selling_point = False
 
         if request.is_json:
             data = request.get_json(silent=True) or {}
@@ -276,6 +277,7 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                 column_mapping = _parse_column_mapping(data.get("column_mapping") or {})
             except ValueError as exc:
                 return _json_error(str(exc))
+            enable_selling_point = bool(data.get("enable_selling_point"))
         else:
             uploaded = request.files.get("file")
             if uploaded is None or not uploaded.filename:
@@ -295,6 +297,7 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                 template_file=app.config["PROMOTION_TEMPLATE_FILE"],
                 output_dir=app.config["PROMOTION_OUTPUT_DIR"] / task_id,
                 column_mapping=column_mapping,
+                enable_selling_point=enable_selling_point,
             )
         except Exception as exc:
             return _json_error(str(exc), status_code=500)
@@ -304,14 +307,20 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
             "report": result.report_path,
         }
 
+        messages = []
+        if enable_selling_point and not result.selling_point_column_found:
+            messages.append("未识别到短卖点列")
+
         return jsonify(
             {
                 "success": True,
                 "task_id": task_id,
+                "messages": messages,
                 "summary": {
                     "success_count": result.success_count,
                     "coupon_key_count": result.coupon_key_count,
                     "promo_id_count": result.promo_id_count,
+                    "selling_point_count": result.selling_point_count,
                     "skipped_empty_count": result.skipped_empty_count,
                     "invalid_count": result.invalid_count,
                     "duplicate_count": result.duplicate_count,
@@ -772,6 +781,7 @@ def _mapping_payload(mapping: ColumnMapping):
         "sku_col": mapping.sku_col,
         "code_col": mapping.code_col,
         "product_name_col": mapping.product_name_col,
+        "selling_point_col": mapping.selling_point_col,
     }
 
 
@@ -779,11 +789,17 @@ def _parse_column_mapping(raw_mapping) -> ColumnMapping:
     sku_col = _parse_column_value(raw_mapping.get("sku_col"))
     code_col = _parse_column_value(raw_mapping.get("code_col"))
     product_name_col = _parse_column_value(raw_mapping.get("product_name_col"))
+    selling_point_col = _parse_column_value(raw_mapping.get("selling_point_col"))
     if sku_col is None:
         raise ValueError("请选择 SKU 列")
     if code_col is None:
         raise ValueError("请选择券码/促销编码列")
-    return ColumnMapping(sku_col=sku_col, code_col=code_col, product_name_col=product_name_col)
+    return ColumnMapping(
+        sku_col=sku_col,
+        code_col=code_col,
+        product_name_col=product_name_col,
+        selling_point_col=selling_point_col,
+    )
 
 
 def _parse_column_value(value):

@@ -119,6 +119,83 @@ class PromotionBindingRoutesTest(unittest.TestCase):
         self.assertEqual(payload["columns"][0]["sample_values"], ["1001", "1002"])
         self.assertTrue(Path(payload["path"]).exists())
 
+    def test_preview_suggests_selling_point_column(self):
+        app = create_app(base_dir=Path(tempfile.mkdtemp()))
+        client = app.test_client()
+
+        response = client.post(
+            "/api/promotion-binding/preview",
+            data={"file": (io.BytesIO(self._business_workbook_with_selling_point_bytes()), "业务提报.xlsx")},
+            content_type="multipart/form-data",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["suggested_mapping"]["selling_point_col"], 4)
+
+    def test_generate_with_enable_selling_point(self):
+        base_dir = Path(tempfile.mkdtemp())
+        app = create_app(base_dir=base_dir)
+        client = app.test_client()
+
+        preview_response = client.post(
+            "/api/promotion-binding/preview",
+            data={"file": (io.BytesIO(self._business_workbook_with_selling_point_bytes()), "业务提报.xlsx")},
+            content_type="multipart/form-data",
+        )
+        preview_payload = preview_response.get_json()
+        self.assertTrue(preview_payload["success"])
+
+        response = client.post(
+            "/api/promotion-binding/generate",
+            json={
+                "task_id": preview_payload["task_id"],
+                "column_mapping": {
+                    "sku_col": 1,
+                    "code_col": 3,
+                    "selling_point_col": 4,
+                },
+                "enable_selling_point": True,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["summary"]["selling_point_count"], 2)
+        self.assertEqual(payload["messages"], [])
+
+    def test_generate_warns_when_selling_point_column_not_found(self):
+        base_dir = Path(tempfile.mkdtemp())
+        app = create_app(base_dir=base_dir)
+        client = app.test_client()
+
+        preview_response = client.post(
+            "/api/promotion-binding/preview",
+            data={"file": (io.BytesIO(self._business_workbook_bytes()), "业务提报.xlsx")},
+            content_type="multipart/form-data",
+        )
+        preview_payload = preview_response.get_json()
+        self.assertTrue(preview_payload["success"])
+
+        response = client.post(
+            "/api/promotion-binding/generate",
+            json={
+                "task_id": preview_payload["task_id"],
+                "column_mapping": {
+                    "sku_col": 1,
+                    "code_col": 3,
+                },
+                "enable_selling_point": True,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["success"])
+        self.assertIn("未识别到短卖点列", payload["messages"])
+
     def test_generate_promotion_binding_files_with_selected_columns(self):
         base_dir = Path(tempfile.mkdtemp())
         app = create_app(base_dir=base_dir)
@@ -296,6 +373,23 @@ class PromotionBindingRoutesTest(unittest.TestCase):
         ws.append(["排期", "商品编号", "标题", "权益内容"])
         ws.append(["2026-06-18", "1001", "A 商品", "vender_BA#a9d94c41368e441094132b17a3b40fd6"])
         ws.append(["2026-06-19", "1002", "B 商品", "381421541016"])
+        output = io.BytesIO()
+        wb.save(output)
+        return output.getvalue()
+
+    def _business_workbook_with_selling_point_bytes(self):
+        wb = Workbook()
+        ws = wb.active
+        ws.append(
+            [
+                "skuID",
+                "商品名称",
+                "促销编码 专享券填专享券key码 专享价填ERP促销编码",
+                "短卖点（折扣、直降、卖点都可以）",
+            ]
+        )
+        ws.append(["1001", "A 商品", "vender_BA#a9d94c41368e441094132b17a3b40fd6", "限时直降"])
+        ws.append(["1002", "B 商品", "381421541016", "满减优惠"])
         output = io.BytesIO()
         wb.save(output)
         return output.getvalue()

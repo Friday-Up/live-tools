@@ -53,18 +53,18 @@ class ReportWriterTest(unittest.TestCase):
 
         wb = load_workbook(output_path, data_only=True)
 
-        self.assertEqual(wb.sheetnames, ["汇总", "可上传明细", "需处理异常", "跳过和重复"])
+        self.assertEqual(wb.sheetnames, ["汇总", "可上传明细", "需处理异常", "跳过和重复", "短卖点警告"])
         self.assertEqual([wb["汇总"].cell(1, col).value for col in range(1, 5)], ["分类", "指标", "数量", "说明"])
         self.assertEqual(wb["汇总"].cell(2, 2).value, "可绑定条数")
         self.assertEqual(wb["汇总"].cell(2, 3).value, 1)
         self.assertEqual(
-            [wb["可上传明细"].cell(1, col).value for col in range(1, 7)],
-            ["原始行号", "SKU", "商品名称", "绑定类型", "绑定值", "写入模板行号"],
+            [wb["可上传明细"].cell(1, col).value for col in range(1, 8)],
+            ["原始行号", "SKU", "商品名称", "绑定类型", "绑定值", "短卖点", "写入模板行号"],
         )
         self.assertEqual(wb["可上传明细"].cell(2, 1).value, 8)
         self.assertEqual(wb["可上传明细"].cell(2, 3).value, "A 商品")
         self.assertEqual(wb["可上传明细"].cell(2, 4).value, "专享价促销ID")
-        self.assertEqual(wb["可上传明细"].cell(2, 6).value, 2)
+        self.assertEqual(wb["可上传明细"].cell(2, 7).value, 2)
         self.assertEqual(wb["需处理异常"].cell(2, 1).value, 25)
         self.assertEqual(wb["需处理异常"].cell(2, 3).value, "B 商品")
         self.assertEqual(wb["需处理异常"].cell(2, 5).value, "未识别到有效券码/促销ID")

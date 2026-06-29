@@ -15,6 +15,7 @@ class BusinessRow:
     sku: str
     raw_code: str
     product_name: str = ""
+    selling_point: str = ""
 
 
 @dataclass(frozen=True)
@@ -22,6 +23,7 @@ class ColumnMapping:
     sku_col: int | None = None
     code_col: int | None = None
     product_name_col: int | None = None
+    selling_point_col: int | None = None
 
 
 @dataclass(frozen=True)
@@ -40,6 +42,7 @@ class WorkbookInspection:
 SKU_COLUMN_KEYWORDS = ["sku", "skuid", "上播skuid"]
 CODE_COLUMN_KEYWORDS = ["券码", "价码", "促销编码", "专享券", "专享价", "达人id"]
 PRODUCT_NAME_COLUMN_KEYWORDS = ["商品名称"]
+SELLING_POINT_COLUMN_KEYWORDS = ["短卖点", "利益点", "卖点"]
 
 
 def normalize_header(value) -> str:
@@ -93,6 +96,7 @@ def inspect_business_workbook(file_path: str | Path, sample_size: int = 3) -> Wo
             sku_col=_find_column(headers, SKU_COLUMN_KEYWORDS),
             code_col=_find_column(headers, CODE_COLUMN_KEYWORDS),
             product_name_col=_find_column(headers, PRODUCT_NAME_COLUMN_KEYWORDS),
+            selling_point_col=_find_column(headers, SELLING_POINT_COLUMN_KEYWORDS),
         ),
     )
 
@@ -115,6 +119,7 @@ def read_business_rows(file_path: str | Path, column_mapping: ColumnMapping | No
     sku_col = _require_column_index(mapping.sku_col, ws.max_column, "SKU列")
     code_col = _require_column_index(mapping.code_col, ws.max_column, "绑定值列")
     product_name_col = _optional_column_index(mapping.product_name_col, ws.max_column, "商品名称列")
+    selling_point_col = _optional_column_index(mapping.selling_point_col, ws.max_column, "短卖点列")
 
     rows: list[BusinessRow] = []
     for row_index in range(2, ws.max_row + 1):
@@ -123,12 +128,14 @@ def read_business_rows(file_path: str | Path, column_mapping: ColumnMapping | No
             continue
         raw_code = format_cell_value(ws.cell(row_index, code_col).value)
         product_name = format_cell_value(ws.cell(row_index, product_name_col).value) if product_name_col else ""
+        selling_point = format_cell_value(ws.cell(row_index, selling_point_col).value) if selling_point_col else ""
         rows.append(
             BusinessRow(
                 source_row=row_index,
                 sku=sku,
                 raw_code=raw_code,
                 product_name=product_name,
+                selling_point=selling_point,
             )
         )
 

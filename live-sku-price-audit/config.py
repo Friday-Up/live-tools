@@ -29,9 +29,9 @@ CONFIG = {
     'output_dir': os.path.join(BASE_DIR, 'output'),
     'screenshot_dir': os.path.join(BASE_DIR, 'output', 'screenshots'),
 
-    # 并发配置
-    # 测价 worker 浏览器数量；Mac 可适当提高，Windows 若出现 wareBusiness 大量超时再降回 3
-    'concurrent_workers': 3,
+   # 并发配置
+   # 测价 worker 浏览器数量；Mac 可适当提高，Windows 若出现 wareBusiness 大量超时再降回 3
+    'concurrent_workers': 5,
 
     # 防爬配置
     'delay_min': 1,      # 最小延迟（秒）

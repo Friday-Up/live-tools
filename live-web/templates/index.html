@@ -217,6 +217,8 @@
             grid-template-columns: repeat(2, minmax(0, 1fr));
             gap: 12px;
         }
+        .selling-point-mapping { display: none; }
+        .selling-point-mapping.active { display: block; }
 
         .btn {
             display: inline-flex;
@@ -509,7 +511,7 @@
                             <label class="form-label">价格门槛（低于此价格标记为“不符合上菜”）</label>
                             <input type="number" class="form-input" id="thresholdInput" value="6.0" step="0.1" min="0">
                             <label class="form-label" style="margin-top: 12px;">并发浏览器数</label>
-                            <input type="number" class="form-input" id="concurrentWorkersInput" value="3" step="1" min="1" max="10">
+                            <input type="number" class="form-input" id="concurrentWorkersInput" value="5" step="1" min="1" max="10">
                             <label class="checkbox-row">
                                 <input type="checkbox" id="showBrowserInput">
                                 <span>显示测价浏览器窗口</span>
@@ -615,6 +617,10 @@
                             <label class="form-label">券码/促销编码列</label>
                             <select class="form-input" id="promotionCodeColumn"></select>
                         </div>
+                        <div class="form-group selling-point-mapping" id="promotionSellingPointMapping">
+                            <label class="form-label">短卖点列</label>
+                            <select class="form-input" id="promotionSellingPointColumn"></select>
+                        </div>
                     </div>
                 </div>
 
@@ -627,6 +633,10 @@
                         </div>
                         <button class="btn btn-primary" id="promotionGenerateBtn" disabled>生成导入模板</button>
                     </div>
+                    <label class="checkbox-row">
+                        <input type="checkbox" id="enableSellingPointInput">
+                        <span>自动匹配短卖点（会识别“短卖点/利益点/卖点”列并写入模板）</span>
+                    </label>
                 </div>
             </div>
 
@@ -661,6 +671,7 @@
         let selectedPromotionFile = null;
         let selectedPromotionTaskId = null;
         let promotionColumns = [];
+        let promotionSuggestedMapping = {};
 
         const uploadArea = document.getElementById('uploadArea');
         const fileInput = document.getElementById('fileInput');
@@ -676,6 +687,9 @@
         const promotionColumnMapping = document.getElementById('promotionColumnMapping');
         const promotionSkuColumn = document.getElementById('promotionSkuColumn');
         const promotionCodeColumn = document.getElementById('promotionCodeColumn');
+        const promotionSellingPointColumn = document.getElementById('promotionSellingPointColumn');
+        const promotionSellingPointMapping = document.getElementById('promotionSellingPointMapping');
+        const enableSellingPointInput = document.getElementById('enableSellingPointInput');
 
         document.querySelectorAll('.tool-tab').forEach((button) => {
             button.addEventListener('click', () => {
@@ -758,6 +772,7 @@
             selectedPromotionFile = file;
             selectedPromotionTaskId = null;
             promotionColumns = [];
+            promotionSuggestedMapping = {};
             hidePromotionColumnMapping();
             renderFile(promotionFileList, promotionUploadArea, file.name, '正在解析表头');
             promotionGenerateBtn.disabled = true;
@@ -772,6 +787,7 @@
                     if (!data.success) throw new Error(data.error || '读取表头失败');
                     selectedPromotionTaskId = data.task_id;
                     promotionColumns = data.columns || [];
+                    promotionSuggestedMapping = data.suggested_mapping || {};
                     renderPromotionColumnOptions(promotionColumns, data.suggested_mapping || {});
                     renderFile(promotionFileList, promotionUploadArea, data.filename || file.name, '已解析表头');
                     promotionGenerateBtn.disabled = false;
@@ -788,13 +804,28 @@
             promotionColumnMapping.classList.remove('active');
             promotionSkuColumn.innerHTML = '';
             promotionCodeColumn.innerHTML = '';
+            promotionSellingPointColumn.innerHTML = '';
+            promotionSellingPointMapping.classList.remove('active');
         }
 
         function renderPromotionColumnOptions(columns, suggestedMapping) {
             promotionSkuColumn.innerHTML = buildColumnOptions(columns, suggestedMapping.sku_col, false);
             promotionCodeColumn.innerHTML = buildColumnOptions(columns, suggestedMapping.code_col, false);
+            if (enableSellingPointInput.checked) {
+                promotionSellingPointColumn.innerHTML = buildColumnOptions(columns, suggestedMapping.selling_point_col, true);
+                promotionSellingPointMapping.classList.add('active');
+            } else {
+                promotionSellingPointColumn.innerHTML = '';
+                promotionSellingPointMapping.classList.remove('active');
+            }
             promotionColumnMapping.classList.add('active');
         }
+
+        enableSellingPointInput.addEventListener('change', () => {
+            if (promotionColumns.length > 0) {
+                renderPromotionColumnOptions(promotionColumns, promotionSuggestedMapping);
+            }
+        });
 
         function buildColumnOptions(columns, selectedIndex, allowEmpty) {
             const options = [];
@@ -1055,15 +1086,20 @@
                     task_id: selectedPromotionTaskId,
                     column_mapping: {
                         sku_col: promotionSkuColumn.value,
-                        code_col: promotionCodeColumn.value
-                    }
+                        code_col: promotionCodeColumn.value,
+                        selling_point_col: enableSellingPointInput.checked ? promotionSellingPointColumn.value : null,
+                    },
+                    enable_selling_point: enableSellingPointInput.checked,
                 })
             })
                 .then((res) => res.json())
                 .then((data) => {
                     if (!data.success) throw new Error(data.error || '生成失败');
                     showPromotionResult(data);
-                    showMessage(promotionStatusMessage, '生成完成', 'success');
+                    const message = data.messages && data.messages.length > 0
+                        ? `生成完成，${data.messages.join('；')}`
+                        : '生成完成';
+                    showMessage(promotionStatusMessage, message, 'success');
                 })
                 .catch((error) => showMessage(promotionStatusMessage, error.message, 'error'))
                 .finally(() => {
@@ -1077,10 +1113,15 @@
                 ['可绑定', summary.success_count],
                 ['KEY', summary.coupon_key_count],
                 ['促销ID', summary.promo_id_count],
+            ];
+            if (enableSellingPointInput.checked) {
+                items.push(['短卖点', summary.selling_point_count]);
+            }
+            items.push(
                 ['空值', summary.skipped_empty_count],
                 ['异常', summary.invalid_count],
                 ['重复', summary.duplicate_count],
-            ];
+            );
             document.getElementById('promotionSummary').innerHTML = items.map(([label, value]) => `
                 <div class="summary-item">
                     <div class="summary-value">${escapeHtml(value)}</div>
@@ -1091,6 +1132,9 @@
             document.getElementById('promotionReportDownload').href = data.report_download_url;
             document.getElementById('promotionResultCard').classList.add('active');
             document.getElementById('promotionResultCard').scrollIntoView({ behavior: 'smooth' });
+            if (data.messages && data.messages.length > 0) {
+                showMessage(promotionStatusMessage, data.messages.join('；'), 'info');
+            }
         }
 
         document.getElementById('promotionRestartBtn').addEventListener('click', () => {

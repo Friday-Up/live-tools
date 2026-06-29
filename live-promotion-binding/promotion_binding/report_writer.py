@@ -33,6 +33,7 @@ MANUAL_ISSUE_TYPES = {
 }
 
 SKIPPED_ISSUE_TYPES = {"EMPTY_CODE", "DUPLICATE_BINDING"}
+SELLING_POINT_ISSUE_TYPES = {"SELLING_POINT_TOO_LONG"}
 
 ISSUE_LABELS = {
     "EMPTY_CODE": "未填写券码/价码",
@@ -43,6 +44,9 @@ ISSUE_LABELS = {
     "SKU_BINDING_CONFLICT": "同一 SKU 出现多个不同绑定值",
     "DUPLICATE_BINDING": "重复 SKU 和绑定值",
 }
+ISSUE_LABELS.update({
+    "SELLING_POINT_TOO_LONG": "短卖点超过 22 个字符",
+})
 
 BINDING_TYPE_LABELS = {
     "COUPON_KEY": "专享券KEY码",
@@ -65,12 +69,13 @@ def write_report(
     detail_ws = wb.create_sheet("可上传明细")
     manual_issue_ws = wb.create_sheet("需处理异常")
     skipped_ws = wb.create_sheet("跳过和重复")
+    selling_point_ws = wb.create_sheet("短卖点警告")
 
     _write_rows(summary_ws, _summary_rows(summary))
     _write_rows(
         detail_ws,
         [
-            ["原始行号", "SKU", "商品名称", "绑定类型", "绑定值", "写入模板行号"],
+            ["原始行号", "SKU", "商品名称", "绑定类型", "绑定值", "短卖点", "写入模板行号"],
             *[
                 [
                     record.source_row,
@@ -78,6 +83,7 @@ def write_report(
                     record.product_name,
                     _binding_type_label(record),
                     record.binding_value,
+                    record.selling_point,
                     template_row,
                 ]
                 for template_row, record in enumerate(binding_records, start=2)
@@ -121,6 +127,24 @@ def write_report(
             ],
         ],
     )
+    _write_rows(
+        selling_point_ws,
+        [
+            ["原始行号", "SKU", "商品名称", "短卖点", "问题", "建议处理"],
+            *[
+                [
+                    issue.source_row,
+                    issue.sku,
+                    issue.product_name,
+                    issue.raw_code,
+                    _issue_label(issue),
+                    issue.action,
+                ]
+                for issue in issue_records
+                if issue.issue_type in SELLING_POINT_ISSUE_TYPES
+            ],
+        ],
+    )
 
     for ws in wb.worksheets:
         _format_sheet(ws)
@@ -139,9 +163,11 @@ def _summary_rows(summary: dict[str, int]) -> list[list[object]]:
         "可绑定条数": ("生成结果", "会写入官方上传模板"),
         "专享券KEY条数": ("生成结果", "写入模板 C 列"),
         "专享价促销ID条数": ("生成结果", "写入模板 D 列"),
+        "含短卖点条数": ("生成结果", "写入模板 B 列"),
         "空值跳过": ("未进入模板", "券码/价码为空，默认不需要上传"),
         "异常条数": ("未进入模板", "需要人工确认后再生成"),
         "重复条数": ("未进入模板", "相同 SKU 和绑定值仅保留第一条"),
+        "短卖点超长警告": ("警告", "超过 22 个字符，上传后不展示"),
     }
     rows: list[list[object]] = [["分类", "指标", "数量", "说明"]]
     for metric, count in summary.items():
@@ -151,6 +177,8 @@ def _summary_rows(summary: dict[str, int]) -> list[list[object]]:
 
 
 def _binding_type_label(record: BindingRecord) -> str:
+    if record.binding_type is None:
+        return ""
     return BINDING_TYPE_LABELS.get(record.binding_type.value, record.binding_type.value)
 
 

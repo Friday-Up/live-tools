@@ -21,6 +21,7 @@ class BindingRecord:
     binding_value: str
     source_row: int
     product_name: str = ""
+    selling_point: str = ""
 
 
 def write_upload_template(
@@ -43,6 +44,10 @@ def write_upload_template(
         sku_cell.value = str(record.sku)
         sku_cell.number_format = "@"
 
+        if record.selling_point:
+            selling_point_cell = ws.cell(index, 2)
+            selling_point_cell.value = str(record.selling_point)
+
         if record.binding_type == BindingType.COUPON_KEY:
             key_cell = ws.cell(index, 3)
             key_cell.value = str(record.binding_value)
@@ -51,8 +56,6 @@ def write_upload_template(
             promo_cell = ws.cell(index, 4)
             promo_cell.value = str(record.binding_value)
             promo_cell.number_format = "@"
-        else:
-            raise ValueError(f"不支持的绑定类型: {record.binding_type}")
 
     wb.save(output_path)
     return output_path

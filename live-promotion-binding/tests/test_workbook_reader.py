@@ -131,6 +131,39 @@ class WorkbookReaderTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "未找到"):
             read_business_rows(path)
 
+    def test_inspects_and_reads_selling_point_column(self):
+        path = self._create_workbook(
+            [
+                ["skuID", "商品名称", "券码", "短卖点（折扣、直降、卖点都可以）"],
+                ["1001", "A 商品", "vender_BA#a9d94c41368e441094132b17a3b40fd6", "限时直降"],
+                ["1002", "B 商品", "381421541016", "满减优惠"],
+            ]
+        )
+
+        inspection = inspect_business_workbook(path)
+        self.assertEqual(inspection.suggested_mapping.selling_point_col, 4)
+
+        rows = read_business_rows(path)
+        self.assertEqual(
+            rows,
+            [
+                BusinessRow(
+                    source_row=2,
+                    sku="1001",
+                    raw_code="vender_BA#a9d94c41368e441094132b17a3b40fd6",
+                    product_name="A 商品",
+                    selling_point="限时直降",
+                ),
+                BusinessRow(
+                    source_row=3,
+                    sku="1002",
+                    raw_code="381421541016",
+                    product_name="B 商品",
+                    selling_point="满减优惠",
+                ),
+            ],
+        )
+
     def _create_workbook(self, rows):
         tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
         tmp.close()

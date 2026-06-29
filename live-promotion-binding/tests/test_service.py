@@ -47,9 +47,9 @@ class ServiceTest(unittest.TestCase):
         self.assertIsNone(template_ws.cell(4, 1).value)
 
         report_wb = load_workbook(result.report_path, data_only=True)
-        self.assertEqual(report_wb.sheetnames, ["汇总", "可上传明细", "需处理异常", "跳过和重复"])
+        self.assertEqual(report_wb.sheetnames, ["汇总", "可上传明细", "需处理异常", "跳过和重复", "短卖点警告"])
         self.assertEqual(report_wb["可上传明细"].cell(2, 3).value, "商品 1001")
-        self.assertEqual(report_wb["可上传明细"].cell(3, 6).value, 3)
+        self.assertEqual(report_wb["可上传明细"].cell(3, 7).value, 3)
 
         manual_issue_rows = [
             [
@@ -98,6 +98,96 @@ class ServiceTest(unittest.TestCase):
         )
         wb.save(path)
         return path
+
+    def test_includes_selling_point_when_switch_enabled(self):
+        path = Path(tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False).name)
+        wb = Workbook()
+        ws = wb.active
+        ws.append(["skuID", "商品名称", "券码", "短卖点（折扣、直降、卖点都可以）"])
+        ws.append(["1001", "A 商品", "vender_BA#a9d94c41368e441094132b17a3b40fd6", "限时直降"])
+        ws.append(["1002", "B 商品", "381421541016", "满减优惠"])
+        wb.save(path)
+
+        output_dir = Path(tempfile.mkdtemp())
+        result = generate_binding_files(
+            business_file=path,
+            template_file=ASSET_TEMPLATE,
+            output_dir=output_dir,
+            enable_selling_point=True,
+        )
+
+        self.assertTrue(result.selling_point_column_found)
+        self.assertEqual(result.success_count, 2)
+        self.assertEqual(result.selling_point_count, 2)
+
+        template_wb = load_workbook(result.output_template_path, data_only=True)
+        template_ws = template_wb.active
+        self.assertEqual(template_ws.cell(2, 2).value, "限时直降")
+        self.assertEqual(template_ws.cell(3, 2).value, "满减优惠")
+
+        report_wb = load_workbook(result.report_path, data_only=True)
+        self.assertIn("短卖点警告", report_wb.sheetnames)
+        summary_values = {report_wb["汇总"].cell(row, 2).value: report_wb["汇总"].cell(row, 3).value for row in range(2, report_wb["汇总"].max_row + 1)}
+        self.assertEqual(summary_values["含短卖点条数"], 2)
+
+    def test_includes_selling_point_only_rows(self):
+        path = Path(tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False).name)
+        wb = Workbook()
+        ws = wb.active
+        ws.append(["skuID", "商品名称", "券码", "短卖点"])
+        ws.append(["1001", "A 商品", None, "仅短卖点"])
+        ws.append(["1002", "B 商品", "381421541016", "有价码和短卖点"])
+        wb.save(path)
+
+        output_dir = Path(tempfile.mkdtemp())
+        result = generate_binding_files(
+            business_file=path,
+            template_file=ASSET_TEMPLATE,
+            output_dir=output_dir,
+            enable_selling_point=True,
+        )
+
+        self.assertEqual(result.success_count, 2)
+        self.assertEqual(result.promo_id_count, 1)
+        self.assertEqual(result.coupon_key_count, 0)
+        self.assertEqual(result.selling_point_count, 2)
+
+        template_wb = load_workbook(result.output_template_path, data_only=True)
+        template_ws = template_wb.active
+        self.assertEqual(template_ws.cell(2, 1).value, "1001")
+        self.assertEqual(template_ws.cell(2, 2).value, "仅短卖点")
+        self.assertIsNone(template_ws.cell(2, 4).value)
+        self.assertEqual(template_ws.cell(3, 1).value, "1002")
+        self.assertEqual(template_ws.cell(3, 2).value, "有价码和短卖点")
+        self.assertEqual(template_ws.cell(3, 4).value, "381421541016")
+
+    def test_reports_selling_point_too_long_as_warning(self):
+        path = Path(tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False).name)
+        wb = Workbook()
+        ws = wb.active
+        ws.append(["skuID", "商品名称", "券码", "短卖点"])
+        ws.append(["1001", "A 商品", "381421541016", "这是一个超过二十二个字符的短卖点内容示例很好啊"])
+        wb.save(path)
+
+        output_dir = Path(tempfile.mkdtemp())
+        result = generate_binding_files(
+            business_file=path,
+            template_file=ASSET_TEMPLATE,
+            output_dir=output_dir,
+            enable_selling_point=True,
+        )
+
+        self.assertEqual(result.success_count, 1)
+        self.assertEqual(result.selling_point_count, 1)
+        self.assertEqual(result.invalid_count, 0)
+
+        report_wb = load_workbook(result.report_path, data_only=True)
+        warning_ws = report_wb["短卖点警告"]
+        self.assertEqual(warning_ws.max_row, 2)
+        self.assertEqual(warning_ws.cell(2, 4).value, "这是一个超过二十二个字符的短卖点内容示例很好啊")
+
+        template_wb = load_workbook(result.output_template_path, data_only=True)
+        self.assertEqual(template_wb.active.cell(2, 2).value, "这是一个超过二十二个字符的短卖点内容示例很好啊")
 
 
 if __name__ == "__main__":
