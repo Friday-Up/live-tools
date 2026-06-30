@@ -39,7 +39,7 @@
 
         .tool-tabs {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 1fr 1fr 1fr;
             gap: 8px;
             background: #e9eef5;
             border-radius: 12px;
@@ -473,6 +473,7 @@
             .form-row { flex-direction: column; align-items: stretch; }
             .mapping-grid { grid-template-columns: 1fr; }
             .tool-tabs { grid-template-columns: 1fr; }
+            .tool-tab { font-size: 14px; padding: 0 4px; }
             .stats { flex-wrap: wrap; }
             .btn { width: 100%; }
         }
@@ -482,12 +483,13 @@
     <div class="container">
         <div class="header">
             <h1>直播运营工具</h1>
-            <p>SKU 测价、绑定券码/促销ID统一入口</p>
+            <p>SKU 测价、绑定券码/促销ID、批量创建直播间统一入口</p>
         </div>
 
         <div class="tool-tabs">
             <button class="tool-tab active" data-tool="pricePanel">SKU 测价</button>
             <button class="tool-tab" data-tool="promotionPanel">绑定券码/促销ID</button>
+            <button class="tool-tab" data-tool="roomCreatorPanel">批量创建直播间</button>
         </div>
 
         <section class="tool-panel active" id="pricePanel">
@@ -652,6 +654,103 @@
                 </div>
             </div>
         </section>
+
+        <section class="tool-panel" id="roomCreatorPanel">
+            <div class="card" id="roomCreatorCard">
+                <div class="section-title">选择直播间创建 Excel 文件</div>
+
+                <div class="upload-area" id="roomCreatorUploadArea">
+                    <div class="upload-icon">📄</div>
+                    <div class="upload-text">点击上传或拖拽文件到此处</div>
+                    <div class="upload-hint">支持 .xlsx 格式，需包含「直播标题」和「开播时间」列</div>
+                </div>
+                <input type="file" id="roomCreatorFileInput" accept=".xlsx" class="hidden">
+                <div class="file-list" id="roomCreatorFileList"></div>
+                <div class="status-message" id="roomCreatorStatusMessage"></div>
+
+                <div class="column-mapping" id="roomCreatorMapping" style="margin-top: 16px;">
+                    <div class="section-title">列映射确认</div>
+                    <div id="roomCreatorMappingText" style="font-size: 13px; color: #666; line-height: 1.8;"></div>
+                </div>
+
+                <div style="margin-top: 20px;">
+                    <label class="checkbox-row" style="margin-bottom: 12px; display: inline-flex;">
+                        <input type="checkbox" id="showRoomBrowserInput">
+                        <span>显示创建浏览器窗口</span>
+                    </label>
+                    <br>
+                    <button class="btn btn-primary" id="roomCreatorStartBtn" disabled>开始创建</button>
+                </div>
+            </div>
+
+            <div class="card progress-section" id="roomCreatorProgressCard">
+                <div class="section-title">创建进度</div>
+
+                <div class="stats">
+                    <div class="stat">
+                        <div class="stat-value" id="roomCreatorStatCurrent">0/0</div>
+                        <div class="stat-label">当前/总数</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-value" id="roomCreatorStatSuccess" style="color: #27ae60;">0</div>
+                        <div class="stat-label">成功</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-value" id="roomCreatorStatFailed" style="color: #e74c3c;">0</div>
+                        <div class="stat-label">失败</div>
+                    </div>
+                </div>
+
+                <div class="progress-bar">
+                    <div class="progress-fill" id="roomCreatorProgressFill" style="width: 0%"></div>
+                </div>
+                <div class="progress-info">
+                    <span id="roomCreatorProgressText">准备中...</span>
+                    <span id="roomCreatorProgressPercent">0%</span>
+                </div>
+
+                <div style="text-align: center; margin-bottom: 16px;">
+                    <button class="btn btn-secondary" id="roomCreatorStopBtn" style="background: #e74c3c; color: white;">停止创建</button>
+                </div>
+
+                <div class="log-wrapper">
+                    <div class="log-header">
+                        <div class="section-title" style="margin-bottom: 0;">实时日志</div>
+                        <button class="log-copy-btn" id="roomCreatorCopyLogBtn">复制日志</button>
+                    </div>
+                    <div class="log-container" id="roomCreatorLogContainer"></div>
+                </div>
+            </div>
+
+            <div class="card result-section" id="roomCreatorResultCard">
+                <div class="result-icon">✓</div>
+                <div class="result-title">创建完成</div>
+                <div class="summary-grid">
+                    <div class="summary-item">
+                        <div class="summary-value" id="roomCreatorResultTotal">0</div>
+                        <div class="summary-label">总数</div>
+                    </div>
+                    <div class="summary-item">
+                        <div class="summary-value" id="roomCreatorResultSuccess" style="color: #27ae60;">0</div>
+                        <div class="summary-label">成功</div>
+                    </div>
+                    <div class="summary-item">
+                        <div class="summary-value" id="roomCreatorResultFailed" style="color: #e74c3c;">0</div>
+                        <div class="summary-label">失败</div>
+                    </div>
+                    <div class="summary-item">
+                        <div class="summary-value" id="roomCreatorResultSkipped" style="color: #f39c12;">0</div>
+                        <div class="summary-label">跳过</div>
+                    </div>
+                </div>
+                <div class="result-desc">结果文件已生成，可下载查看详细数据</div>
+                <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+                    <button class="btn btn-success" id="roomCreatorDownloadBtn">下载结果</button>
+                    <button class="btn btn-secondary" id="roomCreatorRestartBtn">再次创建</button>
+                </div>
+            </div>
+        </section>
+
     </div>
 
     <div class="modal" id="loginModal">
@@ -858,6 +957,12 @@
                     selectedFile = null;
                     startBtn.disabled = true;
                     fileInput.value = '';
+                } else if (targetList === roomCreatorFileList) {
+                    selectedRoomFile = null;
+                    selectedRoomTaskId = null;
+                    roomCreatorStartBtn.disabled = true;
+                    roomCreatorMapping.classList.remove('active');
+                    roomCreatorFileInput.value = '';
                 } else {
                     selectedPromotionFile = null;
                     selectedPromotionTaskId = null;
@@ -1007,6 +1112,7 @@
         document.getElementById('continueBtn').addEventListener('click', () => {
             hideLoginModal();
             fetch('/api/continue', { method: 'POST' });
+            fetch('/api/room-creator/continue', { method: 'POST' });
         });
 
         document.getElementById('downloadBtn').addEventListener('click', () => {
@@ -1142,6 +1248,231 @@
             clearMessage(promotionStatusMessage);
             promotionUploadArea.scrollIntoView({ behavior: 'smooth' });
         });
+
+        // Room Creator
+       let selectedRoomFile = null;
+       let selectedRoomTaskId = null;
+       let roomCreatorStatusInterval = null;
+        let roomCreatorMappingData = null;
+       let lastRoomCreatorStatus = null;
+
+        const roomCreatorUploadArea = document.getElementById('roomCreatorUploadArea');
+        const roomCreatorFileInput = document.getElementById('roomCreatorFileInput');
+        const roomCreatorFileList = document.getElementById('roomCreatorFileList');
+        const roomCreatorStartBtn = document.getElementById('roomCreatorStartBtn');
+        const roomCreatorStatusMessage = document.getElementById('roomCreatorStatusMessage');
+        const roomCreatorMapping = document.getElementById('roomCreatorMapping');
+        const roomCreatorMappingText = document.getElementById('roomCreatorMappingText');
+
+        bindUpload(roomCreatorUploadArea, roomCreatorFileInput, handleRoomCreatorFile);
+
+        function handleRoomCreatorFile(file) {
+            if (!file.name.endsWith('.xlsx')) {
+                alert('仅支持 .xlsx 格式');
+                return;
+            }
+            selectedRoomFile = file;
+            selectedRoomTaskId = null;
+            roomCreatorStartBtn.disabled = true;
+            roomCreatorMapping.classList.remove('active');
+            renderFile(roomCreatorFileList, roomCreatorUploadArea, file.name, '正在解析表头');
+            showMessage(roomCreatorStatusMessage, '正在读取表头...', 'info');
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            fetch('/api/room-creator/preview', { method: 'POST', body: formData })
+                .then((res) => res.json())
+               .then((data) => {
+                   if (!data.success) throw new Error(data.error || '读取表头失败');
+                   selectedRoomTaskId = data.task_id;
+                    roomCreatorMappingData = data.mapping || null;
+                   renderRoomCreatorMapping(data.mapping, data.defaults);
+                    renderFile(roomCreatorFileList, roomCreatorUploadArea, data.filename || file.name, '已解析表头');
+                    roomCreatorStartBtn.disabled = false;
+                    clearMessage(roomCreatorStatusMessage);
+                })
+                .catch((error) => {
+                    selectedRoomTaskId = null;
+                    roomCreatorStartBtn.disabled = true;
+                    showMessage(roomCreatorStatusMessage, error.message, 'error');
+                });
+        }
+
+        function renderRoomCreatorMapping(mapping, defaults) {
+            defaults = defaults || {};
+            const items = [
+                ['直播标题', mapping.title_col, null],
+                ['开播时间', mapping.start_time_col, null],
+                ['直播封面', mapping.cover_col, defaults.cover],
+                ['直播形式', mapping.live_form_col, defaults.live_form],
+                ['画面方向', mapping.live_direction_col, defaults.live_direction],
+                ['直播地点', mapping.live_location_col, defaults.live_location],
+                ['直播品类', mapping.live_category_col, defaults.live_category],
+            ];
+            roomCreatorMappingText.innerHTML = items
+                .map(([label, col, defaultValue]) => {
+                    const value = col
+                        ? escapeHtml(col)
+                        : `<span style="color:#aaa">未识别（默认值：${defaultValue !== undefined ? escapeHtml(defaultValue) : '无'}）</span>`;
+                    return `<div>${escapeHtml(label)}：${value}</div>`;
+                })
+                .join('');
+            roomCreatorMapping.classList.add('active');
+        }
+
+        roomCreatorStartBtn.addEventListener('click', () => {
+            if (!selectedRoomTaskId) {
+                alert('请先选择文件');
+                return;
+            }
+            roomCreatorStartBtn.disabled = true;
+            clearMessage(roomCreatorStatusMessage);
+            document.getElementById('roomCreatorProgressCard').classList.add('active');
+            document.getElementById('roomCreatorResultCard').classList.remove('active');
+
+           fetch('/api/room-creator/start', {
+               method: 'POST',
+               headers: { 'Content-Type': 'application/json' },
+               body: JSON.stringify({
+                   task_id: selectedRoomTaskId,
+                    show_browser: document.getElementById('showRoomBrowserInput').checked,
+                    column_mapping: roomCreatorMappingData
+               })
+           })
+            .then((res) => res.json())
+            .then((data) => {
+                if (!data.success) {
+                    showMessage(roomCreatorStatusMessage, data.error, 'error');
+                    roomCreatorStartBtn.disabled = false;
+                } else {
+                    startRoomCreatorStatusPolling();
+                }
+            })
+            .catch(() => {
+                showMessage(roomCreatorStatusMessage, '启动失败，请确认服务仍在运行', 'error');
+                roomCreatorStartBtn.disabled = false;
+            });
+        });
+
+        function startRoomCreatorStatusPolling() {
+            if (roomCreatorStatusInterval) clearInterval(roomCreatorStatusInterval);
+            document.getElementById('roomCreatorStopBtn').style.display = 'inline-flex';
+            document.getElementById('roomCreatorStopBtn').disabled = false;
+            roomCreatorStatusInterval = setInterval(() => {
+                fetch('/api/room-creator/status')
+                    .then((res) => res.json())
+                    .then((data) => {
+                        lastRoomCreatorStatus = data;
+                        updateRoomCreatorUI(data);
+                        if (data.need_login) showLoginModal();
+                        else hideLoginModal();
+
+                        if (!data.running && data.result_file && !data.error) {
+                            clearInterval(roomCreatorStatusInterval);
+                            showRoomCreatorResult(data);
+                            document.getElementById('roomCreatorStopBtn').style.display = 'none';
+                        } else if (!data.running && data.error) {
+                            clearInterval(roomCreatorStatusInterval);
+                            showMessage(roomCreatorStatusMessage, data.error, 'error');
+                            roomCreatorStartBtn.disabled = false;
+                            document.getElementById('roomCreatorStopBtn').style.display = 'none';
+                        } else if (!data.running) {
+                            clearInterval(roomCreatorStatusInterval);
+                            showMessage(roomCreatorStatusMessage, '创建已停止', 'info');
+                            roomCreatorStartBtn.disabled = false;
+                            document.getElementById('roomCreatorStopBtn').style.display = 'none';
+                        }
+                    })
+                    .catch(() => {
+                        clearInterval(roomCreatorStatusInterval);
+                        showMessage(roomCreatorStatusMessage, '连接服务失败，请重新启动工具', 'error');
+                        roomCreatorStartBtn.disabled = false;
+                        document.getElementById('roomCreatorStopBtn').style.display = 'none';
+                    });
+            }, 500);
+        }
+
+        function updateRoomCreatorUI(data) {
+            const completed = Math.min(data.current || 0, data.total || 0);
+            const percent = data.total > 0 ? Math.round((completed / data.total) * 100) : 0;
+            document.getElementById('roomCreatorProgressFill').style.width = percent + '%';
+            document.getElementById('roomCreatorProgressText').textContent = data.stopping ? '正在停止...' : (data.running ? `正在创建: ${data.current_title || '...'}` : '已完成');
+            document.getElementById('roomCreatorProgressPercent').textContent = percent + '%';
+            document.getElementById('roomCreatorStatCurrent').textContent = `${completed}/${data.total || 0}`;
+            document.getElementById('roomCreatorStatSuccess').textContent = data.created_count || 0;
+            document.getElementById('roomCreatorStatFailed').textContent = data.failed_count || 0;
+
+            const logContainer = document.getElementById('roomCreatorLogContainer');
+            logContainer.innerHTML = (data.logs || []).map((log) => {
+                let cls = '';
+                if (log.message.includes('成功') || log.message.includes('完成') || log.message.includes('保存')) cls = 'log-success';
+                else if (log.message.includes('失败') || log.message.includes('错误')) cls = 'log-error';
+                else if (log.message.includes('登录') || log.message.includes('停止')) cls = 'log-warning';
+                return `<div class="log-entry ${cls}"><span class="log-time">${escapeHtml(log.time)}</span>${escapeHtml(log.message)}</div>`;
+            }).join('');
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+
+        function showRoomCreatorResult(data) {
+            document.getElementById('roomCreatorResultCard').classList.add('active');
+            roomCreatorStartBtn.disabled = false;
+            clearMessage(roomCreatorStatusMessage);
+            document.getElementById('roomCreatorResultTotal').textContent = data.total || 0;
+            document.getElementById('roomCreatorResultSuccess').textContent = data.created_count || 0;
+            document.getElementById('roomCreatorResultFailed').textContent = data.failed_count || 0;
+            document.getElementById('roomCreatorResultSkipped').textContent = data.skipped || 0;
+            document.getElementById('roomCreatorResultCard').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        document.getElementById('roomCreatorStopBtn').addEventListener('click', () => {
+            if (confirm('确定要停止创建吗？')) {
+                document.getElementById('roomCreatorStopBtn').disabled = true;
+                showMessage(roomCreatorStatusMessage, '正在停止，正在关闭浏览器并退出当前步骤', 'info');
+                fetch('/api/room-creator/stop', { method: 'POST' })
+                    .catch(() => showMessage(roomCreatorStatusMessage, '停止请求发送失败，请稍后刷新页面确认状态', 'error'));
+            }
+        });
+
+        document.getElementById('roomCreatorDownloadBtn').addEventListener('click', () => {
+            window.location.href = '/api/room-creator/download';
+        });
+
+        document.getElementById('roomCreatorRestartBtn').addEventListener('click', () => {
+            document.getElementById('roomCreatorResultCard').classList.remove('active');
+            document.getElementById('roomCreatorProgressCard').classList.remove('active');
+            document.getElementById('roomCreatorProgressFill').style.width = '0%';
+            document.getElementById('roomCreatorProgressText').textContent = '准备中...';
+            document.getElementById('roomCreatorProgressPercent').textContent = '0%';
+            document.getElementById('roomCreatorStatCurrent').textContent = '0/0';
+            document.getElementById('roomCreatorStatSuccess').textContent = '0';
+            document.getElementById('roomCreatorStatFailed').textContent = '0';
+            document.getElementById('roomCreatorLogContainer').innerHTML = '';
+            roomCreatorMapping.classList.remove('active');
+            clearMessage(roomCreatorStatusMessage);
+            roomCreatorUploadArea.scrollIntoView({ behavior: 'smooth' });
+        });
+
+        document.getElementById('roomCreatorCopyLogBtn').addEventListener('click', () => {
+            const logContainer = document.getElementById('roomCreatorLogContainer');
+            const logs = Array.from(logContainer.querySelectorAll('.log-entry'))
+                .map((entry) => entry.textContent)
+                .join('\n');
+            if (!logs) {
+                alert('暂无日志可复制');
+                return;
+            }
+            navigator.clipboard.writeText(logs).then(() => {
+                const btn = document.getElementById('roomCreatorCopyLogBtn');
+                btn.textContent = '已复制';
+                btn.classList.add('copied');
+                setTimeout(() => {
+                    btn.textContent = '复制日志';
+                    btn.classList.remove('copied');
+                }, 2000);
+            }).catch(() => alert('复制失败，请手动选择复制'));
+        });
+
     </script>
 </body>
 </html>

@@ -351,6 +351,34 @@ class PromotionBindingRoutesTest(unittest.TestCase):
         self.assertIn("def close_current_browsers", source)
         self.assertIn("close_current_browsers()", source[source.index("def stop_price_audit"):])
 
+
+    def test_room_creator_preview_stores_column_mapping(self):
+        app = create_app(base_dir=Path(tempfile.mkdtemp()))
+        client = app.test_client()
+
+        wb = Workbook()
+        ws = wb.active
+        ws.append(["直播标题", "开播时间", "直播形式", "画面方向", "直播地点", "直播品类"])
+        ws.append(["直播间一号", "2026-07-01 20:00:00", "测试直播", "横屏", "不显示地点", "母婴"])
+        output = io.BytesIO()
+        wb.save(output)
+
+        response = client.post(
+            "/api/room-creator/preview",
+            data={"file": (io.BytesIO(output.getvalue()), "rooms.xlsx")},
+            content_type="multipart/form-data",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["mapping"]["title_col"], "直播标题")
+        self.assertEqual(payload["mapping"]["start_time_col"], "开播时间")
+        self.assertEqual(payload["mapping"]["live_form_col"], "直播形式")
+        self.assertEqual(payload["mapping"]["live_direction_col"], "画面方向")
+        self.assertEqual(payload["mapping"]["live_location_col"], "直播地点")
+        self.assertEqual(payload["mapping"]["live_category_col"], "直播品类")
+        self.assertIn(payload["task_id"], app.config["ROOM_CREATOR_MAPPINGS"])
     def _business_workbook_bytes(self):
         wb = Workbook()
         ws = wb.active

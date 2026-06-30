@@ -44,13 +44,19 @@ LIVE_DIR = resolve_live_dir()
 LIVE_WEB_ROOT = resolve_web_root(LIVE_DIR)
 PROMOTION_BINDING_ROOT = LIVE_DIR / "live-promotion-binding"
 PRICE_AUDIT_ROOT = LIVE_DIR / "live-sku-price-audit"
+ROOM_CREATOR_ROOT = LIVE_DIR / "live-room-creator"
 if str(PROMOTION_BINDING_ROOT) not in sys.path:
     sys.path.insert(0, str(PROMOTION_BINDING_ROOT))
 if str(PRICE_AUDIT_ROOT) not in sys.path:
     sys.path.insert(0, str(PRICE_AUDIT_ROOT))
+if str(ROOM_CREATOR_ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOM_CREATOR_ROOT))
 
 from promotion_binding.service import generate_binding_files
 from promotion_binding.workbook_reader import ColumnMapping, inspect_business_workbook
+from room_creator import BatchRunner, RoomCreatorBrowser, inspect_workbook
+from room_creator.excel_reader import ColumnMapping as RoomColumnMapping
+from room_creator import config as room_creator_config
 
 
 RUNTIME_RETENTION_DAYS = 7
@@ -80,6 +86,8 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
     price_input_dir = runtime_dir / "input" / "price-audit"
     price_output_dir = runtime_dir / "output" / "price-audit"
     price_screenshot_dir = price_output_dir / "screenshots"
+    room_input_dir = runtime_dir / "input" / "room-creator"
+    room_output_dir = runtime_dir / "output" / "room-creator"
     template_file = PROMOTION_BINDING_ROOT / "assets" / "商品上传模版（2026切片版）.xlsx"
     cleanup_roots = [runtime_dir, base_dir / "input", base_dir / "output"]
 
@@ -88,6 +96,8 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
     output_dir.mkdir(parents=True, exist_ok=True)
     price_input_dir.mkdir(parents=True, exist_ok=True)
     price_output_dir.mkdir(parents=True, exist_ok=True)
+    room_input_dir.mkdir(parents=True, exist_ok=True)
+    room_output_dir.mkdir(parents=True, exist_ok=True)
 
     app = Flask(__name__, template_folder=str(LIVE_WEB_ROOT / "templates"))
     app.config["PROMOTION_RESULTS"] = {}
@@ -102,6 +112,10 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
     app.config["PRICE_OUTPUT_DIR"] = price_output_dir
     app.config["PRICE_SCREENSHOT_DIR"] = price_screenshot_dir
     app.config["PRICE_AUTH_FILE"] = PRICE_AUDIT_ROOT / "jd_auth.json"
+    app.config["ROOM_INPUT_DIR"] = room_input_dir
+    app.config["ROOM_OUTPUT_DIR"] = room_output_dir
+    app.config["ROOM_CREATOR_RESULTS"] = {}
+    app.config["ROOM_CREATOR_MAPPINGS"] = {}
 
     status_lock = threading.Lock()
     price_status = _initial_price_status()
@@ -109,6 +123,12 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
     stop_flag = threading.Event()
     browser_lock = threading.Lock()
     current_browser = {"browser": None}
+    room_status_lock = threading.Lock()
+    room_creator_status = _initial_room_creator_status()
+    room_stop_flag = threading.Event()
+    room_login_event = threading.Event()
+    room_browser_lock = threading.Lock()
+    current_room_browser = {"browser": None}
 
     def close_current_browsers():
         with browser_lock:
@@ -129,6 +149,17 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
             except Exception:
                 pass
         return closed_count
+
+    def close_current_room_browser():
+        with room_browser_lock:
+            browser = current_room_browser.get("browser")
+            current_room_browser["browser"] = None
+        if browser:
+            try:
+                browser.close(force=True)
+            except Exception:
+                pass
+        return 1 if browser else 0
 
     @app.route("/")
     def index():
@@ -349,6 +380,130 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
             return _json_error("结果文件不存在", status_code=404)
 
         return send_file(path, as_attachment=True)
+
+
+    @app.route("/api/room-creator/preview", methods=["POST"])
+    def preview_room_creator():
+        _cleanup_runtime_for_app(app)
+        uploaded = request.files.get("file")
+        if uploaded is None or not uploaded.filename:
+            return _json_error("未选择文件")
+
+        if not uploaded.filename.lower().endswith(".xlsx"):
+            return _json_error("仅支持 .xlsx 文件")
+
+        task_id = uuid.uuid4().hex
+        filename = _safe_xlsx_name(uploaded.filename, task_id)
+        input_path = app.config["ROOM_INPUT_DIR"] / filename
+        uploaded.save(input_path)
+
+        try:
+            mapping, headers = inspect_workbook(input_path)
+        except Exception as exc:
+            return _json_error(str(exc), status_code=500)
+
+        with room_status_lock:
+            app.config["ROOM_CREATOR_UPLOADS"] = app.config.get("ROOM_CREATOR_UPLOADS", {})
+            app.config["ROOM_CREATOR_UPLOADS"][task_id] = input_path
+            app.config["ROOM_CREATOR_MAPPINGS"] = app.config.get("ROOM_CREATOR_MAPPINGS", {})
+            app.config["ROOM_CREATOR_MAPPINGS"][task_id] = mapping
+
+        return jsonify(
+            {
+                "success": True,
+                "task_id": task_id,
+                "filename": filename,
+                "path": str(input_path),
+                "columns": headers,
+                "mapping": {
+                    "title_col": mapping.title_col,
+                    "cover_col": mapping.cover_col,
+                    "start_time_col": mapping.start_time_col,
+                    "live_form_col": mapping.live_form_col,
+                "live_direction_col": mapping.live_direction_col,
+                "live_location_col": mapping.live_location_col,
+                "live_category_col": mapping.live_category_col,
+            },
+            "defaults": {
+                "cover": "使用默认封面",
+                "live_form": room_creator_config.DEFAULT_LIVE_FORM,
+                "live_direction": room_creator_config.DEFAULT_LIVE_DIRECTION,
+                "live_location": room_creator_config.DEFAULT_LIVE_LOCATION,
+                "live_category": room_creator_config.DEFAULT_LIVE_CATEGORY,
+            },
+        }
+    )
+
+    @app.route("/api/room-creator/start", methods=["POST"])
+    def start_room_creator():
+        with room_status_lock:
+            if room_creator_status["running"]:
+                return _json_error("已有任务正在运行")
+
+        data = request.get_json(silent=True) or {}
+        task_id = str(data.get("task_id") or "")
+        input_path = app.config.get("ROOM_CREATOR_UPLOADS", {}).get(task_id)
+        if not input_path or not Path(input_path).exists():
+            return _json_error("文件不存在，请重新上传", status_code=404)
+
+        raw_mapping = data.get("column_mapping") or {}
+        stored_mapping = app.config.get("ROOM_CREATOR_MAPPINGS", {}).get(task_id)
+        if stored_mapping and isinstance(stored_mapping, RoomColumnMapping):
+            column_mapping = stored_mapping
+        else:
+            column_mapping = RoomColumnMapping(
+                title_col=raw_mapping.get("title_col") or "直播标题",
+                cover_col=raw_mapping.get("cover_col"),
+                start_time_col=raw_mapping.get("start_time_col") or "开播时间",
+                live_form_col=raw_mapping.get("live_form_col"),
+                live_direction_col=raw_mapping.get("live_direction_col"),
+                live_location_col=raw_mapping.get("live_location_col"),
+                live_category_col=raw_mapping.get("live_category_col"),
+            )
+
+        room_stop_flag.clear()
+        room_login_event.clear()
+        show_browser = bool(data.get("show_browser", False))
+        thread = threading.Thread(
+            target=run_room_creator_task,
+            args=(Path(input_path), column_mapping, show_browser, task_id),
+        )
+        thread.daemon = False
+        thread.start()
+        return jsonify({"success": True})
+
+    @app.route("/api/room-creator/status")
+    def get_room_creator_status():
+        with room_status_lock:
+            return jsonify(dict(room_creator_status))
+
+    @app.route("/api/room-creator/continue", methods=["POST"])
+    def continue_room_creator():
+        room_login_event.set()
+        add_room_log('用户点击"我已登录"，继续运行')
+        return jsonify({"success": True})
+
+    @app.route("/api/room-creator/stop", methods=["POST"])
+    def stop_room_creator():
+        add_room_log("收到停止请求")
+        room_stop_flag.set()
+        room_login_event.set()
+        with room_status_lock:
+            room_creator_status["stopping"] = True
+            room_creator_status["need_login"] = False
+        close_current_room_browser()
+        return jsonify({"success": True})
+
+    @app.route("/api/room-creator/download")
+    def download_room_creator_result():
+        with room_status_lock:
+            result_file = room_creator_status.get("result_file")
+
+        if not result_file or not Path(result_file).exists():
+            return _json_error("结果文件不存在", status_code=404)
+
+        return send_file(result_file, as_attachment=True)
+
 
     def add_price_log(message: str):
         with status_lock:
@@ -649,11 +804,228 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                 price_status["stopping"] = False
                 price_status["need_login"] = False
 
+
+    def add_room_log(message: str):
+        with room_status_lock:
+            room_creator_status["logs"].append({"time": time.strftime("%H:%M:%S"), "message": message})
+            if len(room_creator_status["logs"]) > 200:
+                room_creator_status["logs"] = room_creator_status["logs"][-200:]
+        print(f"[{time.strftime('%H:%M:%S')}] {message}")
+
+    def wait_for_room_login(browser):
+        add_room_log("登录态已失效，请登录")
+        with room_status_lock:
+            room_creator_status["need_login"] = True
+        room_login_event.clear()
+
+        try:
+            browser.open_login_page()
+        except Exception as exc:
+            add_room_log(f"打开登录页失败: {exc}")
+
+        wait_count = 0
+        while not room_login_event.is_set() and wait_count < 120:
+            room_login_event.wait(timeout=5)
+            wait_count += 1
+            if wait_count % 6 == 0:
+                add_room_log(f"仍在等待用户登录... ({wait_count * 5}秒)")
+            if room_stop_flag.is_set():
+                add_room_log("创建已停止")
+                break
+
+        with room_status_lock:
+            room_creator_status["need_login"] = False
+
+        if room_stop_flag.is_set():
+            return False
+
+        add_room_log("重新检查登录状态...")
+        is_logged_in = browser.check_login_status()
+        add_room_log(f"登录状态检查结果: {'已登录' if is_logged_in else '未登录'}")
+
+        if not is_logged_in:
+            add_room_log("登录失败")
+            return False
+
+        browser.save_auth_state()
+        add_room_log("登录恢复，继续运行")
+        return True
+
+    def run_room_creator_task(input_file: Path, column_mapping: RoomColumnMapping, show_browser: bool = False, task_id: str = ""):
+        browser = None
+        try:
+            from room_creator.excel_reader import read_room_rows
+            from room_creator.runner import BatchRunner
+            from room_creator.validator import find_duplicates, validate_row
+            from room_creator.models import RoomCreateResult
+            from room_creator.report_writer import write_batch_report
+
+            with room_status_lock:
+                room_creator_status.clear()
+                room_creator_status.update(_initial_room_creator_status())
+                room_creator_status["running"] = True
+
+            add_room_log("开始批量创建直播间")
+            add_room_log(f"输入文件: {input_file.name}")
+
+            rows = read_room_rows(input_file, column_mapping)
+            duplicates = find_duplicates(rows)
+            valid_rows = []
+            skipped_rows = []
+            for row in rows:
+                errors = validate_row(row)
+                if row.row_index in duplicates:
+                    errors.append("与前面行的标题+开播时间重复")
+                if errors:
+                    error_text = "; ".join(errors)
+                    skipped_rows.append((row, error_text))
+                    add_room_log(f"第 {row.row_index} 行预校验失败: {error_text}")
+                else:
+                    valid_rows.append(row)
+
+            total = len(valid_rows)
+            with room_status_lock:
+                room_creator_status["total"] = total
+                room_creator_status["skipped"] = len(skipped_rows)
+            add_room_log(f"可创建 {total} 个，预校验跳过 {len(skipped_rows)} 个")
+
+            if total == 0:
+                with room_status_lock:
+                    room_creator_status["error"] = "没有可创建的直播间"
+                return
+
+            browser = RoomCreatorBrowser(
+                auth_file=app.config["PRICE_AUTH_FILE"],
+                headless=not show_browser,
+                log_callback=add_room_log,
+            )
+            with room_browser_lock:
+                current_room_browser["browser"] = browser
+
+            page = browser.start()
+            add_room_log("检查登录状态...")
+            if not browser.ensure_login(interactive=False):
+                add_room_log("需要登录")
+                # headless 模式下用户看不到登录页，切换到可视化窗口
+                if not show_browser:
+                    add_room_log("当前为无头模式，切换为显示窗口以便登录")
+                    try:
+                        browser.close(force=True)
+                    except Exception:
+                        pass
+                    browser = RoomCreatorBrowser(
+                        auth_file=app.config["PRICE_AUTH_FILE"],
+                        headless=False,
+                        log_callback=add_room_log,
+                    )
+                    browser.start()
+                    with room_browser_lock:
+                        current_room_browser["browser"] = browser
+                browser.open_login_page()
+                if not wait_for_room_login(browser):
+                    with room_status_lock:
+                        room_creator_status["error"] = "登录失败，请重新运行"
+                    return
+                browser._page = browser.browser_manager.page
+                browser._page.goto(
+                    "https://jlive.jd.com/my/listNew?jlive=%2Fmy%2Flist",
+                    wait_until="networkidle",
+                    timeout=60000,
+                )
+                browser._page.wait_for_timeout(1500)
+
+            def on_room_progress(current, total, created_count, failed_count, current_title):
+                with room_status_lock:
+                    room_creator_status["current"] = current
+                    room_creator_status["total"] = total
+                    room_creator_status["created_count"] = created_count
+                    room_creator_status["failed_count"] = failed_count
+                    room_creator_status["current_title"] = current_title
+
+            runner = BatchRunner(
+                browser=browser,
+                log_callback=add_room_log,
+                stop_event=room_stop_flag,
+                progress_callback=on_room_progress,
+            )
+            result = runner.run_batch(valid_rows)
+
+            # 把预校验跳过的行加入结果
+            for row, error in skipped_rows:
+                result.results.append(
+                    RoomCreateResult(
+                        row_index=row.row_index,
+                        title=row.title,
+                        start_time=row.start_time,
+                        live_form=row.live_form,
+                        live_direction=row.live_direction,
+                        live_location=row.live_location,
+                        live_category=row.live_category,
+                        success=False,
+                        error=error,
+                    )
+                )
+            result.skipped_count = len(skipped_rows)
+
+            output_path = write_batch_report(result, app.config["ROOM_OUTPUT_DIR"])
+            add_room_log(f"结果已保存: {Path(output_path).name}")
+
+            with room_status_lock:
+                room_creator_status["result_file"] = str(output_path)
+                room_creator_status["current"] = result.created_count + result.failed_count
+                room_creator_status["created_count"] = result.created_count
+                room_creator_status["failed_count"] = result.failed_count
+                room_creator_status["skipped"] = result.skipped_count
+
+            if result.stopped_by_limit:
+                with room_status_lock:
+                    room_creator_status["error"] = result.error
+            elif room_stop_flag.is_set():
+                add_room_log("创建已停止")
+            else:
+                add_room_log("创建完成")
+
+        except Exception as exc:
+            with room_status_lock:
+                room_creator_status["error"] = str(exc)
+            add_room_log(f"错误: {exc}")
+        finally:
+            if browser:
+                try:
+                    add_room_log("正在关闭浏览器...")
+                    browser.close(force=True)
+                    add_room_log("浏览器已关闭")
+                except Exception as exc:
+                    add_room_log(f"关闭浏览器出错: {exc}")
+
+            with room_browser_lock:
+                current_room_browser["browser"] = None
+            with room_status_lock:
+                room_creator_status["running"] = False
+                room_creator_status["stopping"] = False
+                room_creator_status["need_login"] = False
+                app.config.get("ROOM_CREATOR_UPLOADS", {}).pop(task_id, None)
+                app.config.get("ROOM_CREATOR_MAPPINGS", {}).pop(task_id, None)
+
+            # 清理本次上传的临时文件
+            try:
+                if input_file.exists():
+                    input_file.unlink()
+                    add_room_log(f"已清理上传文件: {input_file.name}")
+            except Exception as exc:
+                add_room_log(f"清理上传文件失败: {exc}")
+
+
     def shutdown_server():
         add_price_log("正在关闭服务...")
         stop_flag.set()
         login_event.set()
         close_current_browsers()
+
+        add_room_log("正在关闭直播间创建浏览器...")
+        room_stop_flag.set()
+        room_login_event.set()
+        close_current_room_browser()
         os.kill(os.getpid(), signal.SIGTERM)
 
     return app
@@ -696,6 +1068,22 @@ def _initial_price_status():
     }
 
 
+def _initial_room_creator_status():
+    return {
+        "running": False,
+        "total": 0,
+        "current": 0,
+        "current_title": "",
+        "created_count": 0,
+        "failed_count": 0,
+        "skipped": 0,
+        "logs": [],
+        "result_file": None,
+        "error": None,
+        "need_login": False,
+        "stopping": False,
+    }
+
 def _cleanup_runtime_for_app(app: Flask):
     _cleanup_old_runtime_files(
         app.config["RUNTIME_CLEANUP_ROOTS"],
@@ -705,6 +1093,8 @@ def _cleanup_runtime_for_app(app: Flask):
     app.config["PROMOTION_OUTPUT_DIR"].mkdir(parents=True, exist_ok=True)
     app.config["PRICE_INPUT_DIR"].mkdir(parents=True, exist_ok=True)
     app.config["PRICE_OUTPUT_DIR"].mkdir(parents=True, exist_ok=True)
+    app.config["ROOM_INPUT_DIR"].mkdir(parents=True, exist_ok=True)
+    app.config["ROOM_OUTPUT_DIR"].mkdir(parents=True, exist_ok=True)
 
 
 def _cleanup_old_runtime_files(roots: list[Path], retention_days: int, now: float | None = None):
