@@ -13,10 +13,11 @@ class WebTemplateTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         html = response.data.decode("utf-8")
         self.assertIn("直播运营工具", html)
-        self.assertIn("SKU 测价、绑定券码/促销ID统一入口", html)
+        self.assertIn("SKU 测价、绑定券码/促销ID、批量创建直播间统一入口", html)
         self.assertNotIn("直播 SKU 价格巡检工具", html)
         self.assertIn("SKU 测价", html)
         self.assertIn("绑定券码/促销ID", html)
+        self.assertIn("批量创建直播间", html)
         self.assertIn("生成导入模板", html)
         self.assertIn("promotionColumnMapping", html)
         self.assertIn("promotionSkuColumn", html)
@@ -29,6 +30,18 @@ class WebTemplateTest(unittest.TestCase):
         self.assertIn("upload-area", html)
         self.assertIn("progress-section", html)
         self.assertIn("log-container", html)
+
+
+    def test_index_contains_room_creator_panel(self):
+        app = create_app(base_dir=Path(tempfile.mkdtemp()))
+        response = app.test_client().get("/")
+
+        self.assertEqual(response.status_code, 200)
+        html = response.data.decode("utf-8")
+        self.assertIn('id="roomCreatorPanel"', html)
+        self.assertIn("/api/room-creator/preview", html)
+        self.assertIn("/api/room-creator/start", html)
+        self.assertIn("/api/room-creator/download", html)
 
     def test_price_audit_progress_uses_completed_count_for_concurrent_runs(self):
         app = create_app(base_dir=Path(tempfile.mkdtemp()))
@@ -60,6 +73,17 @@ class WebTemplateTest(unittest.TestCase):
         self.assertIn('id="showBrowserInput"', html)
         self.assertIn("显示测价浏览器窗口", html)
         self.assertIn("show_browser: document.getElementById('showBrowserInput').checked", html)
+
+    def test_price_audit_provides_sku_input_mode(self):
+        app = create_app(base_dir=Path(tempfile.mkdtemp()))
+        response = app.test_client().get("/")
+
+        self.assertEqual(response.status_code, 200)
+        html = response.data.decode("utf-8")
+        self.assertIn('id="inputTabs"', html)
+        self.assertIn('data-mode="sku"', html)
+        self.assertIn('id="skuInput"', html)
+        self.assertIn("/api/start-from-skus", html)
 
 
 if __name__ == "__main__":

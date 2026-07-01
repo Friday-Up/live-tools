@@ -4,9 +4,11 @@ Excel 处理模块
 """
 
 import os
+from pathlib import Path
 from openpyxl import load_workbook
 from openpyxl.drawing.image import Image as XLImage
 from openpyxl.utils import get_column_letter
+from openpyxl import Workbook
 
 
 def _normalize_header(value):
@@ -57,6 +59,28 @@ def read_sku_list(file_path, sku_column='商品SKU'):
             sku_list.append((i, _format_sku(sku)))
 
     return sku_list
+
+
+def create_sku_input_file(sku_list, output_path):
+    """
+    根据 SKU 列表创建输入 Excel 文件
+
+    Args:
+        sku_list: SKU 字符串列表
+        output_path: 输出文件路径
+
+    Returns:
+        str: 输出文件路径
+    """
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    wb = Workbook()
+    ws = wb.active
+    ws.append(['商品SKU'])
+    for sku in sku_list:
+        ws.append([sku])
+    wb.save(str(output_path))
+    return str(output_path)
 
 
 def write_results(file_path, results, threshold_price, output_dir='output',

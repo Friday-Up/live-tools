@@ -26,6 +26,14 @@ class WebTemplateTests(unittest.TestCase):
         self.assertIn("const failed = data.fail_count || 0;", html)
         self.assertIn("document.getElementById('resultFailed').textContent = failed;", html)
 
+    def test_web_ui_provides_sku_input_mode(self):
+        html = Path("templates/index.html").read_text(encoding="utf-8")
+
+        self.assertIn('id="inputTabs"', html)
+        self.assertIn('data-mode="sku"', html)
+        self.assertIn('id="skuInput"', html)
+        self.assertIn("/api/start-from-skus", html)
+
 
 if __name__ == "__main__":
     unittest.main()

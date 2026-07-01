@@ -36,6 +36,7 @@ jobs:
           pip install -r live-web/requirements.txt
           pip install -r live-sku-price-audit/requirements.txt
           pip install -r live-promotion-binding/requirements.txt
+          pip install -r live-room-creator/requirements.txt
           pip install pyinstaller
 
       - name: Install Playwright Chromium
@@ -57,6 +58,10 @@ jobs:
           python -m unittest discover -s tests -p "test_*.py" -v
           Pop-Location
 
+          Push-Location live-room-creator
+          python -m unittest discover -s tests -p "test_*.py" -v
+          Pop-Location
+
           python -m unittest discover -s tests -p "test_*.py" -v
 
       - name: Build Live Tools Web with PyInstaller
@@ -67,12 +72,14 @@ jobs:
           $bindingAssets = "live-promotion-binding/assets"
           $bindingPackage = "live-promotion-binding/promotion_binding"
           $priceUtils = "live-sku-price-audit/utils"
+          $roomCreatorPackage = "live-room-creator/room_creator"
 
           pyinstaller --noconfirm --onedir --console `
             --name "Live-Tools-Web" `
             --contents-directory "." `
             --paths "live-promotion-binding" `
             --paths "live-sku-price-audit" `
+            --paths "live-room-creator" `
             --collect-all playwright `
             --collect-all flask `
             --collect-all jinja2 `
@@ -87,10 +94,18 @@ jobs:
             --hidden-import utils.browser_manager `
             --hidden-import utils.excel_handler `
             --hidden-import utils.jd_crawler `
+            --hidden-import room_creator `
+            --hidden-import room_creator.browser `
+            --hidden-import room_creator.excel_reader `
+            --hidden-import room_creator.runner `
+            --hidden-import room_creator.validator `
+            --hidden-import room_creator.report_writer `
+            --hidden-import room_creator.models `
             --add-data "$webTemplates;live-web/templates" `
             --add-data "$bindingAssets;live-promotion-binding/assets" `
             --add-data "$bindingPackage;live-promotion-binding/promotion_binding" `
             --add-data "$priceUtils;live-sku-price-audit/utils" `
+            --add-data "$roomCreatorPackage;live-room-creator/room_creator" `
             $webApp
 
       - name: Copy launcher and runtime folders
@@ -115,7 +130,8 @@ jobs:
             "live-web/templates",
             "live-promotion-binding/assets",
             "live-promotion-binding/promotion_binding",
-            "live-sku-price-audit/utils"
+            "live-sku-price-audit/utils",
+            "live-room-creator/room_creator"
           )
 
           foreach ($item in $required) {

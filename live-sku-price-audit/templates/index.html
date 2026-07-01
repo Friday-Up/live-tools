@@ -56,6 +56,68 @@
             letter-spacing: 0.5px;
         }
 
+        /* Input mode tabs */
+        .input-tabs {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 16px;
+            background: #f5f7fa;
+            padding: 4px;
+            border-radius: 8px;
+        }
+
+        .input-tab {
+            flex: 1;
+            padding: 8px;
+            text-align: center;
+            cursor: pointer;
+            border-radius: 6px;
+            font-size: 14px;
+            color: #666;
+            transition: all 0.2s;
+        }
+
+        .input-tab:hover {
+            color: #333;
+        }
+
+        .input-tab.active {
+            background: white;
+            color: #333;
+            font-weight: 500;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        }
+
+        .sku-textarea {
+            width: 100%;
+            min-height: 120px;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+            line-height: 1.5;
+            resize: vertical;
+            transition: border-color 0.2s;
+        }
+
+        .sku-textarea:focus {
+            outline: none;
+            border-color: #4a90e2;
+        }
+
+        .sku-hint {
+            color: #888;
+            font-size: 12px;
+            margin-top: 6px;
+        }
+
+        .sku-count {
+            color: #4a90e2;
+            font-size: 13px;
+            margin-top: 8px;
+            font-weight: 500;
+        }
+
         /* Upload */
         .upload-area {
             border: 2px dashed #ddd;
@@ -452,16 +514,28 @@
 
         <!-- 上传 + 配置 -->
         <div class="card" id="mainCard">
-            <div class="section-title">📁 选择 Excel 文件</div>
-
-            <div class="upload-area" id="uploadArea">
-                <div class="upload-icon">📄</div>
-                <div class="upload-text">点击上传或拖拽文件到此处</div>
-                <div class="upload-hint">支持 .xlsx 格式，需包含「商品SKU」列</div>
+            <div class="input-tabs" id="inputTabs">
+                <div class="input-tab active" data-mode="upload">📁 上传 Excel</div>
+                <div class="input-tab" data-mode="sku">⌨️ 输入 SKU</div>
             </div>
-            <input type="file" id="fileInput" accept=".xlsx" class="hidden">
 
-            <div class="file-list" id="fileList"></div>
+            <div class="input-panel" id="uploadPanel">
+                <div class="upload-area" id="uploadArea">
+                    <div class="upload-icon">📄</div>
+                    <div class="upload-text">点击上传或拖拽文件到此处</div>
+                    <div class="upload-hint">支持 .xlsx 格式，需包含「商品SKU」列</div>
+                </div>
+                <input type="file" id="fileInput" accept=".xlsx" class="hidden">
+
+                <div class="file-list" id="fileList"></div>
+            </div>
+
+            <div class="input-panel hidden" id="skuPanel">
+                <textarea class="sku-textarea" id="skuInput" placeholder="100264886683,100264886684;100264886685"></textarea>
+                <div class="sku-hint">支持使用英文逗号、分号或中文逗号、分号分隔，可换行</div>
+                <div class="sku-count" id="skuCount"></div>
+            </div>
+
             <div class="status-message" id="statusMessage"></div>
 
             <div style="margin-top: 20px;">
@@ -582,6 +656,12 @@
         const fileList = document.getElementById('fileList');
         const startBtn = document.getElementById('startBtn');
         const statusMessage = document.getElementById('statusMessage');
+        const inputTabs = document.getElementById('inputTabs');
+        const uploadPanel = document.getElementById('uploadPanel');
+        const skuPanel = document.getElementById('skuPanel');
+        const skuInput = document.getElementById('skuInput');
+        const skuCount = document.getElementById('skuCount');
+        let inputMode = 'upload';
 
         function escapeHtml(value) {
             return String(value || '').replace(/[&<>"']/g, (char) => ({
@@ -654,31 +734,97 @@
             fileList.innerHTML = '';
             uploadArea.style.display = 'block';
             fileInput.value = ''; // 清空 input，允许重新上传同一个文件
+            updateStartButtonState();
         }
 
+      function updateSkuCount() {
+          const raw = skuInput.value || '';
+           const separators = /[,;，；\n\r\t]+/;
+           const parts = raw.split(separators);
+           const seen = new Set();
+           let count = 0;
+           for (const part of parts) {
+               const sku = part.trim();
+               if (sku && !seen.has(sku)) {
+                   seen.add(sku);
+                   count++;
+               }
+           }
+          skuCount.textContent = count > 0 ? `已识别 ${count} 个 SKU` : '';
+      }
+
+        function updateStartButtonState() {
+            if (inputMode === 'upload') {
+                startBtn.disabled = !selectedFile;
+            } else {
+                startBtn.disabled = skuInput.value.trim().length === 0;
+            }
+        }
+
+        inputTabs.addEventListener('click', (e) => {
+            const tab = e.target.closest('.input-tab');
+            if (!tab) return;
+            inputMode = tab.dataset.mode;
+            document.querySelectorAll('.input-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            if (inputMode === 'upload') {
+                uploadPanel.classList.remove('hidden');
+                skuPanel.classList.add('hidden');
+            } else {
+                uploadPanel.classList.add('hidden');
+                skuPanel.classList.remove('hidden');
+                skuInput.focus();
+            }
+            updateStartButtonState();
+        });
+
+        skuInput.addEventListener('input', () => {
+            updateSkuCount();
+            updateStartButtonState();
+        });
+
         startBtn.addEventListener('click', () => {
-            if (!selectedFile) { alert('请先选择文件'); return; }
             const threshold = parseFloat(document.getElementById('thresholdInput').value);
             if (isNaN(threshold) || threshold < 0) { alert('请输入有效的价格门槛'); return; }
+
+            let endpoint, body;
+            if (inputMode === 'upload') {
+                if (!selectedFile) { alert('请先选择文件'); return; }
+                endpoint = '/api/start';
+                body = JSON.stringify({
+                    file: selectedFile,
+                    threshold: threshold,
+                    show_browser: document.getElementById('showBrowserInput').checked
+                });
+            } else {
+                const skus = skuInput.value.trim();
+                if (!skus) { alert('请输入 SKU'); return; }
+                endpoint = '/api/start-from-skus';
+                body = JSON.stringify({
+                    skus: skus,
+                    threshold: threshold,
+                    show_browser: document.getElementById('showBrowserInput').checked
+                });
+            }
 
             startBtn.disabled = true;
             clearMessage();
             document.getElementById('progressCard').classList.add('active');
             document.getElementById('resultCard').classList.remove('active');
 
-            fetch('/api/start', {
+            fetch(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    file: selectedFile,
-                    threshold: threshold,
-                    show_browser: document.getElementById('showBrowserInput').checked
-                })
+                body: body
             })
             .then(res => res.json())
             .then(data => {
-                if (!data.success) { showMessage(data.error, 'error'); startBtn.disabled = false; }
-                else startStatusPolling();
+                if (!data.success) {
+                    showMessage(data.error, 'error');
+                    startBtn.disabled = false;
+                } else {
+                    startStatusPolling();
+                }
             })
             .catch(() => {
                 showMessage('启动失败，请确认服务仍在运行', 'error');
@@ -806,6 +952,19 @@
             document.getElementById('statUnqualified').textContent = '0';
             document.getElementById('logContainer').innerHTML = '';
             clearMessage();
+            // 重置输入状态
+            selectedFile = null;
+            fileList.innerHTML = '';
+            uploadArea.style.display = 'block';
+            fileInput.value = '';
+            skuInput.value = '';
+            skuCount.textContent = '';
+            inputMode = 'upload';
+            document.querySelectorAll('.input-tab').forEach(t => t.classList.remove('active'));
+            document.querySelector('.input-tab[data-mode="upload"]').classList.add('active');
+            uploadPanel.classList.remove('hidden');
+            skuPanel.classList.add('hidden');
+            updateStartButtonState();
             document.getElementById('mainCard').scrollIntoView({ behavior: 'smooth' });
         });
 

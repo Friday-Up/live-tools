@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from openpyxl import Workbook
 
@@ -105,6 +106,71 @@ class AppApiTests(unittest.TestCase):
 
         self.assertIn("def close_current_browsers", app_source)
         self.assertIn("close_current_browsers()", app_source[app_source.index("def stop_audit"):])
+
+    def test_parse_sku_input_supports_multiple_separators_and_dedup(self):
+        self.assertEqual(
+            web_app.parse_sku_input("100264886683,48279162646;100264886683"),
+            ["100264886683", "48279162646"],
+        )
+        self.assertEqual(
+            web_app.parse_sku_input("100264886683，48279162646；100264886683"),
+            ["100264886683", "48279162646"],
+        )
+        self.assertEqual(
+            web_app.parse_sku_input("100264886683\n48279162646\t100264886683"),
+            ["100264886683", "48279162646"],
+        )
+
+    def test_start_from_skus_rejects_invalid_threshold_with_json_error(self):
+        response = self.client.post(
+            "/api/start-from-skus",
+            json={"skus": "100264886683", "threshold": "abc"},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["success"], False)
+        self.assertIn("价格门槛", response.get_json()["error"])
+
+    def test_start_from_skus_rejects_empty_input(self):
+        response = self.client.post(
+            "/api/start-from-skus",
+            json={"skus": "", "threshold": 6},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["success"], False)
+        self.assertIn("SKU", response.get_json()["error"])
+
+    @patch.object(web_app, "run_audit_task")
+    def test_start_from_skus_creates_input_file_and_returns_count(self, mock_run):
+        response = self.client.post(
+            "/api/start-from-skus",
+            json={"skus": "100264886683,48279162646", "threshold": 6},
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["count"], 2)
+        mock_run.assert_called_once()
+
+        # 清理生成的临时输入文件
+        input_dir = Path(web_app.CONFIG["input_dir"])
+        generated_files = list(input_dir.glob("页面输入SKU_*.xlsx"))
+        self.assertTrue(generated_files, "应生成临时输入文件")
+        for f in generated_files:
+            f.unlink(missing_ok=True)
+
+    def test_start_from_skus_rejects_whitespace_only_input(self):
+        response = self.client.post(
+            "/api/start-from-skus",
+            json={"skus": "   \n\t  ", "threshold": 6},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["success"], False)
+        self.assertIn("SKU", response.get_json()["error"])
+
+    def test_start_from_skus_requests_cleanup_of_temp_input_file(self):
+        app_source = Path("app.py").read_text(encoding="utf-8")
+        self.assertIn("cleanup_input", app_source)
+        self.assertIn("kwargs={'cleanup_input': True}", app_source)
 
 
 if __name__ == "__main__":

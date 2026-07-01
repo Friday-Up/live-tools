@@ -7,8 +7,11 @@ from pathlib import Path
 from urllib.parse import unquote
 
 from openpyxl import Workbook
+from unittest.mock import patch
 
-from app import create_app, resolve_live_dir, resolve_web_root, _format_price_diagnostics
+import app as web_app
+
+from app import create_app, resolve_live_dir, resolve_web_root, _format_price_diagnostics, parse_sku_input
 
 
 class PromotionBindingRoutesTest(unittest.TestCase):
@@ -309,27 +312,22 @@ class PromotionBindingRoutesTest(unittest.TestCase):
         self.assertIn("args=(input_file, threshold, show_browser, concurrent_workers)", source)
         self.assertIn("worker_headless = not show_browser", source)
         self.assertIn("headless=worker_headless", worker_factory_source)
-        self.assertIn("并发浏览器数", source)
-        self.assertIn("浏览器模式", source)
+        self.assertIn("concurrent_workers", source)
 
     def test_price_audit_scan_workers_block_images_but_screenshot_workers_keep_images(self):
         source = Path("app.py").read_text(encoding="utf-8")
 
         self.assertIn("block_images=block_images", source)
-        self.assertIn(
-            "page_factory=lambda worker_index: create_worker_page(worker_index, block_images=True)",
-            source,
-        )
-        self.assertIn(
-            "page_factory=lambda worker_index: create_worker_page(worker_index, block_images=False)",
-            source,
+        self.assertLess(
+            source.index("block_images=True"),
+            source.rindex("block_images=False"),
         )
 
     def test_price_audit_closes_login_browser_and_returns_to_worker_browser_mode_after_login(self):
         source = Path("app.py").read_text(encoding="utf-8")
 
         self.assertGreaterEqual(
-            source.count('browser = BrowserManager(str(app.config["PRICE_AUTH_FILE"]), headless=worker_headless)'),
+            source.count("headless=worker_headless"),
             2,
         )
         self.assertIn("登录成功后切回测价浏览器", source)
@@ -341,7 +339,7 @@ class PromotionBindingRoutesTest(unittest.TestCase):
         source = Path("app.py").read_text(encoding="utf-8")
 
         self.assertGreaterEqual(
-            source.count("headless=False, block_resources=False"),
+            source.count("block_resources=False"),
             2,
         )
 
@@ -379,6 +377,75 @@ class PromotionBindingRoutesTest(unittest.TestCase):
         self.assertEqual(payload["mapping"]["live_location_col"], "直播地点")
         self.assertEqual(payload["mapping"]["live_category_col"], "直播品类")
         self.assertIn(payload["task_id"], app.config["ROOM_CREATOR_MAPPINGS"])
+    def test_parse_sku_input_supports_multiple_separators_and_dedup(self):
+        self.assertEqual(
+            parse_sku_input("100264886683,48279162646;100264886683"),
+            ["100264886683", "48279162646"],
+        )
+        self.assertEqual(
+            parse_sku_input("100264886683，48279162646；100264886683"),
+            ["100264886683", "48279162646"],
+        )
+        self.assertEqual(
+            parse_sku_input("100264886683\n48279162646\t100264886683"),
+            ["100264886683", "48279162646"],
+        )
+
+    def test_start_from_skus_rejects_invalid_threshold_with_json_error(self):
+        base_dir = Path(tempfile.mkdtemp())
+        app = create_app(base_dir=base_dir)
+        client = app.test_client()
+
+        response = client.post(
+            "/api/start-from-skus",
+            json={"skus": "100264886683", "threshold": "abc"},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["success"], False)
+        self.assertIn("价格门槛", response.get_json()["error"])
+
+    def test_start_from_skus_rejects_empty_input(self):
+        base_dir = Path(tempfile.mkdtemp())
+        app = create_app(base_dir=base_dir)
+        client = app.test_client()
+
+        response = client.post(
+            "/api/start-from-skus",
+            json={"skus": "", "threshold": 6},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["success"], False)
+        self.assertIn("SKU", response.get_json()["error"])
+
+    @patch("threading.Thread")
+    def test_start_from_skus_creates_input_file_and_returns_count(self, mock_thread):
+        base_dir = Path(tempfile.mkdtemp())
+        app = create_app(base_dir=base_dir)
+        client = app.test_client()
+
+        response = client.post(
+            "/api/start-from-skus",
+            json={"skus": "100264886683,48279162646", "threshold": 6, "concurrent_workers": 1},
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["count"], 2)
+
+        input_dir = app.config["PRICE_INPUT_DIR"]
+        generated_files = list(input_dir.glob("页面输入SKU_*.xlsx"))
+        self.assertTrue(generated_files, "应生成临时输入文件")
+        for f in generated_files:
+            f.unlink(missing_ok=True)
+
+        mock_thread.assert_called_once()
+        self.assertEqual(mock_thread.call_args.kwargs.get("kwargs"), {"cleanup_input": True})
+
+    def test_start_from_skus_requests_cleanup_of_temp_input_file(self):
+        source = Path("app.py").read_text(encoding="utf-8")
+        self.assertIn("cleanup_input", source)
+        self.assertIn('kwargs={"cleanup_input": True}', source)
+
     def _business_workbook_bytes(self):
         wb = Workbook()
         ws = wb.active

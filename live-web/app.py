@@ -52,13 +52,14 @@ if str(PRICE_AUDIT_ROOT) not in sys.path:
 if str(ROOM_CREATOR_ROOT) not in sys.path:
     sys.path.insert(0, str(ROOM_CREATOR_ROOT))
 
-from promotion_binding.service import generate_binding_files
-from promotion_binding.workbook_reader import ColumnMapping, inspect_business_workbook
-from room_creator import BatchRunner, RoomCreatorBrowser, inspect_workbook
-from room_creator.excel_reader import ColumnMapping as RoomColumnMapping
+
+# fmt: off
 from room_creator import config as room_creator_config
-
-
+from room_creator.excel_reader import ColumnMapping as RoomColumnMapping
+from room_creator import BatchRunner, RoomCreatorBrowser, inspect_workbook
+from promotion_binding.workbook_reader import ColumnMapping, inspect_business_workbook
+from promotion_binding.service import generate_binding_files
+# fmt: on
 RUNTIME_RETENTION_DAYS = 7
 
 
@@ -66,6 +67,7 @@ def _load_price_audit_concurrent_workers() -> int:
     """从 live-sku-price-audit/config.py 读取并发数，保持统一配置入口。"""
     try:
         import importlib.util
+
         config_path = PRICE_AUDIT_ROOT / "config.py"
         spec = importlib.util.spec_from_file_location("price_audit_config", config_path)
         module = importlib.util.module_from_spec(spec)
@@ -78,8 +80,32 @@ def _load_price_audit_concurrent_workers() -> int:
 PRICE_AUDIT_CONCURRENT_WORKERS = _load_price_audit_concurrent_workers()
 
 
+def parse_sku_input(raw):
+    """解析页面输入的 SKU 字符串，支持英文/中文逗号和分号、换行等分隔符。"""
+    if not raw or not isinstance(raw, str):
+        return []
+    separators = (",", ";", "，", "；", "\n", "\r", "\t")
+    parts = [raw]
+    for sep in separators:
+        split_parts = []
+        for part in parts:
+            split_parts.extend(part.split(sep))
+        parts = split_parts
+
+    seen = set()
+    result = []
+    for sku in parts:
+        normalized = sku.strip()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            result.append(normalized)
+    return result
+
+
 def create_app(base_dir: str | Path | None = None) -> Flask:
-    base_dir = Path(base_dir) if base_dir is not None else Path(__file__).resolve().parent
+    base_dir = (
+        Path(base_dir) if base_dir is not None else Path(__file__).resolve().parent
+    )
     runtime_dir = base_dir / "runtime"
     input_dir = runtime_dir / "input" / "promotion-binding"
     output_dir = runtime_dir / "output" / "promotion-binding"
@@ -88,7 +114,9 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
     price_screenshot_dir = price_output_dir / "screenshots"
     room_input_dir = runtime_dir / "input" / "room-creator"
     room_output_dir = runtime_dir / "output" / "room-creator"
-    template_file = PROMOTION_BINDING_ROOT / "assets" / "商品上传模版（2026切片版）.xlsx"
+    template_file = (
+        PROMOTION_BINDING_ROOT / "assets" / "商品上传模版（2026切片版）.xlsx"
+    )
     cleanup_roots = [runtime_dir, base_dir / "input", base_dir / "output"]
 
     _cleanup_old_runtime_files(cleanup_roots, retention_days=RUNTIME_RETENTION_DAYS)
@@ -183,7 +211,9 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
         upload_path = app.config["PRICE_INPUT_DIR"] / filename
         uploaded.save(upload_path)
 
-        return jsonify({"success": True, "filename": filename, "path": str(upload_path)})
+        return jsonify(
+            {"success": True, "filename": filename, "path": str(upload_path)}
+        )
 
     @app.route("/api/start", methods=["POST"])
     def start_price_audit():
@@ -192,7 +222,9 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                 return _json_error("已有任务正在运行")
 
         data = request.get_json(silent=True) or {}
-        input_file = _resolve_price_input_file(data.get("file"), app.config["PRICE_INPUT_DIR"])
+        input_file = _resolve_price_input_file(
+            data.get("file"), app.config["PRICE_INPUT_DIR"]
+        )
         if not input_file:
             return _json_error("文件不存在或不在 input 目录，请先上传")
 
@@ -207,7 +239,9 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
         show_browser = bool(data.get("show_browser"))
 
         try:
-            concurrent_workers = int(data.get("concurrent_workers", PRICE_AUDIT_CONCURRENT_WORKERS))
+            concurrent_workers = int(
+                data.get("concurrent_workers", PRICE_AUDIT_CONCURRENT_WORKERS)
+            )
         except (TypeError, ValueError):
             concurrent_workers = PRICE_AUDIT_CONCURRENT_WORKERS
         concurrent_workers = max(1, min(10, concurrent_workers))
@@ -217,10 +251,67 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
         thread = threading.Thread(
             target=run_price_audit_task,
             args=(input_file, threshold, show_browser, concurrent_workers),
+            kwargs={"cleanup_input": True},
         )
         thread.daemon = False
         thread.start()
         return jsonify({"success": True})
+
+    @app.route("/api/start-from-skus", methods=["POST"])
+    def start_price_audit_from_skus():
+        with status_lock:
+            if price_status["running"]:
+                return _json_error("已有任务正在运行")
+
+        data = request.get_json(silent=True) or {}
+        skus_raw = data.get("skus", "")
+
+        try:
+            threshold = float(data.get("threshold", 6.0))
+        except (TypeError, ValueError):
+            return _json_error("价格门槛必须是有效数字")
+
+        if threshold < 0:
+            return _json_error("价格门槛不能为负数")
+
+        sku_list = parse_sku_input(skus_raw)
+        if not sku_list:
+            return _json_error("请输入有效的 SKU")
+
+        try:
+            concurrent_workers = int(
+                data.get("concurrent_workers", PRICE_AUDIT_CONCURRENT_WORKERS)
+            )
+        except (TypeError, ValueError):
+            concurrent_workers = PRICE_AUDIT_CONCURRENT_WORKERS
+        concurrent_workers = max(1, min(10, concurrent_workers))
+
+        show_browser = bool(data.get("show_browser"))
+
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        input_file = (
+            app.config["PRICE_INPUT_DIR"]
+            / f"页面输入SKU_{timestamp}_{uuid.uuid4().hex[:8]}.xlsx"
+        )
+        try:
+            from utils.excel_handler import create_sku_input_file
+
+            create_sku_input_file(sku_list, str(input_file))
+        except Exception as e:
+            return _json_error(f"生成输入文件失败: {e}")
+
+        stop_flag.clear()
+        login_event.clear()
+        add_price_log(f"页面输入 SKU {len(sku_list)} 个，已生成临时输入文件")
+
+        thread = threading.Thread(
+            target=run_price_audit_task,
+            args=(input_file, threshold, show_browser, concurrent_workers),
+            kwargs={"cleanup_input": True},
+        )
+        thread.daemon = False
+        thread.start()
+        return jsonify({"success": True, "count": len(sku_list)})
 
     @app.route("/api/status")
     def get_price_status():
@@ -381,7 +472,6 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
 
         return send_file(path, as_attachment=True)
 
-
     @app.route("/api/room-creator/preview", methods=["POST"])
     def preview_room_creator():
         _cleanup_runtime_for_app(app)
@@ -403,9 +493,13 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
             return _json_error(str(exc), status_code=500)
 
         with room_status_lock:
-            app.config["ROOM_CREATOR_UPLOADS"] = app.config.get("ROOM_CREATOR_UPLOADS", {})
+            app.config["ROOM_CREATOR_UPLOADS"] = app.config.get(
+                "ROOM_CREATOR_UPLOADS", {}
+            )
             app.config["ROOM_CREATOR_UPLOADS"][task_id] = input_path
-            app.config["ROOM_CREATOR_MAPPINGS"] = app.config.get("ROOM_CREATOR_MAPPINGS", {})
+            app.config["ROOM_CREATOR_MAPPINGS"] = app.config.get(
+                "ROOM_CREATOR_MAPPINGS", {}
+            )
             app.config["ROOM_CREATOR_MAPPINGS"][task_id] = mapping
 
         return jsonify(
@@ -420,19 +514,19 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                     "cover_col": mapping.cover_col,
                     "start_time_col": mapping.start_time_col,
                     "live_form_col": mapping.live_form_col,
-                "live_direction_col": mapping.live_direction_col,
-                "live_location_col": mapping.live_location_col,
-                "live_category_col": mapping.live_category_col,
-            },
-            "defaults": {
-                "cover": "使用默认封面",
-                "live_form": room_creator_config.DEFAULT_LIVE_FORM,
-                "live_direction": room_creator_config.DEFAULT_LIVE_DIRECTION,
-                "live_location": room_creator_config.DEFAULT_LIVE_LOCATION,
-                "live_category": room_creator_config.DEFAULT_LIVE_CATEGORY,
-            },
-        }
-    )
+                    "live_direction_col": mapping.live_direction_col,
+                    "live_location_col": mapping.live_location_col,
+                    "live_category_col": mapping.live_category_col,
+                },
+                "defaults": {
+                    "cover": "使用默认封面",
+                    "live_form": room_creator_config.DEFAULT_LIVE_FORM,
+                    "live_direction": room_creator_config.DEFAULT_LIVE_DIRECTION,
+                    "live_location": room_creator_config.DEFAULT_LIVE_LOCATION,
+                    "live_category": room_creator_config.DEFAULT_LIVE_CATEGORY,
+                },
+            }
+        )
 
     @app.route("/api/room-creator/start", methods=["POST"])
     def start_room_creator():
@@ -504,10 +598,11 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
 
         return send_file(result_file, as_attachment=True)
 
-
     def add_price_log(message: str):
         with status_lock:
-            price_status["logs"].append({"time": time.strftime("%H:%M:%S"), "message": message})
+            price_status["logs"].append(
+                {"time": time.strftime("%H:%M:%S"), "message": message}
+            )
             if len(price_status["logs"]) > 200:
                 price_status["logs"] = price_status["logs"][-200:]
         print(f"[{time.strftime('%H:%M:%S')}] {message}")
@@ -551,65 +646,96 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
         add_price_log("登录恢复，继续运行")
         return True
 
-    def run_price_audit_task(input_file: Path, threshold_price: float, show_browser: bool = False, concurrent_workers: int = PRICE_AUDIT_CONCURRENT_WORKERS):
+
+    def run_price_audit_task(
+        input_file: Path,
+        threshold_price: float,
+        show_browser: bool = False,
+        concurrent_workers: int = PRICE_AUDIT_CONCURRENT_WORKERS,
+        cleanup_input: bool = False,
+    ):
+
         browser = None
+        page = None
+
         try:
-            from utils.audit_runner import run_sku_batch_with_page_factory
+            # 延迟导入，避免启动时加载失败
             from utils.browser_manager import BrowserManager
+            from utils.jd_crawler import (
+                capture_low_price_result_screenshots_with_page_factory,
+                crawl_sku,
+            )
             from utils.excel_handler import read_sku_list, write_results
-            from utils.jd_crawler import capture_low_price_result_screenshots_with_page_factory, crawl_sku
+            from utils.audit_runner import run_sku_batch_with_page_factory
 
             with status_lock:
-                price_status.clear()
-                price_status.update(_initial_price_status())
                 price_status["running"] = True
+                price_status["stopping"] = False
+                price_status["total"] = 0
+                price_status["current"] = 0
+                price_status["current_sku"] = ""
+                price_status["success_count"] = 0
+                price_status["fail_count"] = 0
+                price_status["unqualified_count"] = 0
+                price_status["logs"] = []
+                price_status["result_file"] = None
+                price_status["error"] = None
+                price_status["need_login"] = False
 
-            add_price_log("开始批量测价")
-            add_price_log(f"输入文件: {input_file.name}")
-            add_price_log(f"价格门槛: ¥{threshold_price}")
-            add_price_log(f"并发浏览器数: {concurrent_workers}")
+            add_price_log("🚀 开始批量测价")
+            add_price_log(f"📁 输入文件: {os.path.basename(input_file)}")
+            add_price_log(f"💰 价格门槛: ¥{threshold_price}")
             worker_headless = not show_browser
-            add_price_log(f"浏览器模式: {'有头' if show_browser else '无头'}")
+            add_price_log(f'🌐 浏览器模式: {"有头" if show_browser else "无头"}')
 
+            # 1. 读取 SKU 列表
+            add_price_log("📖 正在读取 Excel...")
             try:
                 sku_data = read_sku_list(str(input_file), "商品SKU")
-            except Exception as exc:
+            except Exception as e:
                 with status_lock:
-                    price_status["error"] = str(exc)
-                add_price_log(str(exc))
+                    price_status["error"] = str(e)
+                add_price_log(f"❌ {e}")
                 return
 
             with status_lock:
                 price_status["total"] = len(sku_data)
-            add_price_log(f"共读取 {len(sku_data)} 个 SKU")
+            add_price_log(f"✅ 共读取 {len(sku_data)} 个 SKU")
 
-            if not sku_data:
+            if len(sku_data) == 0:
                 with status_lock:
                     price_status["error"] = "未找到 SKU，请检查表格格式"
                 return
 
-            app.config["PRICE_SCREENSHOT_DIR"].mkdir(parents=True, exist_ok=True)
-            for file_path in app.config["PRICE_SCREENSHOT_DIR"].glob("*"):
-                if file_path.is_file():
-                    file_path.unlink()
+            # 2. 启动浏览器
+            add_price_log("🌐 正在启动浏览器...")
+            browser = BrowserManager(
+                str(app.config["PRICE_AUTH_FILE"]), headless=worker_headless
+            )
 
-            browser = BrowserManager(str(app.config["PRICE_AUTH_FILE"]), headless=worker_headless)
             with browser_lock:
                 current_browser["browser"] = [browser]
+
             page = browser.start()
 
-            add_price_log("检查登录状态...")
+            # 3. 检查登录状态
+            add_price_log("🔐 检查登录状态...")
             is_logged_in = browser.check_login_status()
-            add_price_log(f"登录状态检查结果: {'已登录' if is_logged_in else '未登录'}")
+            add_price_log(f'   登录状态检查结果: {"已登录" if is_logged_in else "未登录"}')
             if stop_flag.is_set():
-                add_price_log("测价已停止")
+                add_price_log("🛑 测价已停止")
                 return
+
             if not is_logged_in:
                 try:
                     browser.close(force=True)
                 except Exception:
                     pass
-                browser = BrowserManager(str(app.config["PRICE_AUTH_FILE"]), headless=False, block_resources=False)
+                browser = BrowserManager(
+                    str(app.config["PRICE_AUTH_FILE"]),
+                    headless=False,
+                    block_resources=False,
+                )
                 with browser_lock:
                     current_browser["browser"] = [browser]
                 page = browser.start()
@@ -621,24 +747,36 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                     browser.close(force=True)
                 except Exception:
                     pass
-                add_price_log("登录成功后切回测价浏览器")
-                browser = BrowserManager(str(app.config["PRICE_AUTH_FILE"]), headless=worker_headless)
+                add_price_log("✅ 登录成功后切回测价浏览器")
+                browser = BrowserManager(
+                    str(app.config["PRICE_AUTH_FILE"]), headless=worker_headless
+                )
                 with browser_lock:
                     current_browser["browser"] = [browser]
                 page = browser.start()
-                add_price_log("检查测价浏览器登录状态...")
+                add_price_log("🔐 检查测价浏览器登录状态...")
                 if not browser.check_login_status(recheck_seconds=10):
                     with status_lock:
                         price_status["error"] = "登录状态未能同步到测价浏览器，请重新运行"
-                    add_price_log("登录状态未能同步到测价浏览器，请重新运行")
+                    add_price_log("❌ 登录状态未能同步到测价浏览器，请重新运行")
                     return
+            add_price_log("✅ 登录状态正常")
 
-            add_price_log(f"启用快扫响应取价 + {concurrent_workers} 浏览器并发")
+            add_price_log(f"⚡ 启用快扫响应取价 + {concurrent_workers} 浏览器并发")
 
+            # 4. 创建输出目录
+            if os.path.exists(str(app.config["PRICE_SCREENSHOT_DIR"])):
+                for file in os.listdir(str(app.config["PRICE_SCREENSHOT_DIR"])):
+                    file_path = os.path.join(str(app.config["PRICE_SCREENSHOT_DIR"]), file)
+                    if os.path.isfile(file_path):
+                        os.remove(file_path)
+            os.makedirs(str(app.config["PRICE_SCREENSHOT_DIR"]), exist_ok=True)
+
+            # 5. 批量测价
             def on_item_start(i, total, row_index, sku):
                 with status_lock:
                     price_status["current_sku"] = sku
-                add_price_log(f"[{i}/{total}] 处理 SKU: {sku}")
+                add_price_log(f"[{i}/{len(sku_data)}] 处理 SKU: {sku}")
 
             def crawl_one(worker_page, row_index, sku):
                 return crawl_sku(
@@ -677,16 +815,19 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                                 browsers.remove(worker_browser)
 
                 def recover_worker_login():
-                    login_browser = BrowserManager(str(app.config["PRICE_AUTH_FILE"]), headless=False, block_resources=False)
+                    login_browser = BrowserManager(
+                        str(app.config["PRICE_AUTH_FILE"]),
+                        headless=False,
+                        block_resources=False,
+                    )
                     try:
                         login_browser.start()
                     except Exception:
                         login_browser.close(force=True)
                         raise
                     with browser_lock:
-                        browsers = current_browser.get("browser")
-                        if isinstance(browsers, list):
-                            browsers.append(login_browser)
+                        if isinstance(current_browser, list):
+                            current_browser.append(login_browser)
                     try:
                         return wait_for_web_login(login_browser)
                     finally:
@@ -694,9 +835,11 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                             login_browser.close(force=True)
                         finally:
                             with browser_lock:
-                                browsers = current_browser.get("browser")
-                                if isinstance(browsers, list) and login_browser in browsers:
-                                    browsers.remove(login_browser)
+                                if (
+                                    isinstance(current_browser, list)
+                                    and login_browser in current_browser
+                                ):
+                                    current_browser.remove(login_browser)
 
                 return worker_page, cleanup_worker, recover_worker_login
 
@@ -708,29 +851,31 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                     if result["price"] is not None and result["price"] < threshold_price:
                         with status_lock:
                             price_status["unqualified_count"] += 1
-                        add_price_log(f"低于门槛价: ¥{result['price']}")
+                        add_price_log(f'  🚫 低于门槛价: ¥{result["price"]}')
                     else:
-                        add_price_log(f"价格: ¥{result['price']}")
+                        add_price_log(f'  ✅ 价格: ¥{result["price"]}')
                 elif result["status"] == "partial":
                     with status_lock:
                         price_status["current"] += 1
                         price_status["fail_count"] += 1
-                    add_price_log(f"需人工复核: {result['message']}")
+                    add_price_log(f'  ⚠️ 需人工复核: {result["message"]}')
                 else:
                     with status_lock:
                         price_status["current"] += 1
                         price_status["fail_count"] += 1
-                    add_price_log(f"失败: {result.get('message', '')}")
+                    add_price_log(f'  ❌ 失败: {result["message"]}')
                 diagnostics_log = _format_price_diagnostics(result.get("diagnostics"))
                 if diagnostics_log:
-                    add_price_log(diagnostics_log)
+                    add_price_log(f"  {diagnostics_log}")
 
             batch = run_sku_batch_with_page_factory(
                 sku_data=sku_data,
                 crawl_func=crawl_one,
-                recover_login_func=lambda: wait_for_web_login(browser),
+                recover_login_func=wait_for_web_login,
                 stop_event=stop_flag,
-                page_factory=lambda worker_index: create_worker_page(worker_index, block_images=True),
+                page_factory=lambda worker_index: create_worker_page(
+                    worker_index, block_images=True
+                ),
                 worker_count=concurrent_workers,
                 on_item_start=on_item_start,
                 on_result=on_result,
@@ -738,32 +883,44 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                     f"SKU {sku} 需要人工处理: {result.get('message', '登录态已失效')}"
                 ),
             )
+            results = batch.results
 
-            if batch.results and not batch.stopped and not batch.login_failed and not stop_flag.is_set():
-                add_price_log(f"正在为低于门槛的商品并发补充截图（{concurrent_workers} 个窗口）...")
+            # 6. 测价结束后集中为低价 SKU 补截图，再写入结果表。
+            if (
+                results
+                and not batch.stopped
+                and not batch.login_failed
+                and not stop_flag.is_set()
+            ):
+                add_price_log(
+                    f"📸 正在为低于门槛的商品并发补充截图（{concurrent_workers} 个窗口）..."
+                )
                 screenshot_summary = capture_low_price_result_screenshots_with_page_factory(
-                    results=batch.results,
+                    results=results,
                     screenshot_dir=str(app.config["PRICE_SCREENSHOT_DIR"]),
                     threshold_price=threshold_price,
-                    page_factory=lambda worker_index: create_worker_page(worker_index, block_images=False),
+                    page_factory=lambda worker_index: create_worker_page(
+                        worker_index, block_images=False
+                    ),
                     worker_count=concurrent_workers,
                     should_stop=stop_flag.is_set,
                 )
                 add_price_log(
-                    f"低价截图：应补 {screenshot_summary.total} 张，"
+                    f"📸 低价截图：应补 {screenshot_summary.total} 张，"
                     f"成功 {screenshot_summary.captured} 张，失败 {screenshot_summary.failed} 张"
                 )
                 if screenshot_summary.failed_skus:
                     failed_skus_text = ", ".join(screenshot_summary.failed_skus[:20])
                     if len(screenshot_summary.failed_skus) > 20:
                         failed_skus_text += "..."
-                    add_price_log(f"低价截图失败 SKU: {failed_skus_text}")
+                    add_price_log(f"⚠️ 低价截图失败 SKU: {failed_skus_text}")
 
-            if batch.results:
-                add_price_log("正在写入结果...")
+            # 7. 写入结果
+            if results:
+                add_price_log("📝 正在写入结果...")
                 output_path = write_results(
                     file_path=str(input_file),
-                    results=batch.results,
+                    results=results,
                     threshold_price=threshold_price,
                     output_dir=str(app.config["PRICE_OUTPUT_DIR"]),
                     sku_column="商品SKU",
@@ -773,41 +930,56 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                 )
                 with status_lock:
                     price_status["result_file"] = output_path
-                add_price_log(f"结果已保存: {Path(output_path).name}")
+                add_price_log(f"✅ 结果已保存: {os.path.basename(output_path)}")
 
+            # 8. 检查是否因停止而结束
             if batch.stopped or stop_flag.is_set():
-                add_price_log("测价已停止")
+                add_price_log("🛑 测价已停止")
             elif batch.login_failed:
                 with status_lock:
                     price_status["error"] = "登录失败，程序中断"
-                add_price_log("登录失败，程序中断")
+                add_price_log("❌ 登录失败，程序中断")
             else:
-                add_price_log("测价完成")
+                add_price_log("🎉 测价完成！")
 
-        except Exception as exc:
+        except Exception as e:
             with status_lock:
-                price_status["error"] = str(exc)
-            add_price_log(f"错误: {exc}")
+                price_status["error"] = str(e)
+            add_price_log(f"❌ 错误: {str(e)}")
+            import traceback
+
+            add_price_log(f"❌ 详细错误: {traceback.format_exc()}")
         finally:
+            # 确保浏览器被关闭
             if browser:
                 try:
-                    add_price_log("正在关闭浏览器...")
+                    add_price_log("🛑 正在关闭浏览器...")
                     browser.close(force=True)
-                    add_price_log("浏览器已关闭")
-                except Exception as exc:
-                    add_price_log(f"关闭浏览器出错: {exc}")
+                    add_price_log("✅ 浏览器已关闭")
+                except Exception as e:
+                    add_price_log(f"⚠️ 关闭浏览器出错: {e}")
 
             with browser_lock:
                 current_browser["browser"] = None
+
             with status_lock:
                 price_status["running"] = False
                 price_status["stopping"] = False
                 price_status["need_login"] = False
 
+            if cleanup_input:
+                try:
+                    if input_file.exists():
+                        input_file.unlink()
+                        add_price_log(f"已清理临时输入文件: {input_file.name}")
+                except Exception as exc:
+                    add_price_log(f"清理临时输入文件失败: {exc}")
 
     def add_room_log(message: str):
         with room_status_lock:
-            room_creator_status["logs"].append({"time": time.strftime("%H:%M:%S"), "message": message})
+            room_creator_status["logs"].append(
+                {"time": time.strftime("%H:%M:%S"), "message": message}
+            )
             if len(room_creator_status["logs"]) > 200:
                 room_creator_status["logs"] = room_creator_status["logs"][-200:]
         print(f"[{time.strftime('%H:%M:%S')}] {message}")
@@ -851,7 +1023,12 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
         add_room_log("登录恢复，继续运行")
         return True
 
-    def run_room_creator_task(input_file: Path, column_mapping: RoomColumnMapping, show_browser: bool = False, task_id: str = ""):
+    def run_room_creator_task(
+        input_file: Path,
+        column_mapping: RoomColumnMapping,
+        show_browser: bool = False,
+        task_id: str = "",
+    ):
         browser = None
         try:
             from room_creator.excel_reader import read_room_rows
@@ -934,7 +1111,9 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                 )
                 browser._page.wait_for_timeout(1500)
 
-            def on_room_progress(current, total, created_count, failed_count, current_title):
+            def on_room_progress(
+                current, total, created_count, failed_count, current_title
+            ):
                 with room_status_lock:
                     room_creator_status["current"] = current
                     room_creator_status["total"] = total
@@ -972,7 +1151,9 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
 
             with room_status_lock:
                 room_creator_status["result_file"] = str(output_path)
-                room_creator_status["current"] = result.created_count + result.failed_count
+                room_creator_status["current"] = (
+                    result.created_count + result.failed_count
+                )
                 room_creator_status["created_count"] = result.created_count
                 room_creator_status["failed_count"] = result.failed_count
                 room_creator_status["skipped"] = result.skipped_count
@@ -1014,7 +1195,6 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                     add_room_log(f"已清理上传文件: {input_file.name}")
             except Exception as exc:
                 add_room_log(f"清理上传文件失败: {exc}")
-
 
     def shutdown_server():
         add_price_log("正在关闭服务...")
@@ -1084,6 +1264,7 @@ def _initial_room_creator_status():
         "stopping": False,
     }
 
+
 def _cleanup_runtime_for_app(app: Flask):
     _cleanup_old_runtime_files(
         app.config["RUNTIME_CLEANUP_ROOTS"],
@@ -1097,7 +1278,9 @@ def _cleanup_runtime_for_app(app: Flask):
     app.config["ROOM_OUTPUT_DIR"].mkdir(parents=True, exist_ok=True)
 
 
-def _cleanup_old_runtime_files(roots: list[Path], retention_days: int, now: float | None = None):
+def _cleanup_old_runtime_files(
+    roots: list[Path], retention_days: int, now: float | None = None
+):
     cutoff = (now if now is not None else time.time()) - retention_days * 24 * 60 * 60
     for root in roots:
         root = Path(root)
@@ -1106,7 +1289,9 @@ def _cleanup_old_runtime_files(roots: list[Path], retention_days: int, now: floa
 
         for path in root.rglob("*"):
             try:
-                if (path.is_file() or path.is_symlink()) and path.stat().st_mtime < cutoff:
+                if (
+                    path.is_file() or path.is_symlink()
+                ) and path.stat().st_mtime < cutoff:
                     path.unlink()
             except FileNotFoundError:
                 continue

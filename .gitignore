@@ -7,8 +7,8 @@ live-web/关闭服务.bat
 logs/
 关闭服务.bat
 docs/*
-!docs/sop/
-!docs/sop/**
+docs/sop/
+docs/sop/**
 
 # Promotion binding generated files
 live-promotion-binding/input/*

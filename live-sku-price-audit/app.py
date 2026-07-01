@@ -7,6 +7,7 @@ import os
 import sys
 import time
 import threading
+import uuid
 from pathlib import Path
 
 from flask import Flask, render_template, request, jsonify, send_file
@@ -128,6 +129,28 @@ def safe_upload_name(filename):
     return name
 
 
+def parse_sku_input(raw):
+    """解析页面输入的 SKU 字符串，支持英文/中文逗号和分号、换行等分隔符。"""
+    if not raw or not isinstance(raw, str):
+        return []
+    separators = (',', ';', '，', '；', '\n', '\r', '\t')
+    parts = [raw]
+    for sep in separators:
+        split_parts = []
+        for part in parts:
+            split_parts.extend(part.split(sep))
+        parts = split_parts
+
+    seen = set()
+    result = []
+    for sku in parts:
+        normalized = sku.strip()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            result.append(normalized)
+    return result
+
+
 def add_log(message):
     """添加日志（线程安全）"""
     with status_lock:
@@ -181,7 +204,7 @@ def close_current_browsers():
     return closed_count
 
 
-def run_audit_task(input_file, threshold_price, show_browser=False):
+def run_audit_task(input_file, threshold_price, show_browser=False, cleanup_input=False):
     """在后台线程运行测价任务"""
     global audit_status
     global current_browser
@@ -516,6 +539,14 @@ def run_audit_task(input_file, threshold_price, show_browser=False):
             audit_status['stopping'] = False
             audit_status['need_login'] = False
 
+        if cleanup_input:
+            try:
+                if os.path.exists(input_file):
+                    os.remove(input_file)
+                    add_log(f'🧹 已清理临时输入文件: {os.path.basename(input_file)}')
+            except Exception as e:
+                add_log(f'⚠️ 清理临时输入文件失败: {e}')
+
 
 @app.route('/')
 def index():
@@ -597,6 +628,57 @@ def start_audit():
     thread.start()
 
     return jsonify({'success': True})
+
+
+@app.route('/api/start-from-skus', methods=['POST'])
+def start_audit_from_skus():
+    """从页面输入的 SKU 字符串开始测价"""
+    global audit_status
+
+    with status_lock:
+        if audit_status['running']:
+            return jsonify({'success': False, 'error': '已有任务正在运行'})
+
+    data = request.get_json(silent=True) or {}
+    skus_raw = data.get('skus', '')
+    threshold = data.get('threshold', CONFIG['threshold_price'])
+    show_browser = bool(data.get('show_browser'))
+
+    try:
+        threshold = float(threshold)
+    except (TypeError, ValueError):
+        return json_error('价格门槛必须是有效数字')
+
+    if threshold < 0:
+        return json_error('价格门槛不能为负数')
+
+    sku_list = parse_sku_input(skus_raw)
+    if not sku_list:
+        return json_error('请输入有效的 SKU')
+
+    # 在 input 目录下生成临时输入文件
+    timestamp = time.strftime('%Y%m%d_%H%M%S')
+    input_file = os.path.join(CONFIG['input_dir'], f'页面输入SKU_{timestamp}_{uuid.uuid4().hex[:8]}.xlsx')
+    try:
+        from utils.excel_handler import create_sku_input_file
+        create_sku_input_file(sku_list, input_file)
+    except Exception as e:
+        return json_error(f'生成输入文件失败: {e}')
+
+    stop_flag.clear()
+    login_event.clear()
+
+    add_log(f'📝 页面输入 SKU {len(sku_list)} 个，已生成临时输入文件')
+
+    thread = threading.Thread(
+        target=run_audit_task,
+        args=(input_file, threshold, show_browser),
+        kwargs={'cleanup_input': True}
+    )
+    thread.daemon = False
+    thread.start()
+
+    return jsonify({'success': True, 'count': len(sku_list)})
 
 
 @app.route('/api/status')

@@ -4,7 +4,7 @@ from pathlib import Path
 
 from openpyxl import Workbook
 
-from utils.excel_handler import read_sku_list, write_results
+from utils.excel_handler import read_sku_list, write_results, create_sku_input_file
 
 
 def make_workbook(headers, rows):
@@ -131,6 +131,16 @@ class ExcelHandlerTests(unittest.TestCase):
         self.assertEqual(
             ws.cell(2, 6).value,
             "需人工复核: 部分系列/规格未完成检测；已检测 1 个规格，最低 ¥8.0",
+        )
+
+    def test_create_sku_input_file_generates_readable_sku_list(self):
+        out_dir = tempfile.mkdtemp()
+        output_path = Path(out_dir) / 'sku_input.xlsx'
+        create_sku_input_file(['100264886683', '48279162646'], str(output_path))
+        self.assertTrue(output_path.exists())
+        self.assertEqual(
+            read_sku_list(str(output_path), '商品SKU'),
+            [(2, '100264886683'), (3, '48279162646')],
         )
 
 
