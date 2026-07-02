@@ -155,7 +155,7 @@ class BatchRunner:
 
             # 每行之间随机延迟，降低风控概率
             if index < len(rows) and not self.stop_event.is_set():
-                delay = 1.5
+                delay = 0.8
                 self._log_msg(f"等待 {delay}s 后继续...")
                 time.sleep(delay)
 

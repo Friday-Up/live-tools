@@ -233,7 +233,7 @@ class RoomCreatorBrowser:
 
         # 先关闭可能遮挡创建按钮的弹窗/提示（创建成功后可能出现）
         self._close_modals(press_escape=False, click_mask=True)
-        self._page.wait_for_timeout(500)
+        self._page.wait_for_timeout(300)
 
         # 确保在"正式直播"标签页。创建测试直播后页面可能自动切到"测试直播"标签，
         # 而"创建直播"按钮在"正式直播"标签页上。
@@ -241,7 +241,7 @@ class RoomCreatorBrowser:
             formal_tab = self._page.locator(config.SELECTORS["formal_live_tab"]).first
             if formal_tab.count() and formal_tab.is_visible():
                 formal_tab.click(force=True)
-                self._page.wait_for_timeout(800)
+                self._page.wait_for_timeout(500)
         except Exception:
             pass
 
@@ -513,7 +513,7 @@ class RoomCreatorBrowser:
             raise RoomCreateError("创建提交后抽屉未关闭，可能创建未成功")
 
         # 关闭可能出现的成功提示/弹窗，避免遮挡下一次"创建直播"按钮
-        self._page.wait_for_timeout(800)
+        self._page.wait_for_timeout(400)
         self._close_modals(press_escape=False, click_mask=True)
 
         return True
