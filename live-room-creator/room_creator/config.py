@@ -54,6 +54,7 @@ TITLE_MAX_LENGTH = 15
 
 # 页面元素 selector（基于 2026-06-30 京东直播后台结构）
 SELECTORS = {
+    "formal_live_tab": '.jd-tabs-tab:has-text("正式直播"), .ant-tabs-tab:has-text("正式直播")',
     "create_button": 'button:has-text("创建直播")',
     "drawer": '.jd-drawer-content',
     "title_input": '#createRoom_title input',

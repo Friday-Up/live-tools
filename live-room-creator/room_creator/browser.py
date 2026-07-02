@@ -235,6 +235,16 @@ class RoomCreatorBrowser:
         self._close_modals(press_escape=False, click_mask=True)
         self._page.wait_for_timeout(500)
 
+        # 确保在"正式直播"标签页。创建测试直播后页面可能自动切到"测试直播"标签，
+        # 而"创建直播"按钮在"正式直播"标签页上。
+        try:
+            formal_tab = self._page.locator(config.SELECTORS["formal_live_tab"]).first
+            if formal_tab.count() and formal_tab.is_visible():
+                formal_tab.click(force=True)
+                self._page.wait_for_timeout(800)
+        except Exception:
+            pass
+
         # 等待"创建直播"按钮可见（创建成功后页面可能需要一点时间恢复）
         create_btn = None
         deadline = time.time() + 10
