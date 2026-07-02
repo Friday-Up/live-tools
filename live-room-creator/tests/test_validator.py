@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from room_creator.models import RoomCreateRow
 from room_creator.validator import find_duplicates, validate_row
@@ -13,7 +13,7 @@ class TestValidateRow(unittest.TestCase):
         row = RoomCreateRow(
             row_index=2,
             title="直播间一号",
-            start_time=datetime(2026, 7, 1, 20, 0, 0),
+            start_time=datetime.now() + timedelta(hours=1),
         )
         self.assertEqual(validate_row(row), [])
 
@@ -21,7 +21,7 @@ class TestValidateRow(unittest.TestCase):
         row = RoomCreateRow(
             row_index=2,
             title="直播",
-            start_time=datetime(2026, 7, 1, 20, 0, 0),
+            start_time=datetime.now() + timedelta(hours=1),
         )
         errors = validate_row(row)
         self.assertTrue(any("长度不足" in e for e in errors))

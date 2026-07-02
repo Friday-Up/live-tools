@@ -231,8 +231,19 @@ class RoomCreatorBrowser:
         if self._page is None:
             raise RuntimeError("浏览器未启动")
 
-        create_btn = self._page.locator(config.SELECTORS["create_button"]).first
-        if not create_btn.is_visible():
+        # 先关闭可能遮挡创建按钮的弹窗/提示（创建成功后可能出现）
+        self._close_modals(press_escape=False, click_mask=True)
+        self._page.wait_for_timeout(500)
+
+        # 等待"创建直播"按钮可见（创建成功后页面可能需要一点时间恢复）
+        create_btn = None
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            create_btn = self._page.locator(config.SELECTORS["create_button"]).first
+            if create_btn.count() and create_btn.is_visible():
+                break
+            self._page.wait_for_timeout(500)
+        else:
             raise RoomCreateError('未找到"创建直播"按钮')
         create_btn.click(force=True)
         # 等待侧边栏出现并渲染内部表单
@@ -491,14 +502,18 @@ class RoomCreatorBrowser:
         except Exception:
             raise RoomCreateError("创建提交后抽屉未关闭，可能创建未成功")
 
+        # 关闭可能出现的成功提示/弹窗，避免遮挡下一次"创建直播"按钮
+        self._page.wait_for_timeout(800)
+        self._close_modals(press_escape=False, click_mask=True)
+
         return True
 
     def close_drawer(self):
         """点击取消或按 Esc 关闭侧边栏，准备下一条。"""
         if self._page is None:
             return
-        # 如果存在"离开后所填写内容将不会保存"等确认框，先点确定
-        self._close_modals()
+        # 关闭可能遮挡的弹窗/提示；不按 Escape，避免误触发抽屉的未保存提示
+        self._close_modals(press_escape=False, click_mask=True)
         try:
             cancel_btn = self._page.locator(config.SELECTORS["cancel_button"]).first
             if cancel_btn.is_visible():
