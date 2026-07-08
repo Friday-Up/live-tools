@@ -32,6 +32,7 @@ class WindowsPackagingTest(unittest.TestCase):
         self.assertIn("live-promotion-binding/assets", content)
         self.assertIn("live-promotion-binding/promotion_binding", content)
         self.assertIn("live-sku-price-audit/utils", content)
+        self.assertIn("live-bigscreen-capture/bigscreen_capture", content)
         self.assertIn("Live-Tools-Windows.zip", content)
         self.assertIn("启动直播工具.bat", content)
         self.assertNotIn("启动测价工具.bat", content)

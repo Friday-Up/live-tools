@@ -37,6 +37,7 @@ jobs:
           pip install -r live-sku-price-audit/requirements.txt
           pip install -r live-promotion-binding/requirements.txt
           pip install -r live-room-creator/requirements.txt
+          pip install -r live-bigscreen-capture/requirements.txt
           pip install pyinstaller
 
       - name: Install Playwright Chromium
@@ -62,6 +63,10 @@ jobs:
           python -m unittest discover -s tests -p "test_*.py" -v
           Pop-Location
 
+          Push-Location live-bigscreen-capture
+          python -m unittest discover -s tests -p "test_*.py" -v
+          Pop-Location
+
           python -m unittest discover -s tests -p "test_*.py" -v
 
       - name: Build Live Tools Web with PyInstaller
@@ -73,6 +78,7 @@ jobs:
           $bindingPackage = "live-promotion-binding/promotion_binding"
           $priceUtils = "live-sku-price-audit/utils"
           $roomCreatorPackage = "live-room-creator/room_creator"
+          $bigscreenPackage = "live-bigscreen-capture/bigscreen_capture"
 
           pyinstaller --noconfirm --onedir --console `
             --name "Live-Tools-Web" `
@@ -80,6 +86,7 @@ jobs:
             --paths "live-promotion-binding" `
             --paths "live-sku-price-audit" `
             --paths "live-room-creator" `
+            --paths "live-bigscreen-capture" `
             --collect-all playwright `
             --collect-all flask `
             --collect-all jinja2 `
@@ -101,11 +108,16 @@ jobs:
             --hidden-import room_creator.validator `
             --hidden-import room_creator.report_writer `
             --hidden-import room_creator.models `
+            --hidden-import bigscreen_capture `
+            --hidden-import bigscreen_capture.browser `
+            --hidden-import bigscreen_capture.service `
+            --hidden-import bigscreen_capture.capture_steps `
             --add-data "$webTemplates;live-web/templates" `
             --add-data "$bindingAssets;live-promotion-binding/assets" `
             --add-data "$bindingPackage;live-promotion-binding/promotion_binding" `
             --add-data "$priceUtils;live-sku-price-audit/utils" `
             --add-data "$roomCreatorPackage;live-room-creator/room_creator" `
+            --add-data "$bigscreenPackage;live-bigscreen-capture/bigscreen_capture" `
             $webApp
 
       - name: Copy launcher and runtime folders
@@ -131,7 +143,8 @@ jobs:
             "live-promotion-binding/assets",
             "live-promotion-binding/promotion_binding",
             "live-sku-price-audit/utils",
-            "live-room-creator/room_creator"
+            "live-room-creator/room_creator",
+            "live-bigscreen-capture/bigscreen_capture"
           )
 
           foreach ($item in $required) {
