@@ -13,7 +13,7 @@ class WebTemplateTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         html = response.data.decode("utf-8")
         self.assertIn("直播运营工具", html)
-        self.assertIn("SKU 测价、绑定券码/促销ID、批量创建直播间统一入口", html)
+        self.assertIn("SKU 测价、绑定券码/促销ID、批量创建直播间、蓝屏自动截图统一入口", html)
         self.assertNotIn("直播 SKU 价格巡检工具", html)
         self.assertIn("SKU 测价", html)
         self.assertIn("绑定券码/促销ID", html)
@@ -42,6 +42,21 @@ class WebTemplateTest(unittest.TestCase):
         self.assertIn("/api/room-creator/preview", html)
         self.assertIn("/api/room-creator/start", html)
         self.assertIn("/api/room-creator/download", html)
+
+    def test_index_contains_bigscreen_capture_panel(self):
+        app = create_app(base_dir=Path(tempfile.mkdtemp()))
+        response = app.test_client().get("/")
+
+        self.assertEqual(response.status_code, 200)
+        html = response.data.decode("utf-8")
+        self.assertIn("蓝屏自动截图", html)
+        self.assertIn('id="bigscreenCapturePanel"', html)
+        self.assertIn('id="bigscreenUrlInput"', html)
+        self.assertIn('id="bigscreenHourGrid"', html)
+        self.assertIn("/api/bigscreen-capture/preview", html)
+        self.assertIn("/api/bigscreen-capture/start", html)
+        self.assertIn("/api/bigscreen-capture/capture-now", html)
+        self.assertIn("/api/bigscreen-capture/status", html)
 
     def test_price_audit_progress_uses_completed_count_for_concurrent_runs(self):
         app = create_app(base_dir=Path(tempfile.mkdtemp()))
