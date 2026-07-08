@@ -63,8 +63,7 @@ class BigscreenBrowser:
         self._wait_stable()
 
     def select_overview_product_scope(self, label):
-        self._click_text("全部商品")
-        self._click_text(label)
+        self._select_ant_dropdown("全部商品", label)
         self._wait_stable()
 
     def select_flow_metric(self, label):
@@ -77,7 +76,10 @@ class BigscreenBrowser:
         self._wait_stable()
 
     def sort_product_table(self, label):
-        self._click_text(label)
+        header = self.page.locator("thead th").filter(has_text=label)
+        if header.count() < 1:
+            raise RuntimeError("未找到商品分析表头: %s" % label)
+        header.first.click(force=True)
         self._wait_stable()
 
     def screenshot(self, path):
@@ -101,6 +103,20 @@ class BigscreenBrowser:
         if locator.count() < 1:
             raise RuntimeError("未找到页面元素: %s" % label)
         locator.first.click(force=True)
+
+    def _select_ant_dropdown(self, current_text, option_text):
+        dropdown = self.page.locator(".ant-select-selection-item").filter(has_text=current_text)
+        if dropdown.count() < 1:
+            dropdown = self.page.locator(".ant-select-selection-item").filter(has_text=option_text)
+        if dropdown.count() < 1:
+            raise RuntimeError("未找到下拉框: %s" % current_text)
+        dropdown.first.click(force=True)
+        self.page.wait_for_timeout(500)
+
+        option = self.page.locator(".ant-select-item-option-content").filter(has_text=option_text)
+        if option.count() < 1:
+            raise RuntimeError("未找到下拉选项: %s" % option_text)
+        option.first.evaluate("el => el.click()")
 
     def _wait_stable(self):
         self.page.wait_for_timeout(1500)
