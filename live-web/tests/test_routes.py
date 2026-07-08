@@ -350,6 +350,96 @@ class PromotionBindingRoutesTest(unittest.TestCase):
         self.assertIn("close_current_browsers()", source[source.index("def stop_price_audit"):])
 
 
+    def test_bigscreen_capture_preview_returns_room_id_and_hours(self):
+        app = create_app(base_dir=Path(tempfile.mkdtemp()))
+        client = app.test_client()
+
+        response = client.post(
+            "/api/bigscreen-capture/preview",
+            json={"url": "https://jlive.jd.com/bigScreen?id=46794566"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["room_id"], "46794566")
+        self.assertIn("19:00", payload["hour_options"])
+
+    def test_bigscreen_capture_rejects_bad_url(self):
+        app = create_app(base_dir=Path(tempfile.mkdtemp()))
+        client = app.test_client()
+
+        response = client.post(
+            "/api/bigscreen-capture/preview",
+            json={"url": "https://example.com"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.get_json()["success"])
+
+    def test_bigscreen_capture_capture_now_uses_service_and_downloads_zip(self):
+        class FakeCaptureResult:
+            room_id = "46794566"
+            success_count = 15
+            fail_count = 0
+
+        app = create_app(base_dir=Path(tempfile.mkdtemp()))
+        client = app.test_client()
+
+        with patch("app.capture_bigscreen_once") as fake_capture:
+            FakeCaptureResult.zip_file = app.config["BIGSCREEN_OUTPUT_DIR"] / "result.zip"
+            FakeCaptureResult.zip_file.write_bytes(b"zip")
+            fake_capture.return_value = FakeCaptureResult
+
+            response = client.post(
+                "/api/bigscreen-capture/capture-now",
+                json={"url": "https://jlive.jd.com/bigScreen?id=46794566"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["success_count"], 15)
+        self.assertIn("download_url", payload)
+        download_response = client.get(payload["download_url"])
+        self.assertEqual(download_response.status_code, 200)
+        self.assertEqual(download_response.data, b"zip")
+        download_response.close()
+
+    def test_bigscreen_capture_start_rejects_empty_slots(self):
+        app = create_app(base_dir=Path(tempfile.mkdtemp()))
+        client = app.test_client()
+
+        response = client.post(
+            "/api/bigscreen-capture/start",
+            json={"url": "https://jlive.jd.com/bigScreen?id=46794566", "hour_slots": []},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.get_json()["success"])
+
+    def test_bigscreen_capture_status_returns_initial_shape(self):
+        app = create_app(base_dir=Path(tempfile.mkdtemp()))
+        client = app.test_client()
+
+        response = client.get("/api/bigscreen-capture/status")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertFalse(payload["running"])
+        self.assertEqual(payload["total"], 0)
+        self.assertEqual(payload["logs"], [])
+
+    def test_bigscreen_capture_stop_sets_stopping(self):
+        app = create_app(base_dir=Path(tempfile.mkdtemp()))
+        client = app.test_client()
+
+        stop_response = client.post("/api/bigscreen-capture/stop")
+        status_response = client.get("/api/bigscreen-capture/status")
+
+        self.assertEqual(stop_response.status_code, 200)
+        self.assertTrue(status_response.get_json()["stopping"])
+
     def test_room_creator_preview_stores_column_mapping(self):
         app = create_app(base_dir=Path(tempfile.mkdtemp()))
         client = app.test_client()

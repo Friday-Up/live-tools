@@ -3,6 +3,7 @@ from __future__ import annotations
 """Unified local web entry for live operation tools."""
 
 import os
+from datetime import date, datetime
 from pathlib import Path
 import signal
 import sys
@@ -45,12 +46,15 @@ LIVE_WEB_ROOT = resolve_web_root(LIVE_DIR)
 PROMOTION_BINDING_ROOT = LIVE_DIR / "live-promotion-binding"
 PRICE_AUDIT_ROOT = LIVE_DIR / "live-sku-price-audit"
 ROOM_CREATOR_ROOT = LIVE_DIR / "live-room-creator"
+BIGSCREEN_CAPTURE_ROOT = LIVE_DIR / "live-bigscreen-capture"
 if str(PROMOTION_BINDING_ROOT) not in sys.path:
     sys.path.insert(0, str(PROMOTION_BINDING_ROOT))
 if str(PRICE_AUDIT_ROOT) not in sys.path:
     sys.path.insert(0, str(PRICE_AUDIT_ROOT))
 if str(ROOM_CREATOR_ROOT) not in sys.path:
     sys.path.insert(0, str(ROOM_CREATOR_ROOT))
+if str(BIGSCREEN_CAPTURE_ROOT) not in sys.path:
+    sys.path.insert(0, str(BIGSCREEN_CAPTURE_ROOT))
 
 
 # fmt: off
@@ -59,6 +63,9 @@ from room_creator.excel_reader import ColumnMapping as RoomColumnMapping
 from room_creator import BatchRunner, RoomCreatorBrowser, inspect_workbook
 from promotion_binding.workbook_reader import ColumnMapping, inspect_business_workbook
 from promotion_binding.service import generate_binding_files
+from bigscreen_capture.schedule import build_hour_options, build_planned_slots
+from bigscreen_capture.service import capture_once as capture_bigscreen_once
+from bigscreen_capture.url_parser import BigscreenUrlError, parse_bigscreen_url
 # fmt: on
 RUNTIME_RETENTION_DAYS = 7
 
@@ -114,6 +121,7 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
     price_screenshot_dir = price_output_dir / "screenshots"
     room_input_dir = runtime_dir / "input" / "room-creator"
     room_output_dir = runtime_dir / "output" / "room-creator"
+    bigscreen_output_dir = runtime_dir / "output" / "bigscreen-capture"
     template_file = (
         PROMOTION_BINDING_ROOT / "assets" / "商品上传模版（2026切片版）.xlsx"
     )
@@ -126,6 +134,7 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
     price_output_dir.mkdir(parents=True, exist_ok=True)
     room_input_dir.mkdir(parents=True, exist_ok=True)
     room_output_dir.mkdir(parents=True, exist_ok=True)
+    bigscreen_output_dir.mkdir(parents=True, exist_ok=True)
 
     app = Flask(__name__, template_folder=str(LIVE_WEB_ROOT / "templates"))
     app.config["PROMOTION_RESULTS"] = {}
@@ -144,6 +153,9 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
     app.config["ROOM_OUTPUT_DIR"] = room_output_dir
     app.config["ROOM_CREATOR_RESULTS"] = {}
     app.config["ROOM_CREATOR_MAPPINGS"] = {}
+    app.config["BIGSCREEN_OUTPUT_DIR"] = bigscreen_output_dir
+    app.config["BIGSCREEN_RESULTS"] = {}
+    app.config["BIGSCREEN_AUTH_FILE"] = PRICE_AUDIT_ROOT / "jd_auth.json"
 
     status_lock = threading.Lock()
     price_status = _initial_price_status()
@@ -157,6 +169,10 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
     room_login_event = threading.Event()
     room_browser_lock = threading.Lock()
     current_room_browser = {"browser": None}
+    bigscreen_status_lock = threading.Lock()
+    bigscreen_status = _initial_bigscreen_status()
+    bigscreen_stop_flag = threading.Event()
+    bigscreen_login_event = threading.Event()
 
     def close_current_browsers():
         with browser_lock:
@@ -195,6 +211,133 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
 
     @app.route("/api/health")
     def health():
+        return jsonify({"success": True})
+
+    @app.route("/api/bigscreen-capture/preview", methods=["POST"])
+    def preview_bigscreen_capture():
+        _cleanup_runtime_for_app(app)
+        data = request.get_json(silent=True) or {}
+        try:
+            parsed = parse_bigscreen_url(data.get("url", ""))
+        except BigscreenUrlError as exc:
+            return _json_error(str(exc))
+        return jsonify(
+            {
+                "success": True,
+                "room_id": parsed.room_id,
+                "hour_options": build_hour_options(12, 23),
+            }
+        )
+
+    @app.route("/api/bigscreen-capture/capture-now", methods=["POST"])
+    def capture_bigscreen_now():
+        _cleanup_runtime_for_app(app)
+        data = request.get_json(silent=True) or {}
+        try:
+            parsed = parse_bigscreen_url(data.get("url", ""))
+        except BigscreenUrlError as exc:
+            return _json_error(str(exc))
+
+        task_id = uuid.uuid4().hex
+        output_dir = app.config["BIGSCREEN_OUTPUT_DIR"] / task_id
+        try:
+            result = capture_bigscreen_once(
+                url=parsed.url,
+                output_dir=output_dir,
+                planned_slot="立即截图",
+                captured_at=datetime.now(),
+                auth_file=app.config["BIGSCREEN_AUTH_FILE"],
+            )
+        except Exception as exc:
+            return _json_error(str(exc), status_code=500)
+
+        app.config["BIGSCREEN_RESULTS"][task_id] = {"zip": result.zip_file}
+        return jsonify(
+            {
+                "success": True,
+                "task_id": task_id,
+                "room_id": result.room_id,
+                "success_count": result.success_count,
+                "fail_count": result.fail_count,
+                "download_url": url_for("download_bigscreen_capture", task_id=task_id),
+            }
+        )
+
+    @app.route("/api/bigscreen-capture/download/<task_id>")
+    def download_bigscreen_capture(task_id):
+        result = app.config["BIGSCREEN_RESULTS"].get(task_id)
+        if not result or not Path(result["zip"]).is_file():
+            return _json_error("结果文件不存在", status_code=404)
+        return send_file(result["zip"], as_attachment=True)
+
+    @app.route("/api/bigscreen-capture/start", methods=["POST"])
+    def start_bigscreen_capture():
+        with bigscreen_status_lock:
+            if bigscreen_status["running"]:
+                return _json_error("已有蓝屏截图任务正在运行")
+
+        data = request.get_json(silent=True) or {}
+        try:
+            parsed = parse_bigscreen_url(data.get("url", ""))
+        except BigscreenUrlError as exc:
+            return _json_error(str(exc))
+
+        hour_slots = data.get("hour_slots") or []
+        if not hour_slots:
+            return _json_error("请选择至少一个整点")
+
+        capture_date_raw = data.get("capture_date") or date.today().isoformat()
+        try:
+            capture_date = date.fromisoformat(capture_date_raw)
+            planned_slots = build_planned_slots(capture_date, list(hour_slots))
+        except Exception:
+            return _json_error("整点配置无效")
+
+        pending_slots = [slot for slot in planned_slots if slot.status == "pending"]
+        if not pending_slots:
+            return _json_error("选择的整点都已过期")
+
+        task_id = uuid.uuid4().hex
+        bigscreen_stop_flag.clear()
+        bigscreen_login_event.clear()
+        with bigscreen_status_lock:
+            bigscreen_status.update(_initial_bigscreen_status())
+            bigscreen_status["running"] = True
+            bigscreen_status["total"] = len(pending_slots)
+            bigscreen_status["task_id"] = task_id
+            bigscreen_status["room_id"] = parsed.room_id
+            bigscreen_status["planned_slots"] = [slot.label for slot in planned_slots]
+            bigscreen_status["missed_slots"] = [
+                slot.label for slot in planned_slots if slot.status == "missed"
+            ]
+
+        thread = threading.Thread(
+            target=run_bigscreen_capture_task,
+            args=(task_id, parsed.url, pending_slots),
+        )
+        thread.daemon = False
+        thread.start()
+        return jsonify({"success": True, "task_id": task_id})
+
+    @app.route("/api/bigscreen-capture/status")
+    def get_bigscreen_capture_status():
+        with bigscreen_status_lock:
+            return jsonify(dict(bigscreen_status))
+
+    @app.route("/api/bigscreen-capture/continue", methods=["POST"])
+    def continue_bigscreen_capture():
+        bigscreen_login_event.set()
+        add_bigscreen_log('用户点击"我已登录"，继续运行')
+        return jsonify({"success": True})
+
+    @app.route("/api/bigscreen-capture/stop", methods=["POST"])
+    def stop_bigscreen_capture():
+        add_bigscreen_log("收到停止请求")
+        bigscreen_stop_flag.set()
+        bigscreen_login_event.set()
+        with bigscreen_status_lock:
+            bigscreen_status["stopping"] = True
+            bigscreen_status["need_login"] = False
         return jsonify({"success": True})
 
     @app.route("/api/upload", methods=["POST"])
@@ -1196,6 +1339,70 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
             except Exception as exc:
                 add_room_log(f"清理上传文件失败: {exc}")
 
+    def add_bigscreen_log(message: str):
+        with bigscreen_status_lock:
+            bigscreen_status["logs"].append(
+                {"time": time.strftime("%H:%M:%S"), "message": message}
+            )
+            if len(bigscreen_status["logs"]) > 200:
+                bigscreen_status["logs"] = bigscreen_status["logs"][-200:]
+        print(f"[{time.strftime('%H:%M:%S')}] {message}")
+
+    def run_bigscreen_capture_task(task_id: str, url: str, planned_slots):
+        try:
+            add_bigscreen_log("开始蓝屏自动截图")
+            for slot in planned_slots:
+                if bigscreen_stop_flag.is_set():
+                    add_bigscreen_log("蓝屏截图已停止")
+                    break
+
+                with bigscreen_status_lock:
+                    bigscreen_status["current_slot"] = slot.label
+
+                while not bigscreen_stop_flag.is_set():
+                    wait_seconds = (slot.run_at - datetime.now()).total_seconds()
+                    if wait_seconds <= 0:
+                        break
+                    time.sleep(min(30, max(0.2, wait_seconds)))
+
+                if bigscreen_stop_flag.is_set():
+                    add_bigscreen_log("蓝屏截图已停止")
+                    break
+
+                add_bigscreen_log(f"开始执行 {slot.label} 蓝屏截图")
+                result = capture_bigscreen_once(
+                    url=url,
+                    output_dir=app.config["BIGSCREEN_OUTPUT_DIR"] / task_id / slot.label.replace(":", ""),
+                    planned_slot=slot.label,
+                    captured_at=slot.run_at,
+                    auth_file=app.config["BIGSCREEN_AUTH_FILE"],
+                    should_stop=bigscreen_stop_flag.is_set,
+                    log_callback=add_bigscreen_log,
+                )
+                app.config["BIGSCREEN_RESULTS"][task_id] = {"zip": result.zip_file}
+                with bigscreen_status_lock:
+                    bigscreen_status["current"] += 1
+                    bigscreen_status["success_count"] += result.success_count
+                    bigscreen_status["fail_count"] += result.fail_count
+                    bigscreen_status["result_file"] = str(result.zip_file)
+                add_bigscreen_log(
+                    f"{slot.label} 截图完成，成功 {result.success_count} 项，失败 {result.fail_count} 项"
+                )
+
+            if not bigscreen_stop_flag.is_set():
+                add_bigscreen_log("蓝屏自动截图完成")
+        except Exception as exc:
+            with bigscreen_status_lock:
+                bigscreen_status["error"] = str(exc)
+            add_bigscreen_log(f"蓝屏截图错误: {exc}")
+        finally:
+            with bigscreen_status_lock:
+                bigscreen_status["running"] = False
+                bigscreen_status["need_login"] = False
+                if not bigscreen_stop_flag.is_set():
+                    bigscreen_status["stopping"] = False
+                bigscreen_status["current_slot"] = ""
+
     def shutdown_server():
         add_price_log("正在关闭服务...")
         stop_flag.set()
@@ -1206,6 +1413,10 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
         room_stop_flag.set()
         room_login_event.set()
         close_current_room_browser()
+
+        add_bigscreen_log("正在停止蓝屏自动截图...")
+        bigscreen_stop_flag.set()
+        bigscreen_login_event.set()
         os.kill(os.getpid(), signal.SIGTERM)
 
     return app
@@ -1265,6 +1476,26 @@ def _initial_room_creator_status():
     }
 
 
+def _initial_bigscreen_status():
+    return {
+        "running": False,
+        "total": 0,
+        "current": 0,
+        "current_slot": "",
+        "success_count": 0,
+        "fail_count": 0,
+        "logs": [],
+        "result_file": None,
+        "error": None,
+        "need_login": False,
+        "stopping": False,
+        "task_id": "",
+        "room_id": "",
+        "planned_slots": [],
+        "missed_slots": [],
+    }
+
+
 def _cleanup_runtime_for_app(app: Flask):
     _cleanup_old_runtime_files(
         app.config["RUNTIME_CLEANUP_ROOTS"],
@@ -1276,6 +1507,7 @@ def _cleanup_runtime_for_app(app: Flask):
     app.config["PRICE_OUTPUT_DIR"].mkdir(parents=True, exist_ok=True)
     app.config["ROOM_INPUT_DIR"].mkdir(parents=True, exist_ok=True)
     app.config["ROOM_OUTPUT_DIR"].mkdir(parents=True, exist_ok=True)
+    app.config["BIGSCREEN_OUTPUT_DIR"].mkdir(parents=True, exist_ok=True)
 
 
 def _cleanup_old_runtime_files(
