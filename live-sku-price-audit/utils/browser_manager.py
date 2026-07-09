@@ -51,11 +51,19 @@ def should_block_request(request, block_images=False):
 
 
 class BrowserManager:
-    def __init__(self, auth_file=AUTH_FILE, headless=False, block_resources=True, block_images=False):
+    def __init__(
+        self,
+        auth_file=AUTH_FILE,
+        headless=False,
+        block_resources=True,
+        block_images=False,
+        page_zoom=DEFAULT_PAGE_ZOOM,
+    ):
         self.auth_file = auth_file
         self.headless = headless
         self.block_resources = block_resources
         self.block_images = block_images
+        self.page_zoom = page_zoom
         self.playwright = None
         self.browser = None
         self.context = None
@@ -122,7 +130,7 @@ class BrowserManager:
             (() => {{
                 const applyZoom = () => {{
                     if (document.documentElement) {{
-                        document.documentElement.style.zoom = '{DEFAULT_PAGE_ZOOM}';
+                        document.documentElement.style.zoom = '{self.page_zoom}';
                     }}
                 }};
                 applyZoom();

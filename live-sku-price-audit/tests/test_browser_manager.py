@@ -217,6 +217,16 @@ class BrowserManagerLoginTests(unittest.TestCase):
         self.assertEqual(len(context.init_scripts), 1)
         self.assertIn("document.documentElement.style.zoom = '75%'", context.init_scripts[0])
 
+    def test_configure_page_display_accepts_custom_page_zoom(self):
+        manager = BrowserManager(page_zoom="90%")
+        context = FakeContext()
+        manager.context = context
+
+        manager.configure_page_display()
+
+        self.assertEqual(len(context.init_scripts), 1)
+        self.assertIn("document.documentElement.style.zoom = '90%'", context.init_scripts[0])
+
     def test_start_passes_headless_flag_to_chromium_launch(self):
         fake_playwright = FakePlaywright()
 

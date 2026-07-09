@@ -23,9 +23,9 @@ class BigscreenBrowser:
             str(self.auth_file),
             headless=self.headless,
             block_resources=False,
+            page_zoom="80%",
         )
         self.page = self.browser_manager.start()
-        self.open_overview()
         return self
 
     def check_login_status(self):
@@ -71,16 +71,19 @@ class BigscreenBrowser:
         self._wait_stable()
 
     def select_user_portrait(self, label):
-        self._click_text("访问用户")
-        self._click_text(label)
+        self._select_ant_dropdown("访问用户", label)
         self._wait_stable()
 
     def sort_product_table(self, label):
         header = self.page.locator("thead th").filter(has_text=label)
         if header.count() < 1:
             raise RuntimeError("未找到商品分析表头: %s" % label)
-        header.first.click(force=True)
-        self._wait_stable()
+        for _ in range(2):
+            header.first.click(force=True)
+            self._wait_stable()
+            if self._is_desc_sort_active(header.first) or self._is_visible_column_desc_sorted(label):
+                return
+        self._log("未确认商品分析表头降序状态: %s，继续截图" % label)
 
     def screenshot(self, path):
         path = Path(path)
@@ -117,6 +120,63 @@ class BigscreenBrowser:
         if option.count() < 1:
             raise RuntimeError("未找到下拉选项: %s" % option_text)
         option.first.evaluate("el => el.click()")
+
+    def _is_desc_sort_active(self, header):
+        return bool(
+            header.evaluate(
+                """el => {
+                    const attrValues = [
+                        el.getAttribute('aria-sort'),
+                        el.getAttribute('data-sort-order'),
+                        el.dataset ? el.dataset.sortOrder : '',
+                    ].filter(Boolean).map(value => String(value).toLowerCase());
+                    if (attrValues.some(value => value.includes('desc'))) return true;
+
+                    const down = el.querySelector('.ant-table-column-sorter-down');
+                    if (!down) return false;
+                    const className = [
+                        down.className,
+                        down.parentElement ? down.parentElement.className : '',
+                        down.closest('[class*="sorter"]') ? down.closest('[class*="sorter"]').className : '',
+                    ].map(value => String(value || '')).join(' ');
+                    const ariaChecked = down.getAttribute('aria-checked');
+                    const ariaSelected = down.getAttribute('aria-selected');
+                    const title = String(down.getAttribute('title') || down.getAttribute('aria-label') || '').toLowerCase();
+                    return className.includes('active')
+                        || className.includes('ant-table-column-sorter-active')
+                        || ariaChecked === 'true'
+                        || ariaSelected === 'true'
+                        || title.includes('desc');
+                }"""
+            )
+        )
+
+    def _is_visible_column_desc_sorted(self, label):
+        return bool(
+            self.page.evaluate(
+                """label => {
+                    const headers = Array.from(document.querySelectorAll('thead th'));
+                    const header = headers.find(el => (el.innerText || '').includes(label));
+                    if (!header || !header.parentElement) return false;
+                    const columnIndex = Array.from(header.parentElement.children).indexOf(header);
+                    if (columnIndex < 0) return false;
+
+                    const values = Array.from(document.querySelectorAll('tbody tr'))
+                        .slice(0, 20)
+                        .map(row => row.children[columnIndex])
+                        .filter(Boolean)
+                        .map(cell => String(cell.innerText || ''))
+                        .map(text => text.replace(/[^0-9.\\-]/g, ''))
+                        .filter(text => /\\d/.test(text))
+                        .map(Number)
+                        .filter(value => Number.isFinite(value));
+
+                    if (values.length < 2) return false;
+                    return values.every((value, index) => index === 0 || values[index - 1] >= value);
+                }""",
+                label,
+            )
+        )
 
     def _wait_stable(self):
         self.page.wait_for_timeout(1500)

@@ -155,6 +155,13 @@ jobs:
             }
           }
 
+          $testDirs = Get-ChildItem -Path $distPath -Recurse -Directory -Filter "tests" -ErrorAction SilentlyContinue
+          if ($testDirs) {
+            Write-Host "Test directories must not be included in the Windows package:"
+            $testDirs | ForEach-Object { Write-Host $_.FullName }
+            exit 1
+          }
+
       - name: Compress output
         shell: pwsh
         run: |

@@ -14,5 +14,7 @@ python3 -m unittest discover -s tests -p "test_*.py" -v
 ## 输出
 
 - 单项截图：`蓝屏数据截图_{id}__YYYYMMDD_HHmmss_序号_截图项.png`
-- 清单：`截图清单.xlsx`
+- 结果表：`截图清单.xlsx`
+  - `截图结果` sheet：按整点时间横向嵌入 15 个原始截图，并按预览尺寸显示
+  - `截图清单` sheet：保留每张截图的执行明细、文件名、状态和失败原因
 - 压缩包：`蓝屏数据截图_{id}__YYYYMMDD.zip`

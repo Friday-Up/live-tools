@@ -3,8 +3,10 @@ import os
 import tempfile
 import time
 import unittest
+from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import unquote
+from zipfile import ZipFile
 
 from openpyxl import Workbook
 from unittest.mock import patch
@@ -241,7 +243,7 @@ class PromotionBindingRoutesTest(unittest.TestCase):
             file_path.write_bytes(b"x")
 
         now = time.time()
-        old_time = now - 8 * 24 * 60 * 60
+        old_time = now - 3 * 24 * 60 * 60
         fresh_time = now - 24 * 60 * 60
         os.utime(old_runtime_file, (old_time, old_time))
         os.utime(old_legacy_file, (old_time, old_time))
@@ -249,7 +251,7 @@ class PromotionBindingRoutesTest(unittest.TestCase):
 
         app = create_app(base_dir=base_dir)
 
-        self.assertEqual(app.config["RUNTIME_RETENTION_DAYS"], 7)
+        self.assertEqual(app.config["RUNTIME_RETENTION_DAYS"], 2)
         self.assertFalse(old_runtime_file.exists())
         self.assertFalse(old_legacy_file.exists())
         self.assertTrue(fresh_runtime_file.exists())
@@ -363,7 +365,12 @@ class PromotionBindingRoutesTest(unittest.TestCase):
         payload = response.get_json()
         self.assertTrue(payload["success"])
         self.assertEqual(payload["room_id"], "46794566")
+        self.assertEqual(payload["hour_options"][0], "10:00")
+        self.assertIn("10:30", payload["hour_options"])
         self.assertIn("19:00", payload["hour_options"])
+        self.assertIn("19:30", payload["hour_options"])
+        self.assertIn("24:00", payload["hour_options"])
+        self.assertEqual(payload["hour_options"][-1], "24:00")
 
     def test_bigscreen_capture_rejects_bad_url(self):
         app = create_app(base_dir=Path(tempfile.mkdtemp()))
@@ -377,34 +384,109 @@ class PromotionBindingRoutesTest(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertFalse(response.get_json()["success"])
 
-    def test_bigscreen_capture_capture_now_uses_service_and_downloads_zip(self):
+    def test_bigscreen_capture_capture_now_starts_async_task_and_downloads_zip(self):
         class FakeCaptureResult:
             room_id = "46794566"
             success_count = 15
             fail_count = 0
+            stopped_count = 0
+            records = [object()]
+
+        class ImmediateThread:
+            def __init__(self, target, args):
+                self.target = target
+                self.args = args
+
+            def start(self):
+                self.target(*self.args)
 
         app = create_app(base_dir=Path(tempfile.mkdtemp()))
         client = app.test_client()
 
-        with patch("app.capture_bigscreen_once") as fake_capture:
-            FakeCaptureResult.zip_file = app.config["BIGSCREEN_OUTPUT_DIR"] / "result.zip"
-            FakeCaptureResult.zip_file.write_bytes(b"zip")
+        with patch("app.capture_bigscreen_once") as fake_capture, \
+                patch("app.write_bigscreen_capture_bundle") as fake_bundle, \
+                patch("app.threading.Thread", ImmediateThread):
+            zip_file = app.config["BIGSCREEN_OUTPUT_DIR"] / "result.zip"
+            zip_file.write_bytes(b"zip")
+            FakeCaptureResult.zip_file = zip_file
             fake_capture.return_value = FakeCaptureResult
+            fake_bundle.return_value = (app.config["BIGSCREEN_OUTPUT_DIR"] / "manifest.xlsx", zip_file)
 
             response = client.post(
+                "/api/bigscreen-capture/capture-now",
+                json={"url": "https://jlive.jd.com/bigScreen?id=46794566", "show_browser": True},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(fake_capture.call_args.kwargs["show_browser"])
+        self.assertEqual(fake_capture.call_args.kwargs["planned_slot"], "立即截图")
+        payload = response.get_json()
+        self.assertTrue(payload["success"])
+        self.assertIn("task_id", payload)
+        status_payload = client.get("/api/bigscreen-capture/status").get_json()
+        self.assertFalse(status_payload["running"])
+        self.assertEqual(status_payload["success_count"], 15)
+        download_response = client.get(f"/api/bigscreen-capture/download/{payload['task_id']}")
+        self.assertEqual(download_response.status_code, 200)
+        self.assertEqual(download_response.data, b"zip")
+        download_response.close()
+
+    def test_bigscreen_capture_download_recovers_zip_from_task_directory(self):
+        app = create_app(base_dir=Path(tempfile.mkdtemp()))
+        client = app.test_client()
+        task_dir = app.config["BIGSCREEN_OUTPUT_DIR"] / "lost-task"
+        slot_dir = task_dir / "1800"
+        slot_dir.mkdir(parents=True)
+        (task_dir / ".DS_Store").write_bytes(b"mac")
+        (slot_dir / "截图清单.xlsx").write_bytes(b"manifest")
+        (slot_dir / "sample.png").write_bytes(b"png")
+
+        response = client.get("/api/bigscreen-capture/download/lost-task")
+
+        self.assertEqual(response.status_code, 200)
+        with ZipFile(io.BytesIO(response.data)) as archive:
+            names = archive.namelist()
+        self.assertIn("1800/截图清单.xlsx", names)
+        self.assertIn("1800/sample.png", names)
+        self.assertNotIn(".DS_Store", names)
+        response.close()
+
+    def test_bigscreen_capture_capture_now_rejects_duplicate_running_task(self):
+        class FakeCaptureResult:
+            room_id = "46794566"
+            success_count = 15
+            fail_count = 0
+            stopped_count = 0
+            records = [object()]
+
+        class IdleThread:
+            def __init__(self, target, args):
+                pass
+
+            def start(self):
+                pass
+
+        app = create_app(base_dir=Path(tempfile.mkdtemp()))
+        client = app.test_client()
+
+        with patch("app.capture_bigscreen_once") as fake_capture, \
+                patch("app.threading.Thread", IdleThread):
+            zip_file = app.config["BIGSCREEN_OUTPUT_DIR"] / "result.zip"
+            zip_file.write_bytes(b"zip")
+            FakeCaptureResult.zip_file = zip_file
+            fake_capture.return_value = FakeCaptureResult
+            first_response = client.post(
+                "/api/bigscreen-capture/capture-now",
+                json={"url": "https://jlive.jd.com/bigScreen?id=46794566"},
+            )
+            second_response = client.post(
                 "/api/bigscreen-capture/capture-now",
                 json={"url": "https://jlive.jd.com/bigScreen?id=46794566"},
             )
 
-        self.assertEqual(response.status_code, 200)
-        payload = response.get_json()
-        self.assertTrue(payload["success"])
-        self.assertEqual(payload["success_count"], 15)
-        self.assertIn("download_url", payload)
-        download_response = client.get(payload["download_url"])
-        self.assertEqual(download_response.status_code, 200)
-        self.assertEqual(download_response.data, b"zip")
-        download_response.close()
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 400)
+        self.assertIn("已有蓝屏截图任务正在运行", second_response.get_json()["error"])
 
     def test_bigscreen_capture_start_rejects_empty_slots(self):
         app = create_app(base_dir=Path(tempfile.mkdtemp()))
@@ -417,6 +499,57 @@ class PromotionBindingRoutesTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertFalse(response.get_json()["success"])
+        self.assertEqual(response.get_json()["error"], "请选择至少一个时间点")
+
+    def test_bigscreen_capture_start_uses_time_point_error_messages(self):
+        app = create_app(base_dir=Path(tempfile.mkdtemp()))
+        client = app.test_client()
+
+        invalid_response = client.post(
+            "/api/bigscreen-capture/start",
+            json={
+                "url": "https://jlive.jd.com/bigScreen?id=46794566",
+                "hour_slots": ["bad"],
+            },
+        )
+        expired_response = client.post(
+            "/api/bigscreen-capture/start",
+            json={
+                "url": "https://jlive.jd.com/bigScreen?id=46794566",
+                "capture_date": (date.today() - timedelta(days=1)).isoformat(),
+                "hour_slots": ["10:00"],
+            },
+        )
+
+        self.assertEqual(invalid_response.status_code, 400)
+        self.assertEqual(invalid_response.get_json()["error"], "时间点配置无效")
+        self.assertEqual(expired_response.status_code, 400)
+        self.assertEqual(expired_response.get_json()["error"], "选择的时间点都已过期")
+
+    def test_bigscreen_capture_start_cleans_runtime_before_scheduling(self):
+        class IdleThread:
+            def __init__(self, target, args):
+                pass
+
+            def start(self):
+                pass
+
+        app = create_app(base_dir=Path(tempfile.mkdtemp()))
+        client = app.test_client()
+
+        with patch("app._cleanup_runtime_for_app") as cleanup, \
+                patch("app.threading.Thread", IdleThread):
+            response = client.post(
+                "/api/bigscreen-capture/start",
+                json={
+                    "url": "https://jlive.jd.com/bigScreen?id=46794566",
+                    "capture_date": (date.today() + timedelta(days=1)).isoformat(),
+                    "hour_slots": ["10:00"],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        cleanup.assert_called_once_with(app)
 
     def test_bigscreen_capture_status_returns_initial_shape(self):
         app = create_app(base_dir=Path(tempfile.mkdtemp()))
@@ -439,6 +572,16 @@ class PromotionBindingRoutesTest(unittest.TestCase):
 
         self.assertEqual(stop_response.status_code, 200)
         self.assertTrue(status_response.get_json()["stopping"])
+
+    def test_bigscreen_capture_source_uses_combined_bundle_login_and_show_browser(self):
+        source = Path("app.py").read_text(encoding="utf-8")
+
+        self.assertIn("show_browser = bool(data.get(\"show_browser\", False))", source)
+        self.assertIn("show_browser=show_browser", source)
+        self.assertIn("write_bigscreen_capture_bundle(", source)
+        self.assertIn("bigscreen_status[\"need_login\"] = True", source)
+        self.assertIn("bigscreen_login_event.wait", source)
+        self.assertIn("stopped_count", source)
 
     def test_room_creator_preview_stores_column_mapping(self):
         app = create_app(base_dir=Path(tempfile.mkdtemp()))

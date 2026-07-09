@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 import uuid
+from zipfile import ZIP_DEFLATED, ZipFile
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -20,6 +21,7 @@ from flask import Flask, jsonify, render_template, request, send_file, url_for
 from werkzeug.utils import secure_filename
 
 from config import DEFAULT_HOST, DEFAULT_PORT
+from usage_reporter import create_usage_reporter
 
 
 def resolve_live_dir(
@@ -63,11 +65,14 @@ from room_creator.excel_reader import ColumnMapping as RoomColumnMapping
 from room_creator import BatchRunner, RoomCreatorBrowser, inspect_workbook
 from promotion_binding.workbook_reader import ColumnMapping, inspect_business_workbook
 from promotion_binding.service import generate_binding_files
-from bigscreen_capture.schedule import build_hour_options, build_planned_slots
-from bigscreen_capture.service import capture_once as capture_bigscreen_once
+from bigscreen_capture.schedule import PlannedSlot, build_hour_options, build_planned_slots
+from bigscreen_capture.service import (
+    capture_once as capture_bigscreen_once,
+    write_capture_bundle as write_bigscreen_capture_bundle,
+)
 from bigscreen_capture.url_parser import BigscreenUrlError, parse_bigscreen_url
 # fmt: on
-RUNTIME_RETENTION_DAYS = 7
+RUNTIME_RETENTION_DAYS = 2
 
 
 def _load_price_audit_concurrent_workers() -> int:
@@ -109,7 +114,14 @@ def parse_sku_input(raw):
     return result
 
 
-def create_app(base_dir: str | Path | None = None) -> Flask:
+_DEFAULT_USAGE_REPORTER = object()
+
+
+def create_app(
+    base_dir: str | Path | None = None,
+    usage_reporter=_DEFAULT_USAGE_REPORTER,
+) -> Flask:
+    base_dir_provided = base_dir is not None
     base_dir = (
         Path(base_dir) if base_dir is not None else Path(__file__).resolve().parent
     )
@@ -156,6 +168,9 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
     app.config["BIGSCREEN_OUTPUT_DIR"] = bigscreen_output_dir
     app.config["BIGSCREEN_RESULTS"] = {}
     app.config["BIGSCREEN_AUTH_FILE"] = PRICE_AUDIT_ROOT / "jd_auth.json"
+    if usage_reporter is _DEFAULT_USAGE_REPORTER:
+        usage_reporter = create_usage_reporter(enabled=not base_dir_provided)
+    app.config["USAGE_REPORTER"] = usage_reporter
 
     status_lock = threading.Lock()
     price_status = _initial_price_status()
@@ -205,8 +220,18 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                 pass
         return 1 if browser else 0
 
+    def report_usage(tool_code: str, action: str, **kwargs):
+        reporter = app.config.get("USAGE_REPORTER")
+        if reporter is None:
+            return
+        try:
+            reporter.report_async(tool_code=tool_code, action=action, **kwargs)
+        except Exception as exc:
+            print(f"[{time.strftime('%H:%M:%S')}] 使用统计上报失败: {exc}")
+
     @app.route("/")
     def index():
+        report_usage("live_web", "page_view", status="success")
         return render_template("index.html")
 
     @app.route("/api/health")
@@ -225,12 +250,16 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
             {
                 "success": True,
                 "room_id": parsed.room_id,
-                "hour_options": build_hour_options(12, 23),
+                "hour_options": build_hour_options(10, 24, interval_minutes=30),
             }
         )
 
     @app.route("/api/bigscreen-capture/capture-now", methods=["POST"])
     def capture_bigscreen_now():
+        with bigscreen_status_lock:
+            if bigscreen_status["running"]:
+                return _json_error("已有蓝屏截图任务正在运行")
+
         _cleanup_runtime_for_app(app)
         data = request.get_json(silent=True) or {}
         try:
@@ -239,36 +268,59 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
             return _json_error(str(exc))
 
         task_id = uuid.uuid4().hex
-        output_dir = app.config["BIGSCREEN_OUTPUT_DIR"] / task_id
-        try:
-            result = capture_bigscreen_once(
-                url=parsed.url,
-                output_dir=output_dir,
-                planned_slot="立即截图",
-                captured_at=datetime.now(),
-                auth_file=app.config["BIGSCREEN_AUTH_FILE"],
-            )
-        except Exception as exc:
-            return _json_error(str(exc), status_code=500)
-
-        app.config["BIGSCREEN_RESULTS"][task_id] = {"zip": result.zip_file}
-        return jsonify(
-            {
-                "success": True,
-                "task_id": task_id,
-                "room_id": result.room_id,
-                "success_count": result.success_count,
-                "fail_count": result.fail_count,
-                "download_url": url_for("download_bigscreen_capture", task_id=task_id),
-            }
+        show_browser = bool(data.get("show_browser", False))
+        slot = PlannedSlot(label="立即截图", run_at=datetime.now(), status="pending")
+        bigscreen_stop_flag.clear()
+        bigscreen_login_event.clear()
+        with bigscreen_status_lock:
+            bigscreen_status.update(_initial_bigscreen_status())
+            bigscreen_status["running"] = True
+            bigscreen_status["total"] = 1
+            bigscreen_status["task_id"] = task_id
+            bigscreen_status["room_id"] = parsed.room_id
+            bigscreen_status["planned_slots"] = [slot.label]
+            bigscreen_status["current_slot"] = slot.label
+        report_usage(
+            "bigscreen_capture",
+            "task_start",
+            task_id=task_id,
+            item_count=1,
+            status="started",
+            extra={
+                "room_id": parsed.room_id,
+                "mode": "capture_now",
+                "planned_slots": [slot.label],
+                "show_browser": show_browser,
+            },
         )
+
+        thread = threading.Thread(
+            target=run_bigscreen_capture_task,
+            args=(task_id, parsed.url, [slot], show_browser),
+        )
+        thread.daemon = False
+        thread.start()
+        return jsonify({"success": True, "task_id": task_id, "room_id": parsed.room_id})
 
     @app.route("/api/bigscreen-capture/download/<task_id>")
     def download_bigscreen_capture(task_id):
-        result = app.config["BIGSCREEN_RESULTS"].get(task_id)
-        if not result or not Path(result["zip"]).is_file():
+        zip_path = _resolve_bigscreen_result_zip(app, task_id)
+        if not zip_path:
             return _json_error("结果文件不存在", status_code=404)
-        return send_file(result["zip"], as_attachment=True)
+        with bigscreen_status_lock:
+            room_id = bigscreen_status.get("room_id")
+        report_usage(
+            "bigscreen_capture",
+            "download",
+            task_id=task_id,
+            status="success",
+            extra={
+                "room_id": room_id,
+                "kind": "zip",
+                "recovered": task_id not in app.config["BIGSCREEN_RESULTS"],
+            },
+        )
+        return send_file(zip_path, as_attachment=True)
 
     @app.route("/api/bigscreen-capture/start", methods=["POST"])
     def start_bigscreen_capture():
@@ -276,6 +328,7 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
             if bigscreen_status["running"]:
                 return _json_error("已有蓝屏截图任务正在运行")
 
+        _cleanup_runtime_for_app(app)
         data = request.get_json(silent=True) or {}
         try:
             parsed = parse_bigscreen_url(data.get("url", ""))
@@ -284,20 +337,21 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
 
         hour_slots = data.get("hour_slots") or []
         if not hour_slots:
-            return _json_error("请选择至少一个整点")
+            return _json_error("请选择至少一个时间点")
 
         capture_date_raw = data.get("capture_date") or date.today().isoformat()
         try:
             capture_date = date.fromisoformat(capture_date_raw)
             planned_slots = build_planned_slots(capture_date, list(hour_slots))
         except Exception:
-            return _json_error("整点配置无效")
+            return _json_error("时间点配置无效")
 
         pending_slots = [slot for slot in planned_slots if slot.status == "pending"]
         if not pending_slots:
-            return _json_error("选择的整点都已过期")
+            return _json_error("选择的时间点都已过期")
 
         task_id = uuid.uuid4().hex
+        show_browser = bool(data.get("show_browser", False))
         bigscreen_stop_flag.clear()
         bigscreen_login_event.clear()
         with bigscreen_status_lock:
@@ -310,10 +364,25 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
             bigscreen_status["missed_slots"] = [
                 slot.label for slot in planned_slots if slot.status == "missed"
             ]
+        report_usage(
+            "bigscreen_capture",
+            "task_start",
+            task_id=task_id,
+            item_count=len(pending_slots),
+            status="started",
+            extra={
+                "room_id": parsed.room_id,
+                "mode": "scheduled",
+                "planned_slots": [slot.label for slot in planned_slots],
+                "pending_slots": [slot.label for slot in pending_slots],
+                "missed_slots": [slot.label for slot in planned_slots if slot.status == "missed"],
+                "show_browser": show_browser,
+            },
+        )
 
         thread = threading.Thread(
             target=run_bigscreen_capture_task,
-            args=(task_id, parsed.url, pending_slots),
+            args=(task_id, parsed.url, pending_slots, show_browser),
         )
         thread.daemon = False
         thread.start()
@@ -353,6 +422,12 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
         filename = _preserve_safe_filename(uploaded.filename)
         upload_path = app.config["PRICE_INPUT_DIR"] / filename
         uploaded.save(upload_path)
+        report_usage(
+            "sku_price_audit",
+            "upload",
+            status="success",
+            extra={"filename": filename},
+        )
 
         return jsonify(
             {"success": True, "filename": filename, "path": str(upload_path)}
@@ -380,6 +455,8 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
             return _json_error("价格门槛不能为负数")
 
         show_browser = bool(data.get("show_browser"))
+        task_id = uuid.uuid4().hex
+        app.config["PRICE_ACTIVE_TASK_ID"] = task_id
 
         try:
             concurrent_workers = int(
@@ -391,6 +468,18 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
 
         stop_flag.clear()
         login_event.clear()
+        report_usage(
+            "sku_price_audit",
+            "task_start",
+            task_id=task_id,
+            status="started",
+            extra={
+                "input_mode": "file",
+                "threshold_price": threshold,
+                "show_browser": show_browser,
+                "concurrent_workers": concurrent_workers,
+            },
+        )
         thread = threading.Thread(
             target=run_price_audit_task,
             args=(input_file, threshold, show_browser, concurrent_workers),
@@ -398,7 +487,7 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
         )
         thread.daemon = False
         thread.start()
-        return jsonify({"success": True})
+        return jsonify({"success": True, "task_id": task_id})
 
     @app.route("/api/start-from-skus", methods=["POST"])
     def start_price_audit_from_skus():
@@ -430,6 +519,8 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
         concurrent_workers = max(1, min(10, concurrent_workers))
 
         show_browser = bool(data.get("show_browser"))
+        task_id = uuid.uuid4().hex
+        app.config["PRICE_ACTIVE_TASK_ID"] = task_id
 
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         input_file = (
@@ -446,6 +537,19 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
         stop_flag.clear()
         login_event.clear()
         add_price_log(f"页面输入 SKU {len(sku_list)} 个，已生成临时输入文件")
+        report_usage(
+            "sku_price_audit",
+            "task_start",
+            task_id=task_id,
+            item_count=len(sku_list),
+            status="started",
+            extra={
+                "input_mode": "manual_skus",
+                "threshold_price": threshold,
+                "show_browser": show_browser,
+                "concurrent_workers": concurrent_workers,
+            },
+        )
 
         thread = threading.Thread(
             target=run_price_audit_task,
@@ -454,7 +558,7 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
         )
         thread.daemon = False
         thread.start()
-        return jsonify({"success": True, "count": len(sku_list)})
+        return jsonify({"success": True, "count": len(sku_list), "task_id": task_id})
 
     @app.route("/api/status")
     def get_price_status():
@@ -465,10 +569,18 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
     def download_price_result():
         with status_lock:
             result_file = price_status.get("result_file")
+            task_id = price_status.get("task_id")
 
         if not result_file or not Path(result_file).exists():
             return _json_error("结果文件不存在", status_code=404)
 
+        report_usage(
+            "sku_price_audit",
+            "download",
+            task_id=task_id,
+            status="success",
+            extra={"filename": Path(result_file).name},
+        )
         return send_file(result_file, as_attachment=True)
 
     @app.route("/api/continue", methods=["POST"])
@@ -509,6 +621,13 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
         filename = _safe_xlsx_name(uploaded.filename, task_id)
         input_path = app.config["PROMOTION_INPUT_DIR"] / filename
         uploaded.save(input_path)
+        report_usage(
+            "promotion_binding",
+            "upload",
+            task_id=task_id,
+            status="success",
+            extra={"filename": filename},
+        )
 
         try:
             inspection = inspect_business_workbook(input_path)
@@ -556,6 +675,14 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
             input_path = app.config["PROMOTION_INPUT_DIR"] / filename
             uploaded.save(input_path)
 
+        started_monotonic = time.monotonic()
+        report_usage(
+            "promotion_binding",
+            "task_start",
+            task_id=task_id,
+            status="started",
+            extra={"enable_selling_point": enable_selling_point},
+        )
         try:
             result = generate_binding_files(
                 business_file=input_path,
@@ -565,6 +692,18 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                 enable_selling_point=enable_selling_point,
             )
         except Exception as exc:
+            report_usage(
+                "promotion_binding",
+                "task_finish",
+                task_id=task_id,
+                fail_count=1,
+                duration_ms=int((time.monotonic() - started_monotonic) * 1000),
+                status="failed",
+                extra={
+                    "enable_selling_point": enable_selling_point,
+                    "error": str(exc),
+                },
+            )
             return _json_error(str(exc), status_code=500)
 
         app.config["PROMOTION_RESULTS"][task_id] = {
@@ -576,6 +715,28 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
         if enable_selling_point and not result.selling_point_column_found:
             messages.append("未识别到短卖点列")
 
+        fail_count = result.invalid_count + result.duplicate_count
+        item_count = result.success_count + result.skipped_empty_count + fail_count
+        report_usage(
+            "promotion_binding",
+            "task_finish",
+            task_id=task_id,
+            item_count=item_count,
+            success_count=result.success_count,
+            fail_count=fail_count,
+            duration_ms=int((time.monotonic() - started_monotonic) * 1000),
+            status="success" if fail_count == 0 else "partial_success",
+            extra={
+                "coupon_key_count": result.coupon_key_count,
+                "promo_id_count": result.promo_id_count,
+                "selling_point_count": result.selling_point_count,
+                "skipped_empty_count": result.skipped_empty_count,
+                "invalid_count": result.invalid_count,
+                "duplicate_count": result.duplicate_count,
+                "enable_selling_point": enable_selling_point,
+                "messages": messages,
+            },
+        )
         return jsonify(
             {
                 "success": True,
@@ -613,6 +774,13 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
         if not path.exists():
             return _json_error("结果文件不存在", status_code=404)
 
+        report_usage(
+            "promotion_binding",
+            "download",
+            task_id=task_id,
+            status="success",
+            extra={"kind": kind, "filename": path.name},
+        )
         return send_file(path, as_attachment=True)
 
     @app.route("/api/room-creator/preview", methods=["POST"])
@@ -629,6 +797,13 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
         filename = _safe_xlsx_name(uploaded.filename, task_id)
         input_path = app.config["ROOM_INPUT_DIR"] / filename
         uploaded.save(input_path)
+        report_usage(
+            "room_creator",
+            "upload",
+            task_id=task_id,
+            status="success",
+            extra={"filename": filename},
+        )
 
         try:
             mapping, headers = inspect_workbook(input_path)
@@ -701,6 +876,13 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
         room_stop_flag.clear()
         room_login_event.clear()
         show_browser = bool(data.get("show_browser", False))
+        report_usage(
+            "room_creator",
+            "task_start",
+            task_id=task_id,
+            status="started",
+            extra={"show_browser": show_browser},
+        )
         thread = threading.Thread(
             target=run_room_creator_task,
             args=(Path(input_path), column_mapping, show_browser, task_id),
@@ -735,10 +917,18 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
     def download_room_creator_result():
         with room_status_lock:
             result_file = room_creator_status.get("result_file")
+            task_id = room_creator_status.get("task_id")
 
         if not result_file or not Path(result_file).exists():
             return _json_error("结果文件不存在", status_code=404)
 
+        report_usage(
+            "room_creator",
+            "download",
+            task_id=task_id,
+            status="success",
+            extra={"filename": Path(result_file).name},
+        )
         return send_file(result_file, as_attachment=True)
 
     def add_price_log(message: str):
@@ -800,6 +990,8 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
 
         browser = None
         page = None
+        task_id = app.config.get("PRICE_ACTIVE_TASK_ID", "")
+        started_monotonic = time.monotonic()
 
         try:
             # 延迟导入，避免启动时加载失败
@@ -824,6 +1016,7 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                 price_status["result_file"] = None
                 price_status["error"] = None
                 price_status["need_login"] = False
+                price_status["task_id"] = task_id
 
             add_price_log("🚀 开始批量测价")
             add_price_log(f"📁 输入文件: {os.path.basename(input_file)}")
@@ -1109,6 +1302,34 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                 price_status["running"] = False
                 price_status["stopping"] = False
                 price_status["need_login"] = False
+                snapshot = dict(price_status)
+
+            price_fail_count = snapshot.get("fail_count", 0) or 0
+            if stop_flag.is_set() or snapshot.get("stopped_count"):
+                final_status = "stopped"
+            elif snapshot.get("error"):
+                final_status = "failed"
+            elif price_fail_count > 0:
+                final_status = "partial_success"
+            else:
+                final_status = "success"
+            report_usage(
+                "sku_price_audit",
+                "task_finish",
+                task_id=task_id,
+                item_count=snapshot.get("total", 0) or 0,
+                success_count=snapshot.get("success_count", 0) or 0,
+                fail_count=price_fail_count,
+                duration_ms=int((time.monotonic() - started_monotonic) * 1000),
+                status=final_status,
+                extra={
+                    "unqualified_count": snapshot.get("unqualified_count", 0) or 0,
+                    "threshold_price": threshold_price,
+                    "show_browser": show_browser,
+                    "concurrent_workers": concurrent_workers,
+                    "error": snapshot.get("error"),
+                },
+            )
 
             if cleanup_input:
                 try:
@@ -1173,6 +1394,7 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
         task_id: str = "",
     ):
         browser = None
+        started_monotonic = time.monotonic()
         try:
             from room_creator.excel_reader import read_room_rows
             from room_creator.runner import BatchRunner
@@ -1184,6 +1406,7 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                 room_creator_status.clear()
                 room_creator_status.update(_initial_room_creator_status())
                 room_creator_status["running"] = True
+                room_creator_status["task_id"] = task_id
 
             add_room_log("开始批量创建直播间")
             add_room_log(f"输入文件: {input_file.name}")
@@ -1330,6 +1553,34 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                 room_creator_status["need_login"] = False
                 app.config.get("ROOM_CREATOR_UPLOADS", {}).pop(task_id, None)
                 app.config.get("ROOM_CREATOR_MAPPINGS", {}).pop(task_id, None)
+                snapshot = dict(room_creator_status)
+
+            room_failed = snapshot.get("failed_count", 0) or 0
+            skipped = snapshot.get("skipped", 0) or 0
+            if room_stop_flag.is_set():
+                final_status = "stopped"
+            elif snapshot.get("error"):
+                final_status = "failed"
+            elif room_failed > 0 or skipped > 0:
+                final_status = "partial_success"
+            else:
+                final_status = "success"
+            report_usage(
+                "room_creator",
+                "task_finish",
+                task_id=task_id,
+                item_count=(snapshot.get("created_count", 0) or 0) + room_failed + skipped,
+                success_count=snapshot.get("created_count", 0) or 0,
+                fail_count=room_failed + skipped,
+                duration_ms=int((time.monotonic() - started_monotonic) * 1000),
+                status=final_status,
+                extra={
+                    "failed_count": room_failed,
+                    "skipped_count": skipped,
+                    "show_browser": show_browser,
+                    "error": snapshot.get("error"),
+                },
+            )
 
             # 清理本次上传的临时文件
             try:
@@ -1348,7 +1599,42 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                 bigscreen_status["logs"] = bigscreen_status["logs"][-200:]
         print(f"[{time.strftime('%H:%M:%S')}] {message}")
 
-    def run_bigscreen_capture_task(task_id: str, url: str, planned_slots):
+    def mark_bigscreen_login_required(_browser):
+        with bigscreen_status_lock:
+            bigscreen_status["need_login"] = True
+        add_bigscreen_log("蓝屏截图需要登录，请在弹出的浏览器窗口完成登录")
+
+    def wait_for_bigscreen_login():
+        add_bigscreen_log("等待用户完成蓝屏登录")
+        while not bigscreen_stop_flag.is_set():
+            if bigscreen_login_event.wait(1):
+                bigscreen_login_event.clear()
+                with bigscreen_status_lock:
+                    bigscreen_status["need_login"] = False
+                return not bigscreen_stop_flag.is_set()
+        return False
+
+    def run_bigscreen_capture_task(task_id: str, url: str, planned_slots, show_browser: bool = False):
+        all_records = []
+        bundle_room_id = ""
+        bundle_started_at = planned_slots[0].run_at if planned_slots else datetime.now()
+        started_monotonic = time.monotonic()
+
+        def update_bigscreen_bundle(message: str):
+            if not all_records:
+                return
+            bundle_dir = app.config["BIGSCREEN_OUTPUT_DIR"] / task_id
+            _manifest_file, bundle_zip = write_bigscreen_capture_bundle(
+                bundle_dir,
+                bundle_room_id or parse_bigscreen_url(url).room_id,
+                bundle_started_at,
+                all_records,
+            )
+            app.config["BIGSCREEN_RESULTS"][task_id] = {"zip": bundle_zip}
+            with bigscreen_status_lock:
+                bigscreen_status["result_file"] = str(bundle_zip)
+            add_bigscreen_log(message)
+
         try:
             add_bigscreen_log("开始蓝屏自动截图")
             for slot in planned_slots:
@@ -1378,16 +1664,32 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
                     auth_file=app.config["BIGSCREEN_AUTH_FILE"],
                     should_stop=bigscreen_stop_flag.is_set,
                     log_callback=add_bigscreen_log,
+                    show_browser=show_browser,
+                    on_login_required=mark_bigscreen_login_required,
+                    wait_for_login=wait_for_bigscreen_login,
                 )
-                app.config["BIGSCREEN_RESULTS"][task_id] = {"zip": result.zip_file}
+                all_records.extend(result.records)
+                bundle_room_id = result.room_id
                 with bigscreen_status_lock:
                     bigscreen_status["current"] += 1
                     bigscreen_status["success_count"] += result.success_count
                     bigscreen_status["fail_count"] += result.fail_count
-                    bigscreen_status["result_file"] = str(result.zip_file)
-                add_bigscreen_log(
-                    f"{slot.label} 截图完成，成功 {result.success_count} 项，失败 {result.fail_count} 项"
-                )
+                    bigscreen_status["stopped_count"] += result.stopped_count
+                if result.stopped_count:
+                    add_bigscreen_log(
+                        f"{slot.label} 截图已停止，成功 {result.success_count} 项，失败 {result.fail_count} 项，停止 {result.stopped_count} 项"
+                    )
+                else:
+                    add_bigscreen_log(
+                        f"{slot.label} 截图完成，成功 {result.success_count} 项，失败 {result.fail_count} 项"
+                    )
+                try:
+                    update_bigscreen_bundle("已更新蓝屏截图总 ZIP")
+                except Exception as exc:
+                    add_bigscreen_log(f"更新蓝屏截图总 ZIP 失败: {exc}")
+
+            if all_records:
+                update_bigscreen_bundle("已生成蓝屏截图总 ZIP")
 
             if not bigscreen_stop_flag.is_set():
                 add_bigscreen_log("蓝屏自动截图完成")
@@ -1399,9 +1701,42 @@ def create_app(base_dir: str | Path | None = None) -> Flask:
             with bigscreen_status_lock:
                 bigscreen_status["running"] = False
                 bigscreen_status["need_login"] = False
-                if not bigscreen_stop_flag.is_set():
-                    bigscreen_status["stopping"] = False
+                bigscreen_status["stopping"] = False
                 bigscreen_status["current_slot"] = ""
+                snapshot = dict(bigscreen_status)
+
+            success_count = snapshot.get("success_count", 0) or 0
+            fail_count = snapshot.get("fail_count", 0) or 0
+            stopped_count = snapshot.get("stopped_count", 0) or 0
+            try:
+                room_id = bundle_room_id or snapshot.get("room_id") or parse_bigscreen_url(url).room_id
+            except Exception:
+                room_id = snapshot.get("room_id")
+            if bigscreen_stop_flag.is_set() or stopped_count > 0:
+                final_status = "stopped"
+            elif snapshot.get("error"):
+                final_status = "failed"
+            elif fail_count > 0:
+                final_status = "partial_success"
+            else:
+                final_status = "success"
+            report_usage(
+                "bigscreen_capture",
+                "task_finish",
+                task_id=task_id,
+                item_count=success_count + fail_count + stopped_count,
+                success_count=success_count,
+                fail_count=fail_count,
+                duration_ms=int((time.monotonic() - started_monotonic) * 1000),
+                status=final_status,
+                extra={
+                    "room_id": room_id,
+                    "planned_slots": [slot.label for slot in planned_slots],
+                    "stopped_count": stopped_count,
+                    "show_browser": show_browser,
+                    "error": snapshot.get("error"),
+                },
+            )
 
     def shutdown_server():
         add_price_log("正在关闭服务...")
@@ -1450,12 +1785,14 @@ def _initial_price_status():
         "current_sku": "",
         "success_count": 0,
         "fail_count": 0,
+        "stopped_count": 0,
         "unqualified_count": 0,
         "logs": [],
         "result_file": None,
         "error": None,
         "need_login": False,
         "stopping": False,
+        "task_id": "",
     }
 
 
@@ -1473,6 +1810,7 @@ def _initial_room_creator_status():
         "error": None,
         "need_login": False,
         "stopping": False,
+        "task_id": "",
     }
 
 
@@ -1484,6 +1822,7 @@ def _initial_bigscreen_status():
         "current_slot": "",
         "success_count": 0,
         "fail_count": 0,
+        "stopped_count": 0,
         "logs": [],
         "result_file": None,
         "error": None,
@@ -1508,6 +1847,64 @@ def _cleanup_runtime_for_app(app: Flask):
     app.config["ROOM_INPUT_DIR"].mkdir(parents=True, exist_ok=True)
     app.config["ROOM_OUTPUT_DIR"].mkdir(parents=True, exist_ok=True)
     app.config["BIGSCREEN_OUTPUT_DIR"].mkdir(parents=True, exist_ok=True)
+
+
+def _resolve_bigscreen_result_zip(app: Flask, task_id: str):
+    result = app.config["BIGSCREEN_RESULTS"].get(task_id)
+    if result:
+        zip_path = Path(result["zip"])
+        if zip_path.is_file():
+            return zip_path
+
+    task_dir = _resolve_bigscreen_task_dir(app.config["BIGSCREEN_OUTPUT_DIR"], task_id)
+    if not task_dir:
+        return None
+
+    official_zips = sorted(
+        [
+            path
+            for path in task_dir.glob("蓝屏数据截图_*.zip")
+            if path.is_file() and not path.name.startswith("蓝屏数据截图_已完成结果_")
+        ],
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    if official_zips:
+        return official_zips[0]
+
+    return _write_bigscreen_recovery_zip(task_dir, task_id)
+
+
+def _resolve_bigscreen_task_dir(output_root: Path, task_id: str):
+    output_root = Path(output_root).resolve()
+    task_dir = (output_root / task_id).resolve()
+    try:
+        task_dir.relative_to(output_root)
+    except ValueError:
+        return None
+    if not task_dir.is_dir():
+        return None
+    return task_dir
+
+
+def _write_bigscreen_recovery_zip(task_dir: Path, task_id: str):
+    recovery_zip = task_dir / f"蓝屏数据截图_已完成结果_{task_id}.zip"
+    temp_zip = task_dir / f".{recovery_zip.name}.{uuid.uuid4().hex}.tmp"
+    files = [
+        path
+        for path in sorted(task_dir.rglob("*"))
+        if path.is_file()
+        and path not in {recovery_zip, temp_zip}
+        and not any(part.startswith(".") for part in path.relative_to(task_dir).parts)
+    ]
+    if not files:
+        return None
+
+    with ZipFile(temp_zip, "w", ZIP_DEFLATED) as archive:
+        for path in files:
+            archive.write(path, path.relative_to(task_dir).as_posix())
+    temp_zip.replace(recovery_zip)
+    return recovery_zip
 
 
 def _cleanup_old_runtime_files(

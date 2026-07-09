@@ -865,7 +865,7 @@
                 <div class="status-message" id="bigscreenStatusMessage"></div>
 
                 <div class="column-mapping" id="bigscreenScheduleConfig">
-                    <div class="section-title">截图整点</div>
+                    <div class="section-title">截图时间点</div>
                     <div class="form-row">
                         <div class="form-group">
                             <label class="form-label">截图日期</label>
@@ -877,14 +877,22 @@
                         </div>
                     </div>
                     <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px;">
-                        <button class="btn btn-secondary" id="bigscreenSelectFutureBtn" type="button">选择未来整点</button>
+                        <button class="btn btn-secondary" id="bigscreenSelectFutureWholeBtn" type="button">选择未来整点</button>
+                        <button class="btn btn-secondary" id="bigscreenSelectFutureHalfBtn" type="button">选择未来半点</button>
                         <button class="btn btn-secondary" id="bigscreenSelectAllBtn" type="button">选择全部</button>
                         <button class="btn btn-secondary" id="bigscreenClearHoursBtn" type="button">清空</button>
                     </div>
                     <div class="hour-grid" id="bigscreenHourGrid"></div>
                 </div>
 
-                <div style="margin-top: 20px; display: flex; gap: 12px; flex-wrap: wrap;">
+                <div style="margin-top: 20px;">
+                    <label class="checkbox-row" style="margin-bottom: 12px; display: inline-flex;">
+                        <input type="checkbox" id="bigscreenShowBrowserInput">
+                        <span>显示截图浏览器窗口</span>
+                    </label>
+                </div>
+
+                <div style="display: flex; gap: 12px; flex-wrap: wrap;">
                     <button class="btn btn-secondary" id="bigscreenCaptureNowBtn" disabled>立即截图一次</button>
                     <button class="btn btn-primary" id="bigscreenStartBtn" disabled>开始自动截图</button>
                 </div>
@@ -931,7 +939,7 @@
                 <div class="summary-grid">
                     <div class="summary-item">
                         <div class="summary-value" id="bigscreenResultTotal">0</div>
-                        <div class="summary-label">计划整点</div>
+                        <div class="summary-label">计划时间点</div>
                     </div>
                     <div class="summary-item">
                         <div class="summary-value" id="bigscreenResultSuccess" style="color: #27ae60;">0</div>
@@ -1006,6 +1014,8 @@
         let bigscreenHourOptions = [];
         let bigscreenStatusInterval = null;
         let bigscreenDownloadUrl = '';
+        let bigscreenActiveTaskId = '';
+        let lastBigscreenStatus = null;
 
         document.querySelectorAll('.tool-tab').forEach((button) => {
             button.addEventListener('click', () => {
@@ -1241,6 +1251,19 @@
             });
         }
 
+        const BIGSCREEN_RUNNING_HINT = '蓝屏截图任务正在运行，整点前后可能影响截图耗时';
+
+        function showBigscreenRunningHint(targetMessage) {
+            fetch('/api/bigscreen-capture/status')
+                .then((res) => res.json())
+                .then((data) => {
+                    if (data.running) {
+                        showMessage(targetMessage, BIGSCREEN_RUNNING_HINT, 'info');
+                    }
+                })
+                .catch(() => {});
+        }
+
        startBtn.addEventListener('click', () => {
             const threshold = parseFloat(document.getElementById('thresholdInput').value);
             if (isNaN(threshold) || threshold < 0) {
@@ -1283,6 +1306,7 @@
             clearMessage(statusMessage);
             document.getElementById('progressCard').classList.add('active');
             document.getElementById('resultCard').classList.remove('active');
+            showBigscreenRunningHint(statusMessage);
 
             fetch(endpoint, {
                 method: 'POST',
@@ -1555,7 +1579,7 @@
                     <span>${escapeHtml(hour)}</span>
                 </label>
             `).join('');
-            selectBigscreenFutureHours();
+            selectBigscreenFutureOptions(false);
         }
 
         function getBigscreenSelectedHours() {
@@ -1563,17 +1587,28 @@
                 .map((input) => input.value);
         }
 
-        function selectBigscreenFutureHours() {
+        function getLocalDateValue(date) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+        function selectBigscreenFutureOptions(includeHalfHours) {
             const selectedDate = bigscreenDateInput.value;
-            const today = new Date().toISOString().slice(0, 10);
-            const currentHour = new Date().getHours();
+            const now = new Date();
+            const today = getLocalDateValue(now);
+            const currentMinutes = now.getHours() * 60 + now.getMinutes();
             document.querySelectorAll('input[name="bigscreen-hour"]').forEach((input) => {
-                const hour = parseInt(input.value.split(':')[0], 10);
-                input.checked = selectedDate > today || (selectedDate === today && hour > currentHour);
+                const [hour, minute] = input.value.split(':').map((part) => parseInt(part, 10));
+                const optionMinutes = hour * 60 + minute;
+                const shouldIncludeMinute = includeHalfHours || minute === 0;
+                input.checked = shouldIncludeMinute && (selectedDate > today || (selectedDate === today && optionMinutes > currentMinutes));
             });
         }
 
-        document.getElementById('bigscreenSelectFutureBtn').addEventListener('click', selectBigscreenFutureHours);
+        document.getElementById('bigscreenSelectFutureWholeBtn').addEventListener('click', () => selectBigscreenFutureOptions(false));
+        document.getElementById('bigscreenSelectFutureHalfBtn').addEventListener('click', () => selectBigscreenFutureOptions(true));
         document.getElementById('bigscreenSelectAllBtn').addEventListener('click', () => {
             document.querySelectorAll('input[name="bigscreen-hour"]').forEach((input) => {
                 input.checked = true;
@@ -1584,7 +1619,35 @@
                 input.checked = false;
             });
         });
-        bigscreenDateInput.addEventListener('change', selectBigscreenFutureHours);
+        bigscreenDateInput.addEventListener('change', () => selectBigscreenFutureOptions(false));
+
+        function setBigscreenTaskButtonsDisabled(disabled) {
+            bigscreenPreviewBtn.disabled = disabled;
+            bigscreenCaptureNowBtn.disabled = disabled || !bigscreenRoomIdInput.value;
+            bigscreenStartBtn.disabled = disabled || !bigscreenRoomIdInput.value;
+            document.getElementById('bigscreenSelectFutureWholeBtn').disabled = disabled;
+            document.getElementById('bigscreenSelectFutureHalfBtn').disabled = disabled;
+            document.getElementById('bigscreenSelectAllBtn').disabled = disabled;
+            document.getElementById('bigscreenClearHoursBtn').disabled = disabled;
+            document.querySelectorAll('input[name="bigscreen-hour"]').forEach((input) => {
+                input.disabled = disabled;
+            });
+        }
+
+        function resetBigscreenProgress() {
+            document.getElementById('bigscreenProgressCard').classList.add('active');
+            document.getElementById('bigscreenResultCard').classList.remove('active');
+            document.getElementById('bigscreenProgressFill').style.width = '0%';
+            document.getElementById('bigscreenProgressText').textContent = '准备中...';
+            document.getElementById('bigscreenProgressPercent').textContent = '0%';
+            document.getElementById('bigscreenStatCurrent').textContent = '0/0';
+            document.getElementById('bigscreenStatSuccess').textContent = '0';
+            document.getElementById('bigscreenStatFailed').textContent = '0';
+            document.getElementById('bigscreenLogContainer').innerHTML = '';
+            bigscreenDownloadUrl = '';
+            bigscreenActiveTaskId = '';
+            lastBigscreenStatus = null;
+        }
 
         bigscreenPreviewBtn.addEventListener('click', () => {
             const url = bigscreenUrlInput.value.trim();
@@ -1593,6 +1656,7 @@
                 return;
             }
             bigscreenPreviewBtn.disabled = true;
+            setBigscreenTaskButtonsDisabled(true);
             showMessage(bigscreenStatusMessage, '正在识别链接...', 'info');
             fetch('/api/bigscreen-capture/preview', {
                 method: 'POST',
@@ -1605,13 +1669,12 @@
                     bigscreenRoomIdInput.value = data.room_id;
                     renderBigscreenHours(data.hour_options || []);
                     document.getElementById('bigscreenScheduleConfig').classList.add('active');
-                    bigscreenCaptureNowBtn.disabled = false;
-                    bigscreenStartBtn.disabled = false;
+                    setBigscreenTaskButtonsDisabled(false);
                     showMessage(bigscreenStatusMessage, `已识别直播间 ID：${data.room_id}`, 'success');
                 })
                 .catch((error) => showMessage(bigscreenStatusMessage, error.message, 'error'))
                 .finally(() => {
-                    bigscreenPreviewBtn.disabled = false;
+                    setBigscreenTaskButtonsDisabled(false);
                 });
         });
 
@@ -1621,30 +1684,27 @@
                 showMessage(bigscreenStatusMessage, '请填写蓝屏页面链接', 'error');
                 return;
             }
-            bigscreenCaptureNowBtn.disabled = true;
-            bigscreenStartBtn.disabled = true;
-            document.getElementById('bigscreenResultCard').classList.remove('active');
-            showMessage(bigscreenStatusMessage, '正在截图，请等待浏览器执行完成', 'info');
+            setBigscreenTaskButtonsDisabled(true);
+            resetBigscreenProgress();
+            showMessage(bigscreenStatusMessage, '正在启动截图任务...', 'info');
             fetch('/api/bigscreen-capture/capture-now', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url })
+                body: JSON.stringify({
+                    url,
+                    show_browser: document.getElementById('bigscreenShowBrowserInput').checked,
+                })
             })
                 .then((res) => res.json())
                 .then((data) => {
-                    if (!data.success) throw new Error(data.error || '截图失败');
-                    bigscreenDownloadUrl = data.download_url;
-                    showBigscreenResult({
-                        total: 1,
-                        success_count: data.success_count,
-                        fail_count: data.fail_count,
-                    });
-                    showMessage(bigscreenStatusMessage, '截图完成', 'success');
+                    if (!data.success) throw new Error(data.error || '启动失败');
+                    bigscreenActiveTaskId = data.task_id || '';
+                    showMessage(bigscreenStatusMessage, '已启动截图任务，可在下方查看实时日志', 'info');
+                    startBigscreenStatusPolling();
                 })
-                .catch((error) => showMessage(bigscreenStatusMessage, error.message, 'error'))
-                .finally(() => {
-                    bigscreenCaptureNowBtn.disabled = false;
-                    bigscreenStartBtn.disabled = false;
+                .catch((error) => {
+                    showMessage(bigscreenStatusMessage, error.message, 'error');
+                    setBigscreenTaskButtonsDisabled(false);
                 });
         });
 
@@ -1656,12 +1716,11 @@
                 return;
             }
             if (hourSlots.length === 0) {
-                showMessage(bigscreenStatusMessage, '请选择至少一个整点', 'error');
+                showMessage(bigscreenStatusMessage, '请选择至少一个时间点', 'error');
                 return;
             }
-            bigscreenStartBtn.disabled = true;
-            document.getElementById('bigscreenProgressCard').classList.add('active');
-            document.getElementById('bigscreenResultCard').classList.remove('active');
+            setBigscreenTaskButtonsDisabled(true);
+            resetBigscreenProgress();
             clearMessage(bigscreenStatusMessage);
             fetch('/api/bigscreen-capture/start', {
                 method: 'POST',
@@ -1670,16 +1729,18 @@
                     url,
                     capture_date: bigscreenDateInput.value,
                     hour_slots: hourSlots,
+                    show_browser: document.getElementById('bigscreenShowBrowserInput').checked,
                 })
             })
                 .then((res) => res.json())
                 .then((data) => {
                     if (!data.success) throw new Error(data.error || '启动失败');
+                    bigscreenActiveTaskId = data.task_id || '';
                     startBigscreenStatusPolling();
                 })
                 .catch((error) => {
                     showMessage(bigscreenStatusMessage, error.message, 'error');
-                    bigscreenStartBtn.disabled = false;
+                    setBigscreenTaskButtonsDisabled(false);
                 });
         });
 
@@ -1687,45 +1748,70 @@
             if (bigscreenStatusInterval) clearInterval(bigscreenStatusInterval);
             document.getElementById('bigscreenStopBtn').style.display = 'inline-flex';
             document.getElementById('bigscreenStopBtn').disabled = false;
-            bigscreenStatusInterval = setInterval(() => {
-                fetch('/api/bigscreen-capture/status')
-                    .then((res) => res.json())
-                    .then((data) => {
-                        updateBigscreenUI(data);
-                        if (data.need_login) showLoginModal();
-                        else hideLoginModal();
+            pollBigscreenStatus();
+            bigscreenStatusInterval = setInterval(pollBigscreenStatus, 1000);
+        }
 
-                        if (!data.running && data.result_file && !data.error) {
-                            clearInterval(bigscreenStatusInterval);
-                            bigscreenDownloadUrl = `/api/bigscreen-capture/download/${data.task_id}`;
-                            showBigscreenResult(data);
-                            document.getElementById('bigscreenStopBtn').style.display = 'none';
-                        } else if (!data.running && data.error) {
-                            clearInterval(bigscreenStatusInterval);
-                            showMessage(bigscreenStatusMessage, data.error, 'error');
-                            bigscreenStartBtn.disabled = false;
-                            document.getElementById('bigscreenStopBtn').style.display = 'none';
-                        } else if (!data.running) {
-                            clearInterval(bigscreenStatusInterval);
-                            showMessage(bigscreenStatusMessage, '截图已停止', 'info');
-                            bigscreenStartBtn.disabled = false;
-                            document.getElementById('bigscreenStopBtn').style.display = 'none';
-                        }
-                    })
-                    .catch(() => {
-                        clearInterval(bigscreenStatusInterval);
+        function stopBigscreenStatusPolling() {
+            if (bigscreenStatusInterval) clearInterval(bigscreenStatusInterval);
+            bigscreenStatusInterval = null;
+            document.getElementById('bigscreenStopBtn').style.display = 'none';
+        }
+
+        function pollBigscreenStatus() {
+            fetch('/api/bigscreen-capture/status')
+                .then((res) => res.json())
+                .then((data) => {
+                    lastBigscreenStatus = data;
+                    if (data.task_id) bigscreenActiveTaskId = data.task_id;
+                    updateBigscreenUI(data);
+                    if (data.need_login) showLoginModal();
+                    else hideLoginModal();
+
+                    if (!data.running && data.result_file && !data.error) {
+                        stopBigscreenStatusPolling();
+                        bigscreenDownloadUrl = `/api/bigscreen-capture/download/${data.task_id}`;
+                        showBigscreenResult(data);
+                    } else if (!data.running && data.error) {
+                        stopBigscreenStatusPolling();
+                        showMessage(bigscreenStatusMessage, data.error, 'error');
+                        setBigscreenTaskButtonsDisabled(false);
+                    } else if (!data.running) {
+                        stopBigscreenStatusPolling();
+                        showMessage(bigscreenStatusMessage, '截图已停止', 'info');
+                        setBigscreenTaskButtonsDisabled(false);
+                    }
+                })
+                .catch(() => {
+                    stopBigscreenStatusPolling();
+                    const recovered = showBigscreenConnectionFailureResult();
+                    if (!recovered) {
                         showMessage(bigscreenStatusMessage, '连接服务失败，请重新启动工具', 'error');
-                        bigscreenStartBtn.disabled = false;
-                        document.getElementById('bigscreenStopBtn').style.display = 'none';
-                    });
-            }, 1000);
+                    }
+                    setBigscreenTaskButtonsDisabled(false);
+                });
+        }
+
+        function showBigscreenConnectionFailureResult() {
+            if (!bigscreenActiveTaskId) return false;
+            bigscreenDownloadUrl = `/api/bigscreen-capture/download/${bigscreenActiveTaskId}`;
+            const [completedText, totalText] = document.getElementById('bigscreenStatCurrent').textContent.split('/');
+            const fallbackStatus = lastBigscreenStatus || {
+                total: parseInt(totalText, 10) || 0,
+                success_count: parseInt(document.getElementById('bigscreenStatSuccess').textContent, 10) || 0,
+                fail_count: parseInt(document.getElementById('bigscreenStatFailed').textContent, 10) || 0,
+            };
+            showBigscreenResult(fallbackStatus);
+            document.getElementById('bigscreenProgressText').textContent = `服务连接已断开，已完成 ${parseInt(completedText, 10) || 0}/${fallbackStatus.total || 0}`;
+            showMessage(bigscreenStatusMessage, '连接服务失败，请重新启动工具；重启后可下载已完成结果，也可以重新选择剩余时间点继续截图', 'error');
+            return true;
         }
 
         function updateBigscreenUI(data) {
             const completed = Math.min(data.current || 0, data.total || 0);
             const percent = data.total > 0 ? Math.round((completed / data.total) * 100) : 0;
             document.getElementById('bigscreenProgressFill').style.width = percent + '%';
-            document.getElementById('bigscreenProgressText').textContent = data.stopping ? '正在停止...' : (data.running ? `等待/执行整点: ${data.current_slot || '...'}` : '已完成');
+            document.getElementById('bigscreenProgressText').textContent = data.stopping ? '正在停止...' : (data.running ? `等待/执行时间点: ${data.current_slot || '...'}` : '已完成');
             document.getElementById('bigscreenProgressPercent').textContent = percent + '%';
             document.getElementById('bigscreenStatCurrent').textContent = `${completed}/${data.total || 0}`;
             document.getElementById('bigscreenStatSuccess').textContent = data.success_count || 0;
@@ -1744,7 +1830,7 @@
 
         function showBigscreenResult(data) {
             document.getElementById('bigscreenResultCard').classList.add('active');
-            bigscreenStartBtn.disabled = false;
+            setBigscreenTaskButtonsDisabled(false);
             document.getElementById('bigscreenResultTotal').textContent = data.total || 0;
             document.getElementById('bigscreenResultSuccess').textContent = data.success_count || 0;
             document.getElementById('bigscreenResultFailed').textContent = data.fail_count || 0;
@@ -1779,6 +1865,8 @@
             document.getElementById('bigscreenStatFailed').textContent = '0';
             document.getElementById('bigscreenLogContainer').innerHTML = '';
             bigscreenDownloadUrl = '';
+            bigscreenActiveTaskId = '';
+            lastBigscreenStatus = null;
             clearMessage(bigscreenStatusMessage);
             document.getElementById('bigscreenMainCard').scrollIntoView({ behavior: 'smooth' });
         });
@@ -1884,6 +1972,7 @@
             clearMessage(roomCreatorStatusMessage);
             document.getElementById('roomCreatorProgressCard').classList.add('active');
             document.getElementById('roomCreatorResultCard').classList.remove('active');
+            showBigscreenRunningHint(roomCreatorStatusMessage);
 
            fetch('/api/room-creator/start', {
                method: 'POST',
