@@ -81,7 +81,11 @@ def capture_once(
                 browser.save_auth_state()
                 log("蓝屏登录状态已保存")
 
-        room_name = browser.get_room_name()
+        room_name = ""
+        try:
+            room_name = browser.get_room_name()
+        except Exception as exc:
+            log("读取直播间账号名称失败: %s，继续截图" % exc)
 
         for step in CAPTURE_STEPS:
             filename = screenshot_filename(

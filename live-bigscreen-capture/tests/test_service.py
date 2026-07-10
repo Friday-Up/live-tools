@@ -45,6 +45,7 @@ class FakeBrowser:
         self.calls.append(("sort_product_table", label))
 
     def screenshot(self, path):
+        self.calls.append(("screenshot", Path(path).name))
         Path(path).write_bytes(b"png")
 
     def close(self, force=False):
@@ -104,8 +105,43 @@ class CaptureServiceTest(unittest.TestCase):
 
             self.assertEqual(result.room_name, "京东青春采销")
             calls = FakeBrowser.instances[0].calls
+            first_screenshot_index = next(
+                index
+                for index, call in enumerate(calls)
+                if isinstance(call, tuple) and call[0] == "screenshot"
+            )
             self.assertLess(calls.index("check_login_status"), calls.index("get_room_name"))
-            self.assertLess(calls.index("get_room_name"), calls.index(("close", True)))
+            self.assertLess(calls.index("get_room_name"), first_screenshot_index)
+
+    def test_capture_once_continues_when_room_name_cannot_be_read(self):
+        class RoomNameErrorBrowser(FakeBrowser):
+            def get_room_name(self):
+                self.calls.append("get_room_name")
+                raise RuntimeError("账号名称节点加载超时")
+
+        logs = []
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir)
+
+            result = capture_once(
+                url="https://jlive.jd.com/bigScreen?id=46794566",
+                output_dir=output_dir,
+                planned_slot="19:00",
+                captured_at=datetime(2026, 7, 8, 19, 0, 0),
+                auth_file=output_dir / "jd_auth.json",
+                browser_factory=RoomNameErrorBrowser,
+                log_callback=logs.append,
+            )
+
+            self.assertEqual(result.room_name, "")
+            self.assertEqual(result.success_count, 15)
+            self.assertEqual(len(list(output_dir.rglob("*.png"))), 15)
+            self.assertTrue(result.manifest_file.exists())
+            self.assertTrue(result.zip_file.exists())
+            self.assertIn(
+                "读取直播间账号名称失败: 账号名称节点加载超时，继续截图",
+                logs,
+            )
 
     def test_capture_once_uses_headless_mode_unless_show_browser_requested(self):
         with tempfile.TemporaryDirectory() as tmpdir:
