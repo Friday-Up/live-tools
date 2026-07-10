@@ -38,17 +38,20 @@ class TemplateWriterTest(unittest.TestCase):
         )
 
         wb = load_workbook(output_path, data_only=False)
-        ws = wb.active
+        try:
+            ws = wb.active
 
-        self.assertEqual(ws.cell(1, 1).value, "SKUID（必填，填写格式请用文本/数字格式，勿使用科学计数格式）")
-        self.assertEqual(ws.cell(2, 1).value, "10079660739051")
-        self.assertEqual(ws.cell(2, 3).value, "vender_BA#a9d94c41368e441094132b17a3b40fd6")
-        self.assertIsNone(ws.cell(2, 4).value)
-        self.assertEqual(ws.cell(3, 1).value, "100089021178")
-        self.assertIsNone(ws.cell(3, 3).value)
-        self.assertEqual(ws.cell(3, 4).value, "381421541016")
-        self.assertEqual(ws.cell(2, 1).number_format, "@")
-        self.assertEqual(ws.cell(3, 4).number_format, "@")
+            self.assertEqual(ws.cell(1, 1).value, "SKUID（必填，填写格式请用文本/数字格式，勿使用科学计数格式）")
+            self.assertEqual(ws.cell(2, 1).value, "10079660739051")
+            self.assertEqual(ws.cell(2, 3).value, "vender_BA#a9d94c41368e441094132b17a3b40fd6")
+            self.assertIsNone(ws.cell(2, 4).value)
+            self.assertEqual(ws.cell(3, 1).value, "100089021178")
+            self.assertIsNone(ws.cell(3, 3).value)
+            self.assertEqual(ws.cell(3, 4).value, "381421541016")
+            self.assertEqual(ws.cell(2, 1).number_format, "@")
+            self.assertEqual(ws.cell(3, 4).number_format, "@")
+        finally:
+            wb.close()
 
     def test_writes_selling_point_to_template_b_column(self):
         output_path = Path(tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False).name)
@@ -75,13 +78,16 @@ class TemplateWriterTest(unittest.TestCase):
         )
 
         wb = load_workbook(output_path, data_only=False)
-        ws = wb.active
-        self.assertEqual(ws.cell(2, 1).value, "1001")
-        self.assertEqual(ws.cell(2, 2).value, "限时直降")
-        self.assertEqual(ws.cell(2, 3).value, "vender_BA#a9d94c41368e441094132b17a3b40fd6")
-        self.assertEqual(ws.cell(3, 1).value, "1002")
-        self.assertEqual(ws.cell(3, 2).value, "满减优惠")
-        self.assertIsNone(ws.cell(3, 3).value)
+        try:
+            ws = wb.active
+            self.assertEqual(ws.cell(2, 1).value, "1001")
+            self.assertEqual(ws.cell(2, 2).value, "限时直降")
+            self.assertEqual(ws.cell(2, 3).value, "vender_BA#a9d94c41368e441094132b17a3b40fd6")
+            self.assertEqual(ws.cell(3, 1).value, "1002")
+            self.assertEqual(ws.cell(3, 2).value, "满减优惠")
+            self.assertIsNone(ws.cell(3, 3).value)
+        finally:
+            wb.close()
 
 
 if __name__ == "__main__":

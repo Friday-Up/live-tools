@@ -72,33 +72,36 @@ def _find_column(headers: list, candidates: list[str]) -> int | None:
 
 def inspect_business_workbook(file_path: str | Path, sample_size: int = 3) -> WorkbookInspection:
     wb = load_workbook(file_path, data_only=True, read_only=True)
-    ws = wb.active
+    try:
+        ws = wb.active
 
-    headers = [cell.value for cell in ws[1]]
-    columns: list[WorkbookColumn] = []
-    for col_index, header in enumerate(headers, start=1):
-        sample_values: list[str] = []
-        for row_index in range(2, min(ws.max_row, sample_size + 1) + 1):
-            value = format_cell_value(ws.cell(row_index, col_index).value)
-            if value:
-                sample_values.append(value)
-        columns.append(
-            WorkbookColumn(
-                index=col_index,
-                header=format_cell_value(header),
-                sample_values=sample_values,
+        headers = [cell.value for cell in ws[1]]
+        columns: list[WorkbookColumn] = []
+        for col_index, header in enumerate(headers, start=1):
+            sample_values: list[str] = []
+            for row_index in range(2, min(ws.max_row, sample_size + 1) + 1):
+                value = format_cell_value(ws.cell(row_index, col_index).value)
+                if value:
+                    sample_values.append(value)
+            columns.append(
+                WorkbookColumn(
+                    index=col_index,
+                    header=format_cell_value(header),
+                    sample_values=sample_values,
+                )
             )
-        )
 
-    return WorkbookInspection(
-        columns=columns,
-        suggested_mapping=ColumnMapping(
-            sku_col=_find_column(headers, SKU_COLUMN_KEYWORDS),
-            code_col=_find_column(headers, CODE_COLUMN_KEYWORDS),
-            product_name_col=_find_column(headers, PRODUCT_NAME_COLUMN_KEYWORDS),
-            selling_point_col=_find_column(headers, SELLING_POINT_COLUMN_KEYWORDS),
-        ),
-    )
+        return WorkbookInspection(
+            columns=columns,
+            suggested_mapping=ColumnMapping(
+                sku_col=_find_column(headers, SKU_COLUMN_KEYWORDS),
+                code_col=_find_column(headers, CODE_COLUMN_KEYWORDS),
+                product_name_col=_find_column(headers, PRODUCT_NAME_COLUMN_KEYWORDS),
+                selling_point_col=_find_column(headers, SELLING_POINT_COLUMN_KEYWORDS),
+            ),
+        )
+    finally:
+        wb.close()
 
 
 def read_business_rows(file_path: str | Path, column_mapping: ColumnMapping | None = None) -> list[BusinessRow]:
@@ -115,31 +118,34 @@ def read_business_rows(file_path: str | Path, column_mapping: ColumnMapping | No
         raise ValueError(f"未找到必需列: {', '.join(missing)}；当前表头: {header_text or '空'}")
 
     wb = load_workbook(file_path, data_only=True, read_only=True)
-    ws = wb.active
-    sku_col = _require_column_index(mapping.sku_col, ws.max_column, "SKU列")
-    code_col = _require_column_index(mapping.code_col, ws.max_column, "绑定值列")
-    product_name_col = _optional_column_index(mapping.product_name_col, ws.max_column, "商品名称列")
-    selling_point_col = _optional_column_index(mapping.selling_point_col, ws.max_column, "短卖点列")
+    try:
+        ws = wb.active
+        sku_col = _require_column_index(mapping.sku_col, ws.max_column, "SKU列")
+        code_col = _require_column_index(mapping.code_col, ws.max_column, "绑定值列")
+        product_name_col = _optional_column_index(mapping.product_name_col, ws.max_column, "商品名称列")
+        selling_point_col = _optional_column_index(mapping.selling_point_col, ws.max_column, "短卖点列")
 
-    rows: list[BusinessRow] = []
-    for row_index in range(2, ws.max_row + 1):
-        sku = format_cell_value(ws.cell(row_index, sku_col).value)
-        if not sku:
-            continue
-        raw_code = format_cell_value(ws.cell(row_index, code_col).value)
-        product_name = format_cell_value(ws.cell(row_index, product_name_col).value) if product_name_col else ""
-        selling_point = format_cell_value(ws.cell(row_index, selling_point_col).value) if selling_point_col else ""
-        rows.append(
-            BusinessRow(
-                source_row=row_index,
-                sku=sku,
-                raw_code=raw_code,
-                product_name=product_name,
-                selling_point=selling_point,
+        rows: list[BusinessRow] = []
+        for row_index in range(2, ws.max_row + 1):
+            sku = format_cell_value(ws.cell(row_index, sku_col).value)
+            if not sku:
+                continue
+            raw_code = format_cell_value(ws.cell(row_index, code_col).value)
+            product_name = format_cell_value(ws.cell(row_index, product_name_col).value) if product_name_col else ""
+            selling_point = format_cell_value(ws.cell(row_index, selling_point_col).value) if selling_point_col else ""
+            rows.append(
+                BusinessRow(
+                    source_row=row_index,
+                    sku=sku,
+                    raw_code=raw_code,
+                    product_name=product_name,
+                    selling_point=selling_point,
+                )
             )
-        )
 
-    return rows
+        return rows
+    finally:
+        wb.close()
 
 
 def _require_column_index(value: int | None, max_column: int, label: str) -> int:

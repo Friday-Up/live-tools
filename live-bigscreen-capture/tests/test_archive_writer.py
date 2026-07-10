@@ -62,20 +62,26 @@ class ArchiveWriterTest(unittest.TestCase):
             )
 
             workbook = load_workbook(manifest)
-            self.assertEqual(workbook.sheetnames, ["截图结果", "截图清单"])
-            summary_sheet = workbook["截图结果"]
-            detail_sheet = workbook["截图清单"]
+            try:
+                self.assertEqual(workbook.sheetnames, ["截图结果", "截图清单"])
+                summary_sheet = workbook["截图结果"]
+                detail_sheet = workbook["截图清单"]
 
-            self.assertEqual(summary_sheet["A1"].value, "时间")
-            self.assertEqual(summary_sheet["B1"].value, "01 概览总览")
-            self.assertEqual(summary_sheet["P1"].value, "15 GMVTop10")
-            self.assertEqual(summary_sheet["A2"].value, "19:00")
-            self.assertIn("失败：下拉选择失败", summary_sheet["N2"].value)
-            image_cells = {
-                (image.anchor._from.row + 1, image.anchor._from.col + 1)
-                for image in summary_sheet._images
-            }
-            self.assertEqual(image_cells, {(2, 2), (2, 16)})
+                self.assertEqual(summary_sheet["A1"].value, "时间")
+                self.assertEqual(summary_sheet["B1"].value, "01 概览总览")
+                self.assertEqual(summary_sheet["P1"].value, "15 GMVTop10")
+                self.assertEqual(summary_sheet["A2"].value, "19:00")
+                self.assertIn("失败：下拉选择失败", summary_sheet["N2"].value)
+                image_cells = {
+                    (image.anchor._from.row + 1, image.anchor._from.col + 1)
+                    for image in summary_sheet._images
+                }
+                self.assertEqual(image_cells, {(2, 2), (2, 16)})
+                self.assertEqual(detail_sheet["A1"].value, "计划整点")
+                self.assertEqual(detail_sheet["E2"].value, "概览总览")
+                self.assertEqual(detail_sheet["E3"].value, "用户画像_成交用户")
+            finally:
+                workbook.close()
             with zipfile.ZipFile(manifest) as xlsx:
                 media_dimensions = []
                 drawing_xml = ""
@@ -89,9 +95,6 @@ class ArchiveWriterTest(unittest.TestCase):
             self.assertIn('cx="4953000"', drawing_xml)
             self.assertIn('cy="3095625"', drawing_xml)
 
-            self.assertEqual(detail_sheet["A1"].value, "计划整点")
-            self.assertEqual(detail_sheet["E2"].value, "概览总览")
-            self.assertEqual(detail_sheet["E3"].value, "用户画像_成交用户")
             with zipfile.ZipFile(archive) as zf:
                 names = zf.namelist()
             self.assertIn("截图清单.xlsx", names)

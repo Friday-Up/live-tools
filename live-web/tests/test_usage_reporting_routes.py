@@ -109,6 +109,7 @@ class UsageReportingRoutesTest(unittest.TestCase):
         ws.append(["1002", "B 商品", "381421541016"])
         output = io.BytesIO()
         wb.save(output)
+        wb.close()
         return output.getvalue()
 
 

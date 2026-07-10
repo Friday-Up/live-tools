@@ -25,14 +25,17 @@ def write_manifest_workbook(output_dir, records):
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / MANIFEST_NAME
     workbook = Workbook()
-    summary_sheet = workbook.active
-    summary_sheet.title = SUMMARY_SHEET_NAME
-    detail_sheet = workbook.create_sheet(DETAIL_SHEET_NAME)
+    try:
+        summary_sheet = workbook.active
+        summary_sheet.title = SUMMARY_SHEET_NAME
+        detail_sheet = workbook.create_sheet(DETAIL_SHEET_NAME)
 
-    _write_summary_sheet(summary_sheet, records)
-    _write_detail_sheet(detail_sheet, records)
-    workbook.save(path)
-    return path
+        _write_summary_sheet(summary_sheet, records)
+        _write_detail_sheet(detail_sheet, records)
+        workbook.save(path)
+        return path
+    finally:
+        workbook.close()
 
 
 def _write_summary_sheet(sheet, records):

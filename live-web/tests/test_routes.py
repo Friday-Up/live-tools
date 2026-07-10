@@ -600,6 +600,7 @@ class PromotionBindingRoutesTest(unittest.TestCase):
         ws.append(["直播间一号", "2026-07-01 20:00:00", "测试直播", "横屏", "不显示地点", "母婴"])
         output = io.BytesIO()
         wb.save(output)
+        wb.close()
 
         response = client.post(
             "/api/room-creator/preview",
@@ -711,6 +712,7 @@ class PromotionBindingRoutesTest(unittest.TestCase):
         ws.append(["1002", "B 商品", "381421541016"])
         output = io.BytesIO()
         wb.save(output)
+        wb.close()
         return output.getvalue()
 
     def _manual_mapping_workbook_bytes(self):
@@ -721,6 +723,7 @@ class PromotionBindingRoutesTest(unittest.TestCase):
         ws.append(["2026-06-19", "1002", "B 商品", "381421541016"])
         output = io.BytesIO()
         wb.save(output)
+        wb.close()
         return output.getvalue()
 
     def _business_workbook_with_selling_point_bytes(self):
@@ -738,6 +741,7 @@ class PromotionBindingRoutesTest(unittest.TestCase):
         ws.append(["1002", "B 商品", "381421541016", "满减优惠"])
         output = io.BytesIO()
         wb.save(output)
+        wb.close()
         return output.getvalue()
 
     def _price_workbook_bytes(self):
@@ -747,6 +751,7 @@ class PromotionBindingRoutesTest(unittest.TestCase):
         ws.append(["100264886683"])
         output = io.BytesIO()
         wb.save(output)
+        wb.close()
         return output.getvalue()
 
 

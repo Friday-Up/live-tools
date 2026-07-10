@@ -64,93 +64,96 @@ def write_report(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     wb = Workbook()
-    summary_ws = wb.active
-    summary_ws.title = "汇总"
-    detail_ws = wb.create_sheet("可上传明细")
-    manual_issue_ws = wb.create_sheet("需处理异常")
-    skipped_ws = wb.create_sheet("跳过和重复")
-    selling_point_ws = wb.create_sheet("短卖点警告")
+    try:
+        summary_ws = wb.active
+        summary_ws.title = "汇总"
+        detail_ws = wb.create_sheet("可上传明细")
+        manual_issue_ws = wb.create_sheet("需处理异常")
+        skipped_ws = wb.create_sheet("跳过和重复")
+        selling_point_ws = wb.create_sheet("短卖点警告")
 
-    _write_rows(summary_ws, _summary_rows(summary))
-    _write_rows(
-        detail_ws,
-        [
-            ["原始行号", "SKU", "商品名称", "绑定类型", "绑定值", "短卖点", "写入模板行号"],
-            *[
-                [
-                    record.source_row,
-                    record.sku,
-                    record.product_name,
-                    _binding_type_label(record),
-                    record.binding_value,
-                    record.selling_point,
-                    template_row,
-                ]
-                for template_row, record in enumerate(binding_records, start=2)
+        _write_rows(summary_ws, _summary_rows(summary))
+        _write_rows(
+            detail_ws,
+            [
+                ["原始行号", "SKU", "商品名称", "绑定类型", "绑定值", "短卖点", "写入模板行号"],
+                *[
+                    [
+                        record.source_row,
+                        record.sku,
+                        record.product_name,
+                        _binding_type_label(record),
+                        record.binding_value,
+                        record.selling_point,
+                        template_row,
+                    ]
+                    for template_row, record in enumerate(binding_records, start=2)
+                ],
             ],
-        ],
-    )
-    _write_rows(
-        manual_issue_ws,
-        [
-            ["原始行号", "SKU", "商品名称", "原始券码/价码", "问题", "建议处理"],
-            *[
-                [
-                    issue.source_row,
-                    issue.sku,
-                    issue.product_name,
-                    issue.raw_code,
-                    _issue_label(issue),
-                    issue.action,
-                ]
-                for issue in issue_records
-                if issue.issue_type in MANUAL_ISSUE_TYPES
+        )
+        _write_rows(
+            manual_issue_ws,
+            [
+                ["原始行号", "SKU", "商品名称", "原始券码/价码", "问题", "建议处理"],
+                *[
+                    [
+                        issue.source_row,
+                        issue.sku,
+                        issue.product_name,
+                        issue.raw_code,
+                        _issue_label(issue),
+                        issue.action,
+                    ]
+                    for issue in issue_records
+                    if issue.issue_type in MANUAL_ISSUE_TYPES
+                ],
             ],
-        ],
-    )
-    _write_rows(
-        skipped_ws,
-        [
-            ["原始行号", "SKU", "商品名称", "原始券码/价码", "跳过原因", "保留行号", "说明"],
-            *[
-                [
-                    issue.source_row,
-                    issue.sku,
-                    issue.product_name,
-                    issue.raw_code,
-                    _issue_label(issue),
-                    issue.kept_source_row,
-                    issue.action,
-                ]
-                for issue in issue_records
-                if issue.issue_type in SKIPPED_ISSUE_TYPES
+        )
+        _write_rows(
+            skipped_ws,
+            [
+                ["原始行号", "SKU", "商品名称", "原始券码/价码", "跳过原因", "保留行号", "说明"],
+                *[
+                    [
+                        issue.source_row,
+                        issue.sku,
+                        issue.product_name,
+                        issue.raw_code,
+                        _issue_label(issue),
+                        issue.kept_source_row,
+                        issue.action,
+                    ]
+                    for issue in issue_records
+                    if issue.issue_type in SKIPPED_ISSUE_TYPES
+                ],
             ],
-        ],
-    )
-    _write_rows(
-        selling_point_ws,
-        [
-            ["原始行号", "SKU", "商品名称", "短卖点", "问题", "建议处理"],
-            *[
-                [
-                    issue.source_row,
-                    issue.sku,
-                    issue.product_name,
-                    issue.raw_code,
-                    _issue_label(issue),
-                    issue.action,
-                ]
-                for issue in issue_records
-                if issue.issue_type in SELLING_POINT_ISSUE_TYPES
+        )
+        _write_rows(
+            selling_point_ws,
+            [
+                ["原始行号", "SKU", "商品名称", "短卖点", "问题", "建议处理"],
+                *[
+                    [
+                        issue.source_row,
+                        issue.sku,
+                        issue.product_name,
+                        issue.raw_code,
+                        _issue_label(issue),
+                        issue.action,
+                    ]
+                    for issue in issue_records
+                    if issue.issue_type in SELLING_POINT_ISSUE_TYPES
+                ],
             ],
-        ],
-    )
+        )
 
-    for ws in wb.worksheets:
-        _format_sheet(ws)
+        for ws in wb.worksheets:
+            _format_sheet(ws)
 
-    wb.save(output_path)
-    return output_path
+        wb.save(output_path)
+        return output_path
+    finally:
+        wb.close()
 
 
 def _write_rows(ws, rows):

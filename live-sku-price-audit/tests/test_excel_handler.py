@@ -18,6 +18,7 @@ def make_workbook(headers, rows):
     for row in rows:
         ws.append(row)
     wb.save(tmp.name)
+    wb.close()
     return Path(tmp.name)
 
 
@@ -97,13 +98,17 @@ class ExcelHandlerTests(unittest.TestCase):
 
         from openpyxl import load_workbook
 
-        ws = load_workbook(output).active
-        self.assertEqual(
-            [ws.cell(1, i).value for i in range(1, 7)],
-            ["提交时间（自动）", "商品SKU（必填）", "提交者（自动）", "价格", "图片", "备注"],
-        )
-        self.assertEqual(ws.cell(2, 4).value, 5.5)
-        self.assertEqual(ws.cell(2, 6).value, "不符合上菜")
+        wb = load_workbook(output)
+        try:
+            ws = wb.active
+            self.assertEqual(
+                [ws.cell(1, i).value for i in range(1, 7)],
+                ["提交时间（自动）", "商品SKU（必填）", "提交者（自动）", "价格", "图片", "备注"],
+            )
+            self.assertEqual(ws.cell(2, 4).value, 5.5)
+            self.assertEqual(ws.cell(2, 6).value, "不符合上菜")
+        finally:
+            wb.close()
 
     def test_write_results_appends_output_headers_when_fallback_columns_are_occupied(self):
         path = make_workbook(
@@ -130,11 +135,15 @@ class ExcelHandlerTests(unittest.TestCase):
 
         from openpyxl import load_workbook
 
-        ws = load_workbook(output).active
-        self.assertEqual(ws.cell(1, 4).value, "活动名称")
-        self.assertEqual([ws.cell(1, i).value for i in range(5, 8)], ["价格", "图片", "备注"])
-        self.assertEqual(ws.cell(2, 5).value, 5.5)
-        self.assertEqual(ws.cell(2, 7).value, "不符合上菜")
+        wb = load_workbook(output)
+        try:
+            ws = wb.active
+            self.assertEqual(ws.cell(1, 4).value, "活动名称")
+            self.assertEqual([ws.cell(1, i).value for i in range(5, 8)], ["价格", "图片", "备注"])
+            self.assertEqual(ws.cell(2, 5).value, 5.5)
+            self.assertEqual(ws.cell(2, 7).value, "不符合上菜")
+        finally:
+            wb.close()
 
     def test_write_results_records_partial_price_and_manual_review_remark(self):
         path = make_workbook(
@@ -161,12 +170,16 @@ class ExcelHandlerTests(unittest.TestCase):
 
         from openpyxl import load_workbook
 
-        ws = load_workbook(output).active
-        self.assertEqual(ws.cell(2, 4).value, 8.0)
-        self.assertEqual(
-            ws.cell(2, 6).value,
-            "需人工复核: 部分系列/规格未完成检测；已检测 1 个规格，最低 ¥8.0",
-        )
+        wb = load_workbook(output)
+        try:
+            ws = wb.active
+            self.assertEqual(ws.cell(2, 4).value, 8.0)
+            self.assertEqual(
+                ws.cell(2, 6).value,
+                "需人工复核: 部分系列/规格未完成检测；已检测 1 个规格，最低 ¥8.0",
+            )
+        finally:
+            wb.close()
 
     def test_create_sku_input_file_generates_readable_sku_list(self):
         out_dir = tempfile.mkdtemp()

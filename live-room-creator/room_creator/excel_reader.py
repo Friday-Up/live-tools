@@ -55,12 +55,14 @@ def inspect_workbook(file_path: str | Path) -> tuple[ColumnMapping, list[str]]:
     """检查 Excel 表头并推荐列映射。"""
     file_path = Path(file_path)
     wb = load_workbook(file_path, data_only=True)
-    ws = wb.active
-    if ws is None:
-        raise ValueError("Excel 中没有工作表")
+    try:
+        ws = wb.active
+        if ws is None:
+            raise ValueError("Excel 中没有工作表")
 
-    headers = [str(cell.value or "").strip() for cell in ws[1]]
-    wb.close()
+        headers = [str(cell.value or "").strip() for cell in ws[1]]
+    finally:
+        wb.close()
 
     mapping = ColumnMapping(
         title_col=_find_column(headers, config.TITLE_COLUMN_ALIASES),
@@ -105,52 +107,54 @@ def read_room_rows(
         raise ValueError("列映射不完整：必须包含直播标题和开播时间列")
 
     wb = load_workbook(file_path, data_only=True)
-    ws = wb.active
-    if ws is None:
-        raise ValueError("Excel 中没有工作表")
+    try:
+        ws = wb.active
+        if ws is None:
+            raise ValueError("Excel 中没有工作表")
 
-    rows: list[RoomCreateRow] = []
-    header_values = [str(cell.value or "").strip() for cell in ws[1]]
+        rows: list[RoomCreateRow] = []
+        header_values = [str(cell.value or "").strip() for cell in ws[1]]
 
-    for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-        def cell_value(col_name: Optional[str]):
-            if not col_name:
-                return None
+        for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+            def cell_value(col_name: Optional[str]):
+                if not col_name:
+                    return None
+                try:
+                    idx = header_values.index(col_name)
+                    return row[idx] if idx < len(row) else None
+                except ValueError:
+                    return None
+
+            title = cell_value(mapping.title_col)
+            start_time = cell_value(mapping.start_time_col)
+
+            # 标题和时间为空则跳过（视为空行）
+            if title is None or str(title).strip() == "":
+                continue
+            if start_time is None or str(start_time).strip() == "":
+                raise ValueError(f"第 {row_idx} 行开播时间为空")
+
             try:
-                idx = header_values.index(col_name)
-                return row[idx] if idx < len(row) else None
-            except ValueError:
-                return None
+                parsed_time = _parse_datetime(start_time)
+            except ValueError as exc:
+                raise ValueError(f"第 {row_idx} 行开播时间格式错误：{exc}")
 
-        title = cell_value(mapping.title_col)
-        start_time = cell_value(mapping.start_time_col)
+            live_category = str(cell_value(mapping.live_category_col) or config.DEFAULT_LIVE_CATEGORY).strip()
+            live_category = config.CATEGORY_OPTION_MAP.get(live_category, live_category)
 
-        # 标题和时间为空则跳过（视为空行）
-        if title is None or str(title).strip() == "":
-            continue
-        if start_time is None or str(start_time).strip() == "":
-            raise ValueError(f"第 {row_idx} 行开播时间为空")
-
-        try:
-            parsed_time = _parse_datetime(start_time)
-        except ValueError as exc:
-            raise ValueError(f"第 {row_idx} 行开播时间格式错误：{exc}")
-
-        live_category = str(cell_value(mapping.live_category_col) or config.DEFAULT_LIVE_CATEGORY).strip()
-        live_category = config.CATEGORY_OPTION_MAP.get(live_category, live_category)
-
-        rows.append(
-            RoomCreateRow(
-                row_index=row_idx,
-                title=str(title).strip(),
-                start_time=parsed_time,
-                cover=str(cell_value(mapping.cover_col) or "").strip(),
-                live_form=str(cell_value(mapping.live_form_col) or config.DEFAULT_LIVE_FORM).strip(),
-                live_direction=str(cell_value(mapping.live_direction_col) or config.DEFAULT_LIVE_DIRECTION).strip(),
-                live_location=str(cell_value(mapping.live_location_col) or config.DEFAULT_LIVE_LOCATION).strip(),
-                live_category=live_category,
+            rows.append(
+                RoomCreateRow(
+                    row_index=row_idx,
+                    title=str(title).strip(),
+                    start_time=parsed_time,
+                    cover=str(cell_value(mapping.cover_col) or "").strip(),
+                    live_form=str(cell_value(mapping.live_form_col) or config.DEFAULT_LIVE_FORM).strip(),
+                    live_direction=str(cell_value(mapping.live_direction_col) or config.DEFAULT_LIVE_DIRECTION).strip(),
+                    live_location=str(cell_value(mapping.live_location_col) or config.DEFAULT_LIVE_LOCATION).strip(),
+                    live_category=live_category,
+                )
             )
-        )
 
-    wb.close()
-    return rows
+        return rows
+    finally:
+        wb.close()

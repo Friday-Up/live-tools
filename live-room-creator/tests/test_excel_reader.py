@@ -27,6 +27,7 @@ def _make_workbook(data: list[list], headers: list[str]) -> Path:
     fd, path = tempfile.mkstemp(suffix=".xlsx")
     os.close(fd)
     wb.save(path)
+    wb.close()
     return Path(path)
 
 

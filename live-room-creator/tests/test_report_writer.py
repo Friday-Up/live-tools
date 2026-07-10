@@ -44,12 +44,15 @@ class TestWriteBatchReport(unittest.TestCase):
             path = write_batch_report(result, tmpdir)
             self.assertTrue(path.exists())
             wb = load_workbook(path)
-            ws = wb.active
-            self.assertIsNotNone(ws)
-            self.assertEqual(ws["A1"].value, "原始行号")
-            self.assertEqual(ws["H2"].value, "成功")
-            self.assertEqual(ws["H3"].value, "失败")
-            self.assertEqual(ws["I3"].value, "标题重复")
+            try:
+                ws = wb.active
+                self.assertIsNotNone(ws)
+                self.assertEqual(ws["A1"].value, "原始行号")
+                self.assertEqual(ws["H2"].value, "成功")
+                self.assertEqual(ws["H3"].value, "失败")
+                self.assertEqual(ws["I3"].value, "标题重复")
+            finally:
+                wb.close()
 
 
 if __name__ == "__main__":

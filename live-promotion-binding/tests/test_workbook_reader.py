@@ -174,6 +174,7 @@ class WorkbookReaderTest(unittest.TestCase):
         for row in rows:
             ws.append(row)
         wb.save(path)
+        wb.close()
         return path
 
 

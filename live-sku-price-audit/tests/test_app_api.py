@@ -16,6 +16,7 @@ def make_excel_file():
     ws.append(["商品SKU"])
     ws.append(["100264886683"])
     wb.save(tmp.name)
+    wb.close()
     return tmp.name
 
 
