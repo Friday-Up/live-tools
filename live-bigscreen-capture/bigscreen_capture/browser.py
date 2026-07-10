@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+from time import monotonic
 
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
@@ -14,6 +15,8 @@ from utils.browser_manager import BrowserManager  # noqa: E402
 
 class BigscreenBrowser:
     LOCATOR_TIMEOUT_MS = 15000
+    ACTION_VERIFY_TIMEOUT_MS = 3000
+    ACTION_VERIFY_INTERVAL_MS = 200
 
     def __init__(self, url, auth_file, headless=False, log_callback=None):
         self.url = url
@@ -78,7 +81,13 @@ class BigscreenBrowser:
         return target.inner_text().strip()
 
     def select_overview_live_tab(self, label):
-        self._click_text(label)
+        locator = self.page.get_by_text(label, exact=True)
+        target = self._wait_for_visible(locator, "未找到页面元素: %s" % label)
+        self._dom_click_and_verify(
+            target,
+            lambda: self._is_control_selected(target),
+            "标签未切换为: %s" % label,
+        )
         self._wait_stable()
 
     def select_overview_product_scope(self, label):
@@ -89,7 +98,12 @@ class BigscreenBrowser:
         locator = self.page.locator('[class*="scroll-tab-index-scrollTabItem"]').filter(
             has_text=label
         )
-        self._click_locator(locator, "未找到页面元素: %s" % label)
+        target = self._wait_for_visible(locator, "未找到页面元素: %s" % label)
+        self._dom_click_and_verify(
+            target,
+            lambda: self._is_control_selected(target),
+            "指标未切换为: %s" % label,
+        )
         self._wait_stable()
 
     def select_user_portrait(self, label):
@@ -122,7 +136,11 @@ class BigscreenBrowser:
         locator = self.page.locator('[class*="side-bar-index-name"]').filter(has_text=label)
         target = self._wait_for_visible(locator, "未找到页面元素: %s" % label)
         if not self._is_sidebar_selected(target):
-            self._dom_click(target)
+            self._dom_click_and_verify(
+                target,
+                lambda: self._is_sidebar_selected(target),
+                "页面未切换到: %s" % label,
+            )
         self._wait_stable()
 
     def _click_text(self, label):
@@ -136,10 +154,41 @@ class BigscreenBrowser:
     def _dom_click(locator):
         locator.evaluate("el => el.click()")
 
-    def _wait_for_visible(self, locator, error_message):
+    def _dom_click_and_verify(self, locator, is_selected, error_message):
+        if self._condition_is_met(is_selected):
+            return
+        for _ in range(2):
+            self._dom_click(locator)
+            if self._wait_for_condition(is_selected):
+                return
+        raise RuntimeError(error_message)
+
+    @staticmethod
+    def _condition_is_met(predicate):
+        try:
+            return bool(predicate())
+        except PlaywrightError:
+            return False
+
+    def _wait_for_condition(self, predicate):
+        deadline = monotonic() + self.ACTION_VERIFY_TIMEOUT_MS / 1000
+        while True:
+            try:
+                if predicate():
+                    return True
+            except PlaywrightError:
+                pass
+            if monotonic() >= deadline:
+                return False
+            self.page.wait_for_timeout(self.ACTION_VERIFY_INTERVAL_MS)
+
+    def _wait_for_visible(self, locator, error_message, timeout=None):
         target = locator.first
         try:
-            target.wait_for(state="visible", timeout=self.LOCATOR_TIMEOUT_MS)
+            target.wait_for(
+                state="visible",
+                timeout=self.LOCATOR_TIMEOUT_MS if timeout is None else timeout,
+            )
         except PlaywrightTimeoutError:
             raise RuntimeError(error_message)
         return target
@@ -152,19 +201,69 @@ class BigscreenBrowser:
             )
         )
 
+    @staticmethod
+    def _is_control_selected(locator):
+        return bool(
+            locator.evaluate(
+                """el => {
+                    // BIGSCREEN_CONTROL_SELECTED
+                    const candidates = [
+                        el,
+                        el.closest('label'),
+                        el.closest('[role="radio"]'),
+                    ].filter(Boolean);
+                    return candidates.some(node => {
+                        const input = node.matches('input') ? node : node.querySelector('input');
+                        const className = String(node.className || '').toLowerCase();
+                        return Boolean(input && input.checked)
+                            || node.getAttribute('aria-checked') === 'true'
+                            || node.getAttribute('aria-selected') === 'true'
+                            || className.includes('checked')
+                            || className.includes('selected')
+                            || className.includes('active');
+                    });
+                }"""
+            )
+        )
+
     def _select_ant_dropdown(self, current_text, option_text):
+        selected = self.page.locator(".ant-select-selection-item").filter(
+            has_text=option_text
+        )
+        if selected.count() > 0:
+            return
+
         dropdown = self.page.locator(".ant-select-selection-item").filter(has_text=current_text)
         try:
             dropdown = self._wait_for_visible(dropdown, "未找到下拉框: %s" % current_text)
         except RuntimeError:
             dropdown = self.page.locator(".ant-select-selection-item").filter(has_text=option_text)
-            dropdown = self._wait_for_visible(dropdown, "未找到下拉框: %s" % current_text)
-        self._dom_click(dropdown)
-        self.page.wait_for_timeout(500)
+            dropdown = self._wait_for_visible(
+                dropdown,
+                "未找到下拉框: %s" % current_text,
+                timeout=self.ACTION_VERIFY_TIMEOUT_MS,
+            )
 
         option = self.page.locator(".ant-select-item-option-content").filter(has_text=option_text)
-        option = self._wait_for_visible(option, "未找到下拉选项: %s" % option_text)
-        self._dom_click(option)
+        for attempt in range(2):
+            self._dom_click(dropdown)
+            self.page.wait_for_timeout(500)
+            try:
+                option = self._wait_for_visible(
+                    option,
+                    "未找到下拉选项: %s" % option_text,
+                    timeout=self.ACTION_VERIFY_TIMEOUT_MS,
+                )
+                break
+            except RuntimeError:
+                if attempt == 1:
+                    raise
+
+        self._dom_click_and_verify(
+            option,
+            lambda: selected.count() > 0,
+            "下拉框未切换为: %s" % option_text,
+        )
 
     def _is_desc_sort_active(self, header):
         return bool(

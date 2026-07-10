@@ -21,6 +21,8 @@ class FakeLocator:
         return self
 
     def count(self):
+        if self.label == ".ant-select-selection-item" and self.has_text:
+            return int(self.has_text in self.page.selected_options)
         return self._count
 
     def click(self, **kwargs):
@@ -37,9 +39,23 @@ class FakeLocator:
         if script == "el => el.click()":
             self.page.actions.append(("dom_click", self.label, self.has_text))
             self.page.dom_clicks.append((self.label, self.has_text))
+            key = (self.label, self.has_text)
+            outcomes = self.page.dom_click_results.get(key, [])
+            succeeded = outcomes.pop(0) if outcomes else True
+            if succeeded:
+                if "side-bar-index-name" in self.label:
+                    self.page.selected_labels = {self.has_text}
+                elif "scroll-tab-index-scrollTabItem" in self.label:
+                    self.page.selected_controls.add(self.has_text)
+                elif self.label == ".ant-select-item-option-content":
+                    self.page.selected_options.add(self.has_text)
+                else:
+                    self.page.selected_controls.add(self.has_text or self.label)
             return None
         if "side-bar-index-selected" in script:
             return self.has_text in self.page.selected_labels
+        if "BIGSCREEN_CONTROL_SELECTED" in script:
+            return (self.has_text or self.label) in self.page.selected_controls
         if self.page.evaluation_results:
             return self.page.evaluation_results.pop(0)
         return None
@@ -64,9 +80,12 @@ class FakePage:
         self.evaluations = []
         self.actions = []
         self.dom_clicks = []
+        self.dom_click_results = {}
         self.locator_waits = []
         self.wait_failures = set()
         self.selected_labels = set()
+        self.selected_controls = set()
+        self.selected_options = {"全部商品", "访问用户"}
         self.waits = []
         self.screenshots = []
         self.evaluation_results = []
@@ -85,6 +104,7 @@ class FakePage:
         return FakeLocator(self, selector)
 
     def wait_for_timeout(self, timeout):
+        self.actions.append(("timeout", timeout, None))
         self.waits.append(timeout)
 
     def screenshot(self, **kwargs):
@@ -207,6 +227,111 @@ class BigscreenBrowserTest(unittest.TestCase):
         self.assertEqual(page.clicks, [])
         self.assertEqual(page.dom_clicks, [])
 
+    def test_sidebar_dom_click_retries_once_until_target_is_selected(self):
+        page = FakePage()
+        selector = '[class*="side-bar-index-name"]'
+        page.dom_click_results[(selector, "流量")] = [False, True]
+        browser = BigscreenBrowser(
+            "https://jlive.jd.com/bigScreen?id=46794566",
+            auth_file="jd_auth.json",
+        )
+        browser.ACTION_VERIFY_TIMEOUT_MS = 0
+        browser.page = page
+
+        browser.open_flow()
+
+        self.assertEqual(
+            page.dom_clicks,
+            [(selector, "流量"), (selector, "流量")],
+        )
+        self.assertIn("流量", page.selected_labels)
+
+    def test_sidebar_dom_click_fails_fast_after_two_unverified_attempts(self):
+        page = FakePage()
+        selector = '[class*="side-bar-index-name"]'
+        page.dom_click_results[(selector, "商品")] = [False, False]
+        browser = BigscreenBrowser(
+            "https://jlive.jd.com/bigScreen?id=46794566",
+            auth_file="jd_auth.json",
+        )
+        browser.ACTION_VERIFY_TIMEOUT_MS = 0
+        browser.page = page
+
+        with self.assertRaisesRegex(RuntimeError, "页面未切换到: 商品"):
+            browser.open_product()
+
+        self.assertEqual(
+            page.dom_clicks,
+            [(selector, "商品"), (selector, "商品")],
+        )
+
+    def test_overview_tab_dom_click_retries_until_checked(self):
+        page = FakePage()
+        page.dom_click_results[("成交", None)] = [False, True]
+        browser = BigscreenBrowser(
+            "https://jlive.jd.com/bigScreen?id=46794566",
+            auth_file="jd_auth.json",
+        )
+        browser.ACTION_VERIFY_TIMEOUT_MS = 0
+        browser.page = page
+
+        browser.select_overview_live_tab("成交")
+
+        self.assertEqual(page.dom_clicks, [("成交", None), ("成交", None)])
+
+    def test_control_click_happens_before_action_verification_wait(self):
+        page = FakePage()
+        browser = BigscreenBrowser(
+            "https://jlive.jd.com/bigScreen?id=46794566",
+            auth_file="jd_auth.json",
+        )
+        browser.ACTION_VERIFY_TIMEOUT_MS = 50
+        browser.page = page
+
+        browser.select_overview_live_tab("成交")
+
+        dom_click_index = page.actions.index(("dom_click", "成交", None))
+        self.assertFalse(
+            any(
+                action[0] == "timeout" and action[1] == browser.ACTION_VERIFY_INTERVAL_MS
+                for action in page.actions[:dom_click_index]
+            )
+        )
+
+    def test_flow_metric_dom_click_retries_until_selected(self):
+        page = FakePage()
+        selector = '[class*="scroll-tab-index-scrollTabItem"]'
+        page.dom_click_results[(selector, "在线人数")] = [False, True]
+        browser = BigscreenBrowser(
+            "https://jlive.jd.com/bigScreen?id=46794566",
+            auth_file="jd_auth.json",
+        )
+        browser.ACTION_VERIFY_TIMEOUT_MS = 0
+        browser.page = page
+
+        browser.select_flow_metric("在线人数")
+
+        self.assertEqual(
+            page.dom_clicks,
+            [(selector, "在线人数"), (selector, "在线人数")],
+        )
+
+    def test_dropdown_option_dom_click_retries_until_value_changes(self):
+        page = FakePage()
+        option_key = (".ant-select-item-option-content", "挂袋商品")
+        page.dom_click_results[option_key] = [False, True]
+        browser = BigscreenBrowser(
+            "https://jlive.jd.com/bigScreen?id=46794566",
+            auth_file="jd_auth.json",
+        )
+        browser.ACTION_VERIFY_TIMEOUT_MS = 0
+        browser.page = page
+
+        browser.select_overview_product_scope("挂袋商品")
+
+        self.assertEqual(page.dom_clicks.count(option_key), 2)
+        self.assertIn("挂袋商品", page.selected_options)
+
     def test_check_login_status_is_false_when_bigscreen_never_becomes_ready(self):
         page = FakePage()
         sidebar_selector = '[class*="side-bar-index-name"]'
@@ -299,6 +424,7 @@ class BigscreenBrowserTest(unittest.TestCase):
         self.assertEqual(
             page.filters,
             [
+                (".ant-select-selection-item", {"has_text": "挂袋商品"}),
                 (".ant-select-selection-item", {"has_text": "全部商品"}),
                 (".ant-select-item-option-content", {"has_text": "挂袋商品"}),
             ],
@@ -315,7 +441,7 @@ class BigscreenBrowserTest(unittest.TestCase):
             page.locator_waits,
         )
         self.assertIn(
-            (".ant-select-item-option-content", "挂袋商品", {"state": "visible", "timeout": 15000}),
+            (".ant-select-item-option-content", "挂袋商品", {"state": "visible", "timeout": 3000}),
             page.locator_waits,
         )
 
@@ -333,6 +459,7 @@ class BigscreenBrowserTest(unittest.TestCase):
         self.assertEqual(
             page.filters,
             [
+                (".ant-select-selection-item", {"has_text": "成交用户"}),
                 (".ant-select-selection-item", {"has_text": "访问用户"}),
                 (".ant-select-item-option-content", {"has_text": "成交用户"}),
             ],
