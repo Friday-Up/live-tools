@@ -38,6 +38,12 @@ class FakeLocator:
         self.page.filters.append((self.label, kwargs))
         return self
 
+    def locator(self, selector):
+        child = FakeLocator(self.page, selector)
+        child.has_text = self.has_text
+        self.page.child_locators.append((self.label, self.has_text, selector))
+        return child
+
     def evaluate(self, script):
         self.page.evaluations.append((self.label, script))
         if script == "el => el.click()":
@@ -88,6 +94,7 @@ class FakePage:
         self.actions = []
         self.dom_clicks = []
         self.dispatch_events = []
+        self.child_locators = []
         self.dom_click_results = {}
         self.locator_waits = []
         self.wait_failures = set()
@@ -511,9 +518,14 @@ class BigscreenBrowserTest(unittest.TestCase):
             self.assertEqual(page.screenshots, [{"path": str(path), "full_page": False}])
             self.assertTrue(path.parent.exists())
 
-    def test_sort_product_table_clicks_table_header(self):
+    def test_sort_product_table_clicks_sort_caret(self):
         page = FakePage()
-        page.evaluation_results = [True]
+        page.page_evaluation_results = [
+            [
+                {"product": "商品 A", "value": "20"},
+                {"product": "商品 B", "value": "10"},
+            ]
+        ]
         browser = BigscreenBrowser(
             "https://jlive.jd.com/bigScreen?id=46794566",
             auth_file="jd_auth.json",
@@ -523,8 +535,15 @@ class BigscreenBrowserTest(unittest.TestCase):
         browser.sort_product_table("成交件数")
 
         self.assertEqual(page.clicks, [])
-        self.assertEqual(page.dom_clicks, [("thead th", "成交件数")])
+        self.assertEqual(
+            page.dom_clicks,
+            [('[aria-label="caret-down"]', "成交件数")],
+        )
         self.assertEqual(page.filters, [("thead th", {"has_text": "成交件数"})])
+        self.assertEqual(
+            page.child_locators,
+            [("thead th", "成交件数", '[aria-label="caret-down"]')],
+        )
         self.assertIn(
             ("thead th", "成交件数", {"state": "visible", "timeout": 15000}),
             page.locator_waits,
@@ -532,7 +551,16 @@ class BigscreenBrowserTest(unittest.TestCase):
 
     def test_sort_product_table_clicks_again_until_descending_is_active(self):
         page = FakePage()
-        page.evaluation_results = [False, True]
+        page.page_evaluation_results = [
+            [
+                {"product": "商品 A", "value": "10"},
+                {"product": "商品 B", "value": "20"},
+            ],
+            [
+                {"product": "商品 A", "value": "20"},
+                {"product": "商品 B", "value": "10"},
+            ],
+        ]
         browser = BigscreenBrowser(
             "https://jlive.jd.com/bigScreen?id=46794566",
             auth_file="jd_auth.json",
@@ -544,16 +572,22 @@ class BigscreenBrowserTest(unittest.TestCase):
         self.assertEqual(
             page.dom_clicks,
             [
-                ("thead th", "成交金额"),
-                ("thead th", "成交金额"),
+                ('[aria-label="caret-down"]', "成交金额"),
+                ('[aria-label="caret-down"]', "成交金额"),
             ],
         )
         self.assertEqual(page.clicks, [])
 
-    def test_sort_product_table_stops_after_one_click_when_visible_values_are_descending(self):
+    def test_sort_product_table_ignores_blank_and_pinned_rows_when_verifying_descending(self):
         page = FakePage()
-        page.evaluation_results = [False]
-        page.page_evaluation_results = [True]
+        page.page_evaluation_results = [
+            [
+                {"product": "", "value": ""},
+                {"product": "讲解中 商品", "value": "0"},
+                {"product": "商品 A", "value": "¥20,000"},
+                {"product": "商品 B", "value": "¥10,000"},
+            ]
+        ]
         logs = []
         browser = BigscreenBrowser(
             "https://jlive.jd.com/bigScreen?id=46794566",
@@ -565,32 +599,39 @@ class BigscreenBrowserTest(unittest.TestCase):
         browser.sort_product_table("成交件数")
 
         self.assertEqual(page.clicks, [])
-        self.assertEqual(page.dom_clicks, [("thead th", "成交件数")])
+        self.assertEqual(
+            page.dom_clicks,
+            [('[aria-label="caret-down"]', "成交件数")],
+        )
         self.assertEqual(page.page_evaluations[0][1], "成交件数")
+        self.assertIn(".ant-table-container", page.page_evaluations[0][0])
+        self.assertIn(".ant-table-body tbody", page.page_evaluations[0][0])
         self.assertEqual(logs, [])
 
-    def test_sort_product_table_continues_when_descending_state_is_not_detectable(self):
+    def test_sort_product_table_fails_when_descending_state_is_not_confirmed(self):
         page = FakePage()
-        page.evaluation_results = [False, False]
-        logs = []
+        ascending_rows = [
+            {"product": "商品 A", "value": "10"},
+            {"product": "商品 B", "value": "20"},
+        ]
+        page.page_evaluation_results = [ascending_rows, ascending_rows]
         browser = BigscreenBrowser(
             "https://jlive.jd.com/bigScreen?id=46794566",
             auth_file="jd_auth.json",
-            log_callback=logs.append,
         )
         browser.page = page
 
-        browser.sort_product_table("成交件数")
+        with self.assertRaisesRegex(RuntimeError, "商品分析表未按降序排列: 成交件数"):
+            browser.sort_product_table("成交件数")
 
         self.assertEqual(
             page.dom_clicks,
             [
-                ("thead th", "成交件数"),
-                ("thead th", "成交件数"),
+                ('[aria-label="caret-down"]', "成交件数"),
+                ('[aria-label="caret-down"]', "成交件数"),
             ],
         )
         self.assertEqual(page.clicks, [])
-        self.assertEqual(logs, ["未确认商品分析表头降序状态: 成交件数，继续截图"])
 
 
 if __name__ == "__main__":

@@ -1,3 +1,4 @@
+import re
 import sys
 from pathlib import Path
 from time import monotonic
@@ -113,12 +114,14 @@ class BigscreenBrowser:
     def sort_product_table(self, label):
         header = self.page.locator("thead th").filter(has_text=label)
         header = self._wait_for_visible(header, "未找到商品分析表头: %s" % label)
+        caret = header.locator('[aria-label="caret-down"]')
+        caret = self._wait_for_visible(caret, "未找到商品分析排序箭头: %s" % label)
         for _ in range(2):
-            self._dom_click(header)
+            self._dom_click(caret)
             self._wait_stable()
-            if self._is_desc_sort_active(header) or self._is_visible_column_desc_sorted(label):
+            if self._is_visible_column_desc_sorted(label):
                 return
-        self._log("未确认商品分析表头降序状态: %s，继续截图" % label)
+        raise RuntimeError("商品分析表未按降序排列: %s" % label)
 
     def screenshot(self, path):
         path = Path(path)
@@ -269,61 +272,47 @@ class BigscreenBrowser:
             "下拉框未切换为: %s" % option_text,
         )
 
-    def _is_desc_sort_active(self, header):
-        return bool(
-            header.evaluate(
-                """el => {
-                    const attrValues = [
-                        el.getAttribute('aria-sort'),
-                        el.getAttribute('data-sort-order'),
-                        el.dataset ? el.dataset.sortOrder : '',
-                    ].filter(Boolean).map(value => String(value).toLowerCase());
-                    if (attrValues.some(value => value.includes('desc'))) return true;
+    def _is_visible_column_desc_sorted(self, label):
+        rows = self.page.evaluate(
+            """label => {
+                const headers = Array.from(document.querySelectorAll('thead th'));
+                const header = headers.find(el => (el.innerText || '').trim() === label);
+                const container = header ? header.closest('.ant-table-container') : null;
+                if (!header || !header.parentElement || !container) return [];
 
-                    const down = el.querySelector('.ant-table-column-sorter-down');
-                    if (!down) return false;
-                    const className = [
-                        down.className,
-                        down.parentElement ? down.parentElement.className : '',
-                        down.closest('[class*="sorter"]') ? down.closest('[class*="sorter"]').className : '',
-                    ].map(value => String(value || '')).join(' ');
-                    const ariaChecked = down.getAttribute('aria-checked');
-                    const ariaSelected = down.getAttribute('aria-selected');
-                    const title = String(down.getAttribute('title') || down.getAttribute('aria-label') || '').toLowerCase();
-                    return className.includes('active')
-                        || className.includes('ant-table-column-sorter-active')
-                        || ariaChecked === 'true'
-                        || ariaSelected === 'true'
-                        || title.includes('desc');
-                }"""
-            )
+                const columnIndex = Array.from(header.parentElement.children).indexOf(header);
+                const body = container.querySelector('.ant-table-body tbody');
+                if (columnIndex < 0 || !body) return [];
+
+                return Array.from(body.querySelectorAll('tr')).slice(0, 30).map(row => ({
+                    product: row.children[0] ? String(row.children[0].innerText || '') : '',
+                    value: row.children[columnIndex]
+                        ? String(row.children[columnIndex].innerText || '')
+                        : '',
+                }));
+            }""",
+            label,
         )
 
-    def _is_visible_column_desc_sorted(self, label):
-        return bool(
-            self.page.evaluate(
-                """label => {
-                    const headers = Array.from(document.querySelectorAll('thead th'));
-                    const header = headers.find(el => (el.innerText || '').includes(label));
-                    if (!header || !header.parentElement) return false;
-                    const columnIndex = Array.from(header.parentElement.children).indexOf(header);
-                    if (columnIndex < 0) return false;
+        values = []
+        for row in rows or []:
+            product = str(row.get("product") or "").strip()
+            raw_value = str(row.get("value") or "")
+            if not product or "讲解中" in product:
+                continue
+            number_text = re.sub(r"[^0-9.\-]", "", raw_value)
+            if not re.search(r"\d", number_text):
+                continue
+            try:
+                values.append(float(number_text))
+            except ValueError:
+                continue
 
-                    const values = Array.from(document.querySelectorAll('tbody tr'))
-                        .slice(0, 20)
-                        .map(row => row.children[columnIndex])
-                        .filter(Boolean)
-                        .map(cell => String(cell.innerText || ''))
-                        .map(text => text.replace(/[^0-9.\\-]/g, ''))
-                        .filter(text => /\\d/.test(text))
-                        .map(Number)
-                        .filter(value => Number.isFinite(value));
-
-                    if (values.length < 2) return false;
-                    return values.every((value, index) => index === 0 || values[index - 1] >= value);
-                }""",
-                label,
-            )
+        if not values:
+            return False
+        return all(
+            index == 0 or values[index - 1] >= value
+            for index, value in enumerate(values)
         )
 
     def _wait_stable(self):
