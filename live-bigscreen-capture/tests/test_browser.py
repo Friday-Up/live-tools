@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from bigscreen_capture.browser import BigscreenBrowser
@@ -196,6 +197,23 @@ class BigscreenBrowserTest(unittest.TestCase):
             (sidebar_selector, "概览", {"state": "visible", "timeout": 15000}),
             page.locator_waits,
         )
+
+    def test_check_login_status_is_false_when_bigscreen_navigation_fails(self):
+        page = FakePage()
+        browser = BigscreenBrowser(
+            "https://jlive.jd.com/bigScreen?id=46794566",
+            auth_file="jd_auth.json",
+        )
+        browser.page = page
+        browser.browser_manager = FakeLoggedInBrowserManager(page)
+
+        with patch.object(page, "goto", side_effect=PlaywrightError("net::ERR_ABORTED")):
+            try:
+                result = browser.check_login_status()
+            except PlaywrightError as exc:
+                self.fail("check_login_status leaked Playwright Error: %s" % exc)
+
+        self.assertFalse(result)
 
     def test_start_uses_80_percent_zoom_for_bigscreen_capture(self):
         FakeBrowserManager.instances = []

@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 
@@ -41,7 +42,7 @@ class BigscreenBrowser:
             self._goto_bigscreen()
             sidebar = self.page.locator('[class*="side-bar-index-name"]').filter(has_text="概览")
             self._wait_for_visible(sidebar, "未找到页面元素: 概览")
-        except (PlaywrightTimeoutError, RuntimeError):
+        except (PlaywrightError, RuntimeError):
             return False
         return True
 
