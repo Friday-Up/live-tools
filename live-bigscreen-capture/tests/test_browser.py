@@ -3,6 +3,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
 from bigscreen_capture.browser import BigscreenBrowser
 
 
@@ -11,6 +13,7 @@ class FakeLocator:
         self.page = page
         self.label = label
         self._count = count
+        self.has_text = None
 
     @property
     def first(self):
@@ -20,17 +23,28 @@ class FakeLocator:
         return self._count
 
     def click(self, **kwargs):
+        self.page.actions.append(("click", self.label, self.has_text))
         self.page.clicks.append((self.label, kwargs))
 
     def filter(self, **kwargs):
+        self.has_text = kwargs.get("has_text")
         self.page.filters.append((self.label, kwargs))
         return self
 
     def evaluate(self, script):
         self.page.evaluations.append((self.label, script))
+        if "side-bar-index-selected" in script:
+            return self.has_text in self.page.selected_labels
         if self.page.evaluation_results:
             return self.page.evaluation_results.pop(0)
         return None
+
+    def wait_for(self, **kwargs):
+        key = (self.label, self.has_text)
+        self.page.actions.append(("wait_for", self.label, self.has_text))
+        self.page.locator_waits.append((self.label, self.has_text, kwargs))
+        if key in self.page.wait_failures:
+            raise PlaywrightTimeoutError("locator did not become visible")
 
 
 class FakePage:
@@ -40,6 +54,10 @@ class FakePage:
         self.clicks = []
         self.filters = []
         self.evaluations = []
+        self.actions = []
+        self.locator_waits = []
+        self.wait_failures = set()
+        self.selected_labels = set()
         self.waits = []
         self.screenshots = []
         self.evaluation_results = []
@@ -82,6 +100,14 @@ class FakeBrowserManager:
         return self.page
 
 
+class FakeLoggedInBrowserManager:
+    def __init__(self, page):
+        self.page = page
+
+    def check_login_status(self):
+        return True
+
+
 class BigscreenBrowserTest(unittest.TestCase):
     def test_open_flow_navigates_to_bigscreen_and_clicks_flow_sidebar(self):
         page = FakePage()
@@ -94,7 +120,82 @@ class BigscreenBrowserTest(unittest.TestCase):
         browser.open_flow()
 
         self.assertEqual(page.goto_calls[0][0], "https://jlive.jd.com/bigScreen?id=46794566")
-        self.assertEqual(page.clicks[-1][0], "流量")
+        self.assertEqual(page.clicks[-1][0], '[class*="side-bar-index-name"]')
+        self.assertIn(
+            ('[class*="side-bar-index-name"]', {"has_text": "流量"}),
+            page.filters,
+        )
+
+    def test_open_flow_waits_for_sidebar_visibility_before_clicking(self):
+        page = FakePage()
+        browser = BigscreenBrowser(
+            "https://jlive.jd.com/bigScreen?id=46794566",
+            auth_file="jd_auth.json",
+        )
+        browser.page = page
+
+        browser.open_flow()
+
+        wait_action = ('wait_for', '[class*="side-bar-index-name"]', "流量")
+        click_action = ('click', '[class*="side-bar-index-name"]', "流量")
+        self.assertIn(wait_action, page.actions)
+        self.assertIn(click_action, page.actions)
+        self.assertLess(
+            page.actions.index(wait_action),
+            page.actions.index(click_action),
+        )
+
+    def test_select_flow_metric_waits_for_scoped_metric_before_clicking(self):
+        page = FakePage()
+        browser = BigscreenBrowser(
+            "https://jlive.jd.com/bigScreen?id=46794566",
+            auth_file="jd_auth.json",
+        )
+        browser.page = page
+
+        browser.select_flow_metric("在线人数")
+
+        selector = '[class*="scroll-tab-index-scrollTabItem"]'
+        wait_action = ("wait_for", selector, "在线人数")
+        click_action = ("click", selector, "在线人数")
+        self.assertIn(wait_action, page.actions)
+        self.assertIn(click_action, page.actions)
+        self.assertLess(
+            page.actions.index(wait_action),
+            page.actions.index(click_action),
+        )
+
+    def test_selected_sidebar_is_not_clicked_again(self):
+        page = FakePage()
+        page.url = "https://jlive.jd.com/bigScreen?id=46794566"
+        page.selected_labels.add("概览")
+        browser = BigscreenBrowser(
+            "https://jlive.jd.com/bigScreen?id=46794566",
+            auth_file="jd_auth.json",
+        )
+        browser.page = page
+
+        browser.open_overview()
+
+        self.assertEqual(page.clicks, [])
+
+    def test_check_login_status_is_false_when_bigscreen_never_becomes_ready(self):
+        page = FakePage()
+        sidebar_selector = '[class*="side-bar-index-name"]'
+        page.wait_failures.add((sidebar_selector, "概览"))
+        browser = BigscreenBrowser(
+            "https://jlive.jd.com/bigScreen?id=46794566",
+            auth_file="jd_auth.json",
+        )
+        browser.page = page
+        browser.browser_manager = FakeLoggedInBrowserManager(page)
+
+        self.assertFalse(browser.check_login_status())
+        self.assertEqual(page.goto_calls[-1][0], browser.url)
+        self.assertIn(
+            (sidebar_selector, "概览", {"state": "visible", "timeout": 15000}),
+            page.locator_waits,
+        )
 
     def test_start_uses_80_percent_zoom_for_bigscreen_capture(self):
         FakeBrowserManager.instances = []
@@ -139,6 +240,14 @@ class BigscreenBrowserTest(unittest.TestCase):
             ],
         )
         self.assertEqual(page.evaluations, [(".ant-select-item-option-content", "el => el.click()")])
+        self.assertIn(
+            (".ant-select-selection-item", "全部商品", {"state": "visible", "timeout": 15000}),
+            page.locator_waits,
+        )
+        self.assertIn(
+            (".ant-select-item-option-content", "挂袋商品", {"state": "visible", "timeout": 15000}),
+            page.locator_waits,
+        )
 
     def test_select_user_portrait_uses_user_portrait_dropdown(self):
         page = FakePage()
@@ -188,6 +297,10 @@ class BigscreenBrowserTest(unittest.TestCase):
 
         self.assertEqual(page.clicks, [("thead th", {"force": True})])
         self.assertEqual(page.filters, [("thead th", {"has_text": "成交件数"})])
+        self.assertIn(
+            ("thead th", "成交件数", {"state": "visible", "timeout": 15000}),
+            page.locator_waits,
+        )
 
     def test_sort_product_table_clicks_again_until_descending_is_active(self):
         page = FakePage()

@@ -1,6 +1,8 @@
 import sys
 from pathlib import Path
 
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
 
 PRICE_AUDIT_ROOT = Path(__file__).resolve().parents[2] / "live-sku-price-audit"
 if str(PRICE_AUDIT_ROOT) not in sys.path:
@@ -10,6 +12,8 @@ from utils.browser_manager import BrowserManager  # noqa: E402
 
 
 class BigscreenBrowser:
+    LOCATOR_TIMEOUT_MS = 15000
+
     def __init__(self, url, auth_file, headless=False, log_callback=None):
         self.url = url
         self.auth_file = Path(auth_file)
@@ -31,7 +35,15 @@ class BigscreenBrowser:
     def check_login_status(self):
         if self.browser_manager is None:
             return False
-        return self.browser_manager.check_login_status()
+        if not self.browser_manager.check_login_status():
+            return False
+        try:
+            self._goto_bigscreen()
+            sidebar = self.page.locator('[class*="side-bar-index-name"]').filter(has_text="概览")
+            self._wait_for_visible(sidebar, "未找到页面元素: 概览")
+        except (PlaywrightTimeoutError, RuntimeError):
+            return False
+        return True
 
     def open_login_page(self):
         if self.browser_manager is None:
@@ -67,7 +79,10 @@ class BigscreenBrowser:
         self._wait_stable()
 
     def select_flow_metric(self, label):
-        self._click_text(label)
+        locator = self.page.locator('[class*="scroll-tab-index-scrollTabItem"]').filter(
+            has_text=label
+        )
+        self._click_locator(locator, "未找到页面元素: %s" % label)
         self._wait_stable()
 
     def select_user_portrait(self, label):
@@ -76,12 +91,11 @@ class BigscreenBrowser:
 
     def sort_product_table(self, label):
         header = self.page.locator("thead th").filter(has_text=label)
-        if header.count() < 1:
-            raise RuntimeError("未找到商品分析表头: %s" % label)
+        header = self._wait_for_visible(header, "未找到商品分析表头: %s" % label)
         for _ in range(2):
-            header.first.click(force=True)
+            header.click(force=True)
             self._wait_stable()
-            if self._is_desc_sort_active(header.first) or self._is_visible_column_desc_sorted(label):
+            if self._is_desc_sort_active(header) or self._is_visible_column_desc_sorted(label):
                 return
         self._log("未确认商品分析表头降序状态: %s，继续截图" % label)
 
@@ -98,28 +112,48 @@ class BigscreenBrowser:
         self._wait_stable()
 
     def _click_sidebar(self, label):
-        self._click_text(label)
+        locator = self.page.locator('[class*="side-bar-index-name"]').filter(has_text=label)
+        target = self._wait_for_visible(locator, "未找到页面元素: %s" % label)
+        if not self._is_sidebar_selected(target):
+            target.click(force=True)
         self._wait_stable()
 
     def _click_text(self, label):
         locator = self.page.get_by_text(label, exact=True)
-        if locator.count() < 1:
-            raise RuntimeError("未找到页面元素: %s" % label)
-        locator.first.click(force=True)
+        self._click_locator(locator, "未找到页面元素: %s" % label)
+
+    def _click_locator(self, locator, error_message):
+        self._wait_for_visible(locator, error_message).click(force=True)
+
+    def _wait_for_visible(self, locator, error_message):
+        target = locator.first
+        try:
+            target.wait_for(state="visible", timeout=self.LOCATOR_TIMEOUT_MS)
+        except PlaywrightTimeoutError:
+            raise RuntimeError(error_message)
+        return target
+
+    @staticmethod
+    def _is_sidebar_selected(locator):
+        return bool(
+            locator.evaluate(
+                "el => Boolean(el.closest('[class*=\"side-bar-index-selected\"]'))"
+            )
+        )
 
     def _select_ant_dropdown(self, current_text, option_text):
         dropdown = self.page.locator(".ant-select-selection-item").filter(has_text=current_text)
-        if dropdown.count() < 1:
+        try:
+            dropdown = self._wait_for_visible(dropdown, "未找到下拉框: %s" % current_text)
+        except RuntimeError:
             dropdown = self.page.locator(".ant-select-selection-item").filter(has_text=option_text)
-        if dropdown.count() < 1:
-            raise RuntimeError("未找到下拉框: %s" % current_text)
-        dropdown.first.click(force=True)
+            dropdown = self._wait_for_visible(dropdown, "未找到下拉框: %s" % current_text)
+        dropdown.click(force=True)
         self.page.wait_for_timeout(500)
 
         option = self.page.locator(".ant-select-item-option-content").filter(has_text=option_text)
-        if option.count() < 1:
-            raise RuntimeError("未找到下拉选项: %s" % option_text)
-        option.first.evaluate("el => el.click()")
+        option = self._wait_for_visible(option, "未找到下拉选项: %s" % option_text)
+        option.evaluate("el => el.click()")
 
     def _is_desc_sort_active(self, header):
         return bool(
