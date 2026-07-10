@@ -71,6 +71,12 @@ class BigscreenBrowser:
         self._goto_bigscreen()
         self._click_sidebar("商品")
 
+    def get_room_name(self):
+        self._goto_bigscreen()
+        locator = self.page.locator('[class*="header-index-currentUserName"]')
+        target = self._wait_for_visible(locator, "未找到直播间账号名称")
+        return target.inner_text().strip()
+
     def select_overview_live_tab(self, label):
         self._click_text(label)
         self._wait_stable()

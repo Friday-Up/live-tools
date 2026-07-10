@@ -15,6 +15,7 @@ from .url_parser import parse_bigscreen_url
 @dataclass
 class CaptureOnceResult:
     room_id: str
+    room_name: str
     output_dir: Path
     records: list
     manifest_file: Path
@@ -80,6 +81,8 @@ def capture_once(
                 browser.save_auth_state()
                 log("蓝屏登录状态已保存")
 
+        room_name = browser.get_room_name()
+
         for step in CAPTURE_STEPS:
             filename = screenshot_filename(
                 parsed.room_id,
@@ -143,7 +146,14 @@ def capture_once(
     manifest_file = write_manifest_workbook(output_dir, records)
     zip_file = write_zip_archive(output_dir, parsed.room_id, captured_at)
     log("截图清单和 ZIP 已生成，用时 %.1fs" % (monotonic() - archive_started_at))
-    return CaptureOnceResult(parsed.room_id, output_dir, records, manifest_file, zip_file)
+    return CaptureOnceResult(
+        parsed.room_id,
+        room_name,
+        output_dir,
+        records,
+        manifest_file,
+        zip_file,
+    )
 
 
 def write_capture_bundle(output_dir, room_id, captured_at, records):

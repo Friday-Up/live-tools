@@ -47,6 +47,9 @@ class FakeLocator:
         if key in self.page.wait_failures:
             raise PlaywrightTimeoutError("locator did not become visible")
 
+    def inner_text(self):
+        return self.page.locator_texts.get(self.label, "")
+
 
 class FakePage:
     def __init__(self):
@@ -64,6 +67,7 @@ class FakePage:
         self.evaluation_results = []
         self.page_evaluations = []
         self.page_evaluation_results = []
+        self.locator_texts = {}
 
     def goto(self, url, **kwargs):
         self.goto_calls.append((url, kwargs))
@@ -214,6 +218,25 @@ class BigscreenBrowserTest(unittest.TestCase):
                 self.fail("check_login_status leaked Playwright Error: %s" % exc)
 
         self.assertFalse(result)
+
+    def test_get_room_name_waits_for_account_node_and_returns_visible_text(self):
+        page = FakePage()
+        selector = '[class*="header-index-currentUserName"]'
+        page.locator_texts[selector] = " 京东青春采销 "
+        browser = BigscreenBrowser(
+            "https://jlive.jd.com/bigScreen?id=46794566",
+            auth_file="jd_auth.json",
+        )
+        browser.page = page
+
+        room_name = browser.get_room_name()
+
+        self.assertEqual(room_name, "京东青春采销")
+        self.assertEqual(page.goto_calls[-1][0], browser.url)
+        self.assertIn(
+            (selector, None, {"state": "visible", "timeout": 15000}),
+            page.locator_waits,
+        )
 
     def test_start_uses_80_percent_zoom_for_bigscreen_capture(self):
         FakeBrowserManager.instances = []

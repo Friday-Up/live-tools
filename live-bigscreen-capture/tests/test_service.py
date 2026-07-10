@@ -54,6 +54,10 @@ class FakeBrowser:
         self.calls.append("check_login_status")
         return self.logged_in
 
+    def get_room_name(self):
+        self.calls.append("get_room_name")
+        return "京东青春采销"
+
     def open_login_page(self):
         self.calls.append("open_login_page")
 
@@ -84,6 +88,24 @@ class CaptureServiceTest(unittest.TestCase):
             self.assertEqual(len(list(output_dir.rglob("*.png"))), 15)
             self.assertTrue(result.manifest_file.exists())
             self.assertTrue(result.zip_file.exists())
+
+    def test_capture_once_returns_live_room_account_name(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir)
+
+            result = capture_once(
+                url="https://jlive.jd.com/bigScreen?id=46794566",
+                output_dir=output_dir,
+                planned_slot="19:00",
+                captured_at=datetime(2026, 7, 8, 19, 0, 0),
+                auth_file=output_dir / "jd_auth.json",
+                browser_factory=FakeBrowser,
+            )
+
+            self.assertEqual(result.room_name, "京东青春采销")
+            calls = FakeBrowser.instances[0].calls
+            self.assertLess(calls.index("check_login_status"), calls.index("get_room_name"))
+            self.assertLess(calls.index("get_room_name"), calls.index(("close", True)))
 
     def test_capture_once_uses_headless_mode_unless_show_browser_requested(self):
         with tempfile.TemporaryDirectory() as tmpdir:
