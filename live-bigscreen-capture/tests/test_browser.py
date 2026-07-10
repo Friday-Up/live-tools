@@ -34,6 +34,10 @@ class FakeLocator:
 
     def evaluate(self, script):
         self.page.evaluations.append((self.label, script))
+        if script == "el => el.click()":
+            self.page.actions.append(("dom_click", self.label, self.has_text))
+            self.page.dom_clicks.append((self.label, self.has_text))
+            return None
         if "side-bar-index-selected" in script:
             return self.has_text in self.page.selected_labels
         if self.page.evaluation_results:
@@ -59,6 +63,7 @@ class FakePage:
         self.filters = []
         self.evaluations = []
         self.actions = []
+        self.dom_clicks = []
         self.locator_waits = []
         self.wait_failures = set()
         self.selected_labels = set()
@@ -125,7 +130,11 @@ class BigscreenBrowserTest(unittest.TestCase):
         browser.open_flow()
 
         self.assertEqual(page.goto_calls[0][0], "https://jlive.jd.com/bigScreen?id=46794566")
-        self.assertEqual(page.clicks[-1][0], '[class*="side-bar-index-name"]')
+        self.assertEqual(
+            page.dom_clicks,
+            [('[class*="side-bar-index-name"]', "流量")],
+        )
+        self.assertEqual(page.clicks, [])
         self.assertIn(
             ('[class*="side-bar-index-name"]', {"has_text": "流量"}),
             page.filters,
@@ -142,7 +151,7 @@ class BigscreenBrowserTest(unittest.TestCase):
         browser.open_flow()
 
         wait_action = ('wait_for', '[class*="side-bar-index-name"]', "流量")
-        click_action = ('click', '[class*="side-bar-index-name"]', "流量")
+        click_action = ('dom_click', '[class*="side-bar-index-name"]', "流量")
         self.assertIn(wait_action, page.actions)
         self.assertIn(click_action, page.actions)
         self.assertLess(
@@ -162,13 +171,26 @@ class BigscreenBrowserTest(unittest.TestCase):
 
         selector = '[class*="scroll-tab-index-scrollTabItem"]'
         wait_action = ("wait_for", selector, "在线人数")
-        click_action = ("click", selector, "在线人数")
+        click_action = ("dom_click", selector, "在线人数")
         self.assertIn(wait_action, page.actions)
         self.assertIn(click_action, page.actions)
         self.assertLess(
             page.actions.index(wait_action),
             page.actions.index(click_action),
         )
+
+    def test_select_overview_live_tab_uses_dom_click(self):
+        page = FakePage()
+        browser = BigscreenBrowser(
+            "https://jlive.jd.com/bigScreen?id=46794566",
+            auth_file="jd_auth.json",
+        )
+        browser.page = page
+
+        browser.select_overview_live_tab("成交")
+
+        self.assertEqual(page.dom_clicks, [("成交", None)])
+        self.assertEqual(page.clicks, [])
 
     def test_selected_sidebar_is_not_clicked_again(self):
         page = FakePage()
@@ -183,6 +205,7 @@ class BigscreenBrowserTest(unittest.TestCase):
         browser.open_overview()
 
         self.assertEqual(page.clicks, [])
+        self.assertEqual(page.dom_clicks, [])
 
     def test_check_login_status_is_false_when_bigscreen_never_becomes_ready(self):
         page = FakePage()
@@ -272,7 +295,7 @@ class BigscreenBrowserTest(unittest.TestCase):
 
         browser.select_overview_product_scope("挂袋商品")
 
-        self.assertEqual(page.clicks, [(".ant-select-selection-item", {"force": True})])
+        self.assertEqual(page.clicks, [])
         self.assertEqual(
             page.filters,
             [
@@ -280,7 +303,13 @@ class BigscreenBrowserTest(unittest.TestCase):
                 (".ant-select-item-option-content", {"has_text": "挂袋商品"}),
             ],
         )
-        self.assertEqual(page.evaluations, [(".ant-select-item-option-content", "el => el.click()")])
+        self.assertEqual(
+            page.dom_clicks,
+            [
+                (".ant-select-selection-item", "全部商品"),
+                (".ant-select-item-option-content", "挂袋商品"),
+            ],
+        )
         self.assertIn(
             (".ant-select-selection-item", "全部商品", {"state": "visible", "timeout": 15000}),
             page.locator_waits,
@@ -300,7 +329,7 @@ class BigscreenBrowserTest(unittest.TestCase):
 
         browser.select_user_portrait("成交用户")
 
-        self.assertEqual(page.clicks, [(".ant-select-selection-item", {"force": True})])
+        self.assertEqual(page.clicks, [])
         self.assertEqual(
             page.filters,
             [
@@ -308,7 +337,13 @@ class BigscreenBrowserTest(unittest.TestCase):
                 (".ant-select-item-option-content", {"has_text": "成交用户"}),
             ],
         )
-        self.assertEqual(page.evaluations, [(".ant-select-item-option-content", "el => el.click()")])
+        self.assertEqual(
+            page.dom_clicks,
+            [
+                (".ant-select-selection-item", "访问用户"),
+                (".ant-select-item-option-content", "成交用户"),
+            ],
+        )
 
     def test_screenshot_uses_visible_viewport_not_full_page(self):
         page = FakePage()
@@ -336,7 +371,8 @@ class BigscreenBrowserTest(unittest.TestCase):
 
         browser.sort_product_table("成交件数")
 
-        self.assertEqual(page.clicks, [("thead th", {"force": True})])
+        self.assertEqual(page.clicks, [])
+        self.assertEqual(page.dom_clicks, [("thead th", "成交件数")])
         self.assertEqual(page.filters, [("thead th", {"has_text": "成交件数"})])
         self.assertIn(
             ("thead th", "成交件数", {"state": "visible", "timeout": 15000}),
@@ -355,12 +391,13 @@ class BigscreenBrowserTest(unittest.TestCase):
         browser.sort_product_table("成交金额")
 
         self.assertEqual(
-            page.clicks,
+            page.dom_clicks,
             [
-                ("thead th", {"force": True}),
-                ("thead th", {"force": True}),
+                ("thead th", "成交金额"),
+                ("thead th", "成交金额"),
             ],
         )
+        self.assertEqual(page.clicks, [])
 
     def test_sort_product_table_stops_after_one_click_when_visible_values_are_descending(self):
         page = FakePage()
@@ -376,7 +413,8 @@ class BigscreenBrowserTest(unittest.TestCase):
 
         browser.sort_product_table("成交件数")
 
-        self.assertEqual(page.clicks, [("thead th", {"force": True})])
+        self.assertEqual(page.clicks, [])
+        self.assertEqual(page.dom_clicks, [("thead th", "成交件数")])
         self.assertEqual(page.page_evaluations[0][1], "成交件数")
         self.assertEqual(logs, [])
 
@@ -394,12 +432,13 @@ class BigscreenBrowserTest(unittest.TestCase):
         browser.sort_product_table("成交件数")
 
         self.assertEqual(
-            page.clicks,
+            page.dom_clicks,
             [
-                ("thead th", {"force": True}),
-                ("thead th", {"force": True}),
+                ("thead th", "成交件数"),
+                ("thead th", "成交件数"),
             ],
         )
+        self.assertEqual(page.clicks, [])
         self.assertEqual(logs, ["未确认商品分析表头降序状态: 成交件数，继续截图"])
 
 

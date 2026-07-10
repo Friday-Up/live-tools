@@ -100,7 +100,7 @@ class BigscreenBrowser:
         header = self.page.locator("thead th").filter(has_text=label)
         header = self._wait_for_visible(header, "未找到商品分析表头: %s" % label)
         for _ in range(2):
-            header.click(force=True)
+            self._dom_click(header)
             self._wait_stable()
             if self._is_desc_sort_active(header) or self._is_visible_column_desc_sorted(label):
                 return
@@ -122,7 +122,7 @@ class BigscreenBrowser:
         locator = self.page.locator('[class*="side-bar-index-name"]').filter(has_text=label)
         target = self._wait_for_visible(locator, "未找到页面元素: %s" % label)
         if not self._is_sidebar_selected(target):
-            target.click(force=True)
+            self._dom_click(target)
         self._wait_stable()
 
     def _click_text(self, label):
@@ -130,7 +130,11 @@ class BigscreenBrowser:
         self._click_locator(locator, "未找到页面元素: %s" % label)
 
     def _click_locator(self, locator, error_message):
-        self._wait_for_visible(locator, error_message).click(force=True)
+        self._dom_click(self._wait_for_visible(locator, error_message))
+
+    @staticmethod
+    def _dom_click(locator):
+        locator.evaluate("el => el.click()")
 
     def _wait_for_visible(self, locator, error_message):
         target = locator.first
@@ -155,12 +159,12 @@ class BigscreenBrowser:
         except RuntimeError:
             dropdown = self.page.locator(".ant-select-selection-item").filter(has_text=option_text)
             dropdown = self._wait_for_visible(dropdown, "未找到下拉框: %s" % current_text)
-        dropdown.click(force=True)
+        self._dom_click(dropdown)
         self.page.wait_for_timeout(500)
 
         option = self.page.locator(".ant-select-item-option-content").filter(has_text=option_text)
         option = self._wait_for_visible(option, "未找到下拉选项: %s" % option_text)
-        option.evaluate("el => el.click()")
+        self._dom_click(option)
 
     def _is_desc_sort_active(self, header):
         return bool(
