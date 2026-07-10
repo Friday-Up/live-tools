@@ -394,6 +394,7 @@ class PromotionBindingRoutesTest(unittest.TestCase):
     def test_bigscreen_capture_capture_now_starts_async_task_and_downloads_zip(self):
         class FakeCaptureResult:
             room_id = "46794566"
+            room_name = "京东青春采销"
             success_count = 15
             fail_count = 0
             stopped_count = 0
@@ -433,6 +434,7 @@ class PromotionBindingRoutesTest(unittest.TestCase):
         status_payload = client.get("/api/bigscreen-capture/status").get_json()
         self.assertFalse(status_payload["running"])
         self.assertEqual(status_payload["success_count"], 15)
+        self.assertEqual(status_payload["room_name"], "京东青春采销")
         download_response = client.get(f"/api/bigscreen-capture/download/{payload['task_id']}")
         self.assertEqual(download_response.status_code, 200)
         self.assertEqual(download_response.data, b"zip")
@@ -569,6 +571,7 @@ class PromotionBindingRoutesTest(unittest.TestCase):
         self.assertFalse(payload["running"])
         self.assertEqual(payload["total"], 0)
         self.assertEqual(payload["logs"], [])
+        self.assertEqual(payload["room_name"], "")
 
     def test_bigscreen_capture_stop_sets_stopping(self):
         app = create_app(base_dir=Path(tempfile.mkdtemp()))

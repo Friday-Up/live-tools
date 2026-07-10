@@ -307,8 +307,14 @@ def create_app(
         zip_path = _resolve_bigscreen_result_zip(app, task_id)
         if not zip_path:
             return _json_error("结果文件不存在", status_code=404)
+        result_metadata = app.config["BIGSCREEN_RESULTS"].get(task_id) or {}
         with bigscreen_status_lock:
-            room_id = bigscreen_status.get("room_id")
+            if result_metadata:
+                room_id = result_metadata.get("room_id") or bigscreen_status.get("room_id")
+                room_name = result_metadata.get("room_name", "")
+            else:
+                room_id = bigscreen_status.get("room_id")
+                room_name = bigscreen_status.get("room_name", "")
         report_usage(
             "bigscreen_capture",
             "download",
@@ -316,6 +322,7 @@ def create_app(
             status="success",
             extra={
                 "room_id": room_id,
+                "room_name": room_name,
                 "kind": "zip",
                 "recovered": task_id not in app.config["BIGSCREEN_RESULTS"],
             },
@@ -1617,6 +1624,7 @@ def create_app(
     def run_bigscreen_capture_task(task_id: str, url: str, planned_slots, show_browser: bool = False):
         all_records = []
         bundle_room_id = ""
+        bundle_room_name = ""
         bundle_started_at = planned_slots[0].run_at if planned_slots else datetime.now()
         started_monotonic = time.monotonic()
 
@@ -1630,7 +1638,11 @@ def create_app(
                 bundle_started_at,
                 all_records,
             )
-            app.config["BIGSCREEN_RESULTS"][task_id] = {"zip": bundle_zip}
+            app.config["BIGSCREEN_RESULTS"][task_id] = {
+                "zip": bundle_zip,
+                "room_id": bundle_room_id or parse_bigscreen_url(url).room_id,
+                "room_name": bundle_room_name,
+            }
             with bigscreen_status_lock:
                 bigscreen_status["result_file"] = str(bundle_zip)
             add_bigscreen_log(message)
@@ -1670,11 +1682,14 @@ def create_app(
                 )
                 all_records.extend(result.records)
                 bundle_room_id = result.room_id
+                if result.room_name:
+                    bundle_room_name = result.room_name
                 with bigscreen_status_lock:
                     bigscreen_status["current"] += 1
                     bigscreen_status["success_count"] += result.success_count
                     bigscreen_status["fail_count"] += result.fail_count
                     bigscreen_status["stopped_count"] += result.stopped_count
+                    bigscreen_status["room_name"] = bundle_room_name
                 if result.stopped_count:
                     add_bigscreen_log(
                         f"{slot.label} 截图已停止，成功 {result.success_count} 项，失败 {result.fail_count} 项，停止 {result.stopped_count} 项"
@@ -1712,6 +1727,7 @@ def create_app(
                 room_id = bundle_room_id or snapshot.get("room_id") or parse_bigscreen_url(url).room_id
             except Exception:
                 room_id = snapshot.get("room_id")
+            room_name = bundle_room_name or snapshot.get("room_name", "")
             if bigscreen_stop_flag.is_set() or stopped_count > 0:
                 final_status = "stopped"
             elif snapshot.get("error"):
@@ -1731,6 +1747,7 @@ def create_app(
                 status=final_status,
                 extra={
                     "room_id": room_id,
+                    "room_name": room_name,
                     "planned_slots": [slot.label for slot in planned_slots],
                     "stopped_count": stopped_count,
                     "show_browser": show_browser,
@@ -1847,6 +1864,7 @@ def _initial_bigscreen_status():
         "stopping": False,
         "task_id": "",
         "room_id": "",
+        "room_name": "",
         "planned_slots": [],
         "missed_slots": [],
     }

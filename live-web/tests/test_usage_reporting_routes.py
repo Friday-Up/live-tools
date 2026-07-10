@@ -47,9 +47,10 @@ class UsageReportingRoutesTest(unittest.TestCase):
         self.assertEqual(finish_event["fail_count"], 0)
         self.assertEqual(finish_event["extra"]["coupon_key_count"], 1)
 
-    def test_bigscreen_capture_reports_real_room_id_on_finish(self):
+    def test_bigscreen_capture_reports_room_identity_on_finish_and_download(self):
         class FakeCaptureResult:
             room_id = "46794566"
+            room_name = "京东青春采销"
             success_count = 15
             fail_count = 0
             stopped_count = 0
@@ -82,9 +83,14 @@ class UsageReportingRoutesTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
+        download_response = client.get(
+            f"/api/bigscreen-capture/download/{payload['task_id']}"
+        )
+        self.assertEqual(download_response.status_code, 200)
+        download_response.close()
         self.assertEqual(
             [event["action"] for event in reporter.events],
-            ["task_start", "task_finish"],
+            ["task_start", "task_finish", "download"],
         )
         finish_event = reporter.events[1]
         self.assertEqual(finish_event["tool_code"], "bigscreen_capture")
@@ -94,6 +100,10 @@ class UsageReportingRoutesTest(unittest.TestCase):
         self.assertEqual(finish_event["success_count"], 15)
         self.assertEqual(finish_event["fail_count"], 0)
         self.assertEqual(finish_event["extra"]["room_id"], "46794566")
+        self.assertEqual(finish_event["extra"]["room_name"], "京东青春采销")
+        download_event = reporter.events[2]
+        self.assertEqual(download_event["extra"]["room_id"], "46794566")
+        self.assertEqual(download_event["extra"]["room_name"], "京东青春采销")
 
     def _business_workbook_bytes(self):
         wb = Workbook()
