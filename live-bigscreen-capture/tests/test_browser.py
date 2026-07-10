@@ -29,6 +29,10 @@ class FakeLocator:
         self.page.actions.append(("click", self.label, self.has_text))
         self.page.clicks.append((self.label, kwargs))
 
+    def dispatch_event(self, event_name):
+        self.page.actions.append(("dispatch_event", self.label, self.has_text))
+        self.page.dispatch_events.append((self.label, self.has_text, event_name))
+
     def filter(self, **kwargs):
         self.has_text = kwargs.get("has_text")
         self.page.filters.append((self.label, kwargs))
@@ -47,7 +51,10 @@ class FakeLocator:
                     self.page.selected_labels = {self.has_text}
                 elif "scroll-tab-index-scrollTabItem" in self.label:
                     self.page.selected_controls.add(self.has_text)
-                elif self.label == ".ant-select-item-option-content":
+                elif self.label in (
+                    ".ant-select-item-option",
+                    ".ant-select-item-option-content",
+                ):
                     self.page.selected_options.add(self.has_text)
                 else:
                     self.page.selected_controls.add(self.has_text or self.label)
@@ -80,6 +87,7 @@ class FakePage:
         self.evaluations = []
         self.actions = []
         self.dom_clicks = []
+        self.dispatch_events = []
         self.dom_click_results = {}
         self.locator_waits = []
         self.wait_failures = set()
@@ -318,7 +326,7 @@ class BigscreenBrowserTest(unittest.TestCase):
 
     def test_dropdown_option_dom_click_retries_until_value_changes(self):
         page = FakePage()
-        option_key = (".ant-select-item-option-content", "挂袋商品")
+        option_key = (".ant-select-item-option", "挂袋商品")
         page.dom_click_results[option_key] = [False, True]
         browser = BigscreenBrowser(
             "https://jlive.jd.com/bigScreen?id=46794566",
@@ -331,6 +339,24 @@ class BigscreenBrowserTest(unittest.TestCase):
 
         self.assertEqual(page.dom_clicks.count(option_key), 2)
         self.assertIn("挂袋商品", page.selected_options)
+
+    def test_dropdown_dispatches_mousedown_to_selector_before_waiting_for_option(self):
+        page = FakePage()
+        browser = BigscreenBrowser(
+            "https://jlive.jd.com/bigScreen?id=46794566",
+            auth_file="jd_auth.json",
+        )
+        browser.page = page
+
+        browser.select_overview_product_scope("挂袋商品")
+
+        self.assertEqual(
+            page.dispatch_events,
+            [(".ant-select-selector", "全部商品", "mousedown")],
+        )
+        dispatch_action = ("dispatch_event", ".ant-select-selector", "全部商品")
+        option_wait = ("wait_for", ".ant-select-item-option", "挂袋商品")
+        self.assertLess(page.actions.index(dispatch_action), page.actions.index(option_wait))
 
     def test_check_login_status_is_false_when_bigscreen_never_becomes_ready(self):
         page = FakePage()
@@ -425,23 +451,22 @@ class BigscreenBrowserTest(unittest.TestCase):
             page.filters,
             [
                 (".ant-select-selection-item", {"has_text": "挂袋商品"}),
-                (".ant-select-selection-item", {"has_text": "全部商品"}),
-                (".ant-select-item-option-content", {"has_text": "挂袋商品"}),
+                (".ant-select-selector", {"has_text": "全部商品"}),
+                (".ant-select-item-option", {"has_text": "挂袋商品"}),
             ],
         )
         self.assertEqual(
             page.dom_clicks,
             [
-                (".ant-select-selection-item", "全部商品"),
-                (".ant-select-item-option-content", "挂袋商品"),
+                (".ant-select-item-option", "挂袋商品"),
             ],
         )
         self.assertIn(
-            (".ant-select-selection-item", "全部商品", {"state": "visible", "timeout": 15000}),
+            (".ant-select-selector", "全部商品", {"state": "visible", "timeout": 15000}),
             page.locator_waits,
         )
         self.assertIn(
-            (".ant-select-item-option-content", "挂袋商品", {"state": "visible", "timeout": 3000}),
+            (".ant-select-item-option", "挂袋商品", {"state": "visible", "timeout": 3000}),
             page.locator_waits,
         )
 
@@ -460,15 +485,14 @@ class BigscreenBrowserTest(unittest.TestCase):
             page.filters,
             [
                 (".ant-select-selection-item", {"has_text": "成交用户"}),
-                (".ant-select-selection-item", {"has_text": "访问用户"}),
-                (".ant-select-item-option-content", {"has_text": "成交用户"}),
+                (".ant-select-selector", {"has_text": "访问用户"}),
+                (".ant-select-item-option", {"has_text": "成交用户"}),
             ],
         )
         self.assertEqual(
             page.dom_clicks,
             [
-                (".ant-select-selection-item", "访问用户"),
-                (".ant-select-item-option-content", "成交用户"),
+                (".ant-select-item-option", "成交用户"),
             ],
         )
 

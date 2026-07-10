@@ -154,6 +154,10 @@ class BigscreenBrowser:
     def _dom_click(locator):
         locator.evaluate("el => el.click()")
 
+    @staticmethod
+    def _dom_mousedown(locator):
+        locator.dispatch_event("mousedown")
+
     def _dom_click_and_verify(self, locator, is_selected, error_message):
         if self._condition_is_met(is_selected):
             return
@@ -233,20 +237,20 @@ class BigscreenBrowser:
         if selected.count() > 0:
             return
 
-        dropdown = self.page.locator(".ant-select-selection-item").filter(has_text=current_text)
+        dropdown = self.page.locator(".ant-select-selector").filter(has_text=current_text)
         try:
             dropdown = self._wait_for_visible(dropdown, "未找到下拉框: %s" % current_text)
         except RuntimeError:
-            dropdown = self.page.locator(".ant-select-selection-item").filter(has_text=option_text)
+            dropdown = self.page.locator(".ant-select-selector").filter(has_text=option_text)
             dropdown = self._wait_for_visible(
                 dropdown,
                 "未找到下拉框: %s" % current_text,
                 timeout=self.ACTION_VERIFY_TIMEOUT_MS,
             )
 
-        option = self.page.locator(".ant-select-item-option-content").filter(has_text=option_text)
+        option = self.page.locator(".ant-select-item-option").filter(has_text=option_text)
         for attempt in range(2):
-            self._dom_click(dropdown)
+            self._dom_mousedown(dropdown)
             self.page.wait_for_timeout(500)
             try:
                 option = self._wait_for_visible(
