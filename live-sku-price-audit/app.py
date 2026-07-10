@@ -67,6 +67,22 @@ if not os.path.exists(template_dir):
 
 app = Flask(__name__, template_folder=template_dir, static_folder=static_dir)
 
+
+def remove_file_with_retries(file_path, attempts=5, delay_seconds=0.2):
+    last_error = None
+    for attempt in range(attempts):
+        try:
+            os.remove(file_path)
+            return True
+        except FileNotFoundError:
+            return False
+        except OSError as exc:
+            last_error = exc
+            if attempt == attempts - 1:
+                break
+            time.sleep(delay_seconds)
+    raise last_error
+
 # 全局状态 - 使用锁保护
 status_lock = threading.Lock()
 audit_status = {
@@ -542,7 +558,7 @@ def run_audit_task(input_file, threshold_price, show_browser=False, cleanup_inpu
         if cleanup_input:
             try:
                 if os.path.exists(input_file):
-                    os.remove(input_file)
+                    remove_file_with_retries(input_file)
                     add_log(f'🧹 已清理临时输入文件: {os.path.basename(input_file)}')
             except Exception as e:
                 add_log(f'⚠️ 清理临时输入文件失败: {e}')

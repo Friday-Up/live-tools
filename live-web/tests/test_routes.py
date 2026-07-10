@@ -13,7 +13,14 @@ from unittest.mock import patch
 
 import app as web_app
 
-from app import create_app, resolve_live_dir, resolve_web_root, _format_price_diagnostics, parse_sku_input
+from app import (
+    create_app,
+    resolve_live_dir,
+    resolve_web_root,
+    _format_price_diagnostics,
+    _unlink_with_retries,
+    parse_sku_input,
+)
 
 
 class PromotionBindingRoutesTest(unittest.TestCase):
@@ -678,6 +685,17 @@ class PromotionBindingRoutesTest(unittest.TestCase):
         source = Path("app.py").read_text(encoding="utf-8")
         self.assertIn("cleanup_input", source)
         self.assertIn('kwargs={"cleanup_input": True}', source)
+        self.assertIn("_unlink_with_retries(input_file)", source)
+
+    def test_unlink_with_retries_handles_transient_windows_file_lock(self):
+        path = Path("locked.xlsx")
+
+        with patch.object(Path, "unlink", side_effect=[PermissionError("busy"), None]) as unlink, \
+                patch("app.time.sleep") as sleep:
+            self.assertTrue(_unlink_with_retries(path, attempts=2, delay_seconds=0.01))
+
+        self.assertEqual(unlink.call_count, 2)
+        sleep.assert_called_once_with(0.01)
 
     def _business_workbook_bytes(self):
         wb = Workbook()

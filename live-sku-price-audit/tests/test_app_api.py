@@ -171,6 +171,8 @@ class AppApiTests(unittest.TestCase):
         app_source = Path("app.py").read_text(encoding="utf-8")
         self.assertIn("cleanup_input", app_source)
         self.assertIn("kwargs={'cleanup_input': True}", app_source)
+        self.assertIn("def remove_file_with_retries", app_source)
+        self.assertIn("remove_file_with_retries(input_file)", app_source)
 
 
 if __name__ == "__main__":

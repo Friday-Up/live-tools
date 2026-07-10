@@ -1334,7 +1334,7 @@ def create_app(
             if cleanup_input:
                 try:
                     if input_file.exists():
-                        input_file.unlink()
+                        _unlink_with_retries(input_file)
                         add_price_log(f"已清理临时输入文件: {input_file.name}")
                 except Exception as exc:
                     add_price_log(f"清理临时输入文件失败: {exc}")
@@ -1775,6 +1775,23 @@ def _format_price_diagnostics(diagnostics) -> str:
         f"dom={dom_count}/"
         f"selected={source_counts.get('selected-dom', 0)}"
     )
+
+
+def _unlink_with_retries(path: Path, attempts: int = 5, delay_seconds: float = 0.2):
+    last_error = None
+    path = Path(path)
+    for attempt in range(attempts):
+        try:
+            path.unlink()
+            return True
+        except FileNotFoundError:
+            return False
+        except OSError as exc:
+            last_error = exc
+            if attempt == attempts - 1:
+                break
+            time.sleep(delay_seconds)
+    raise last_error
 
 
 def _initial_price_status():

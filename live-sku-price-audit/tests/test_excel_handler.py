@@ -1,6 +1,8 @@
 import tempfile
 import unittest
+from collections import defaultdict
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from openpyxl import Workbook
 
@@ -20,6 +22,39 @@ def make_workbook(headers, rows):
 
 
 class ExcelHandlerTests(unittest.TestCase):
+    def test_read_sku_list_closes_workbook_after_reading(self):
+        workbook = MagicMock()
+        worksheet = MagicMock()
+        workbook.active = worksheet
+        worksheet.__getitem__.return_value = [MagicMock(value="商品SKU")]
+        worksheet.iter_rows.return_value = [("100264886683",)]
+
+        with patch("utils.excel_handler.load_workbook", return_value=workbook):
+            self.assertEqual(read_sku_list("input.xlsx", "商品SKU"), [(2, "100264886683")])
+
+        workbook.close.assert_called_once()
+
+    def test_write_results_closes_workbook_after_saving(self):
+        workbook = MagicMock()
+        worksheet = MagicMock()
+        workbook.active = worksheet
+        worksheet.__getitem__.return_value = [MagicMock(value="商品SKU")]
+        worksheet.max_column = 1
+        worksheet.cell.return_value.value = None
+        worksheet.column_dimensions = defaultdict(MagicMock)
+        worksheet.row_dimensions = defaultdict(MagicMock)
+
+        with patch("utils.excel_handler.load_workbook", return_value=workbook):
+            write_results(
+                file_path="input.xlsx",
+                results=[],
+                threshold_price=6,
+                output_dir=tempfile.mkdtemp(),
+            )
+
+        workbook.save.assert_called_once()
+        workbook.close.assert_called_once()
+
     def test_reads_required_sku_header_with_suffix(self):
         path = make_workbook(
             ["提交时间（自动）", "商品SKU（必填）", "提交者（自动）"],
