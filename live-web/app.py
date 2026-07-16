@@ -49,6 +49,7 @@ PROMOTION_BINDING_ROOT = LIVE_DIR / "live-promotion-binding"
 PRICE_AUDIT_ROOT = LIVE_DIR / "live-sku-price-audit"
 ROOM_CREATOR_ROOT = LIVE_DIR / "live-room-creator"
 BIGSCREEN_CAPTURE_ROOT = LIVE_DIR / "live-bigscreen-capture"
+PRODUCT_SELECTION_ROOT = LIVE_DIR / "product-selection-agent"
 if str(PROMOTION_BINDING_ROOT) not in sys.path:
     sys.path.insert(0, str(PROMOTION_BINDING_ROOT))
 if str(PRICE_AUDIT_ROOT) not in sys.path:
@@ -57,6 +58,8 @@ if str(ROOM_CREATOR_ROOT) not in sys.path:
     sys.path.insert(0, str(ROOM_CREATOR_ROOT))
 if str(BIGSCREEN_CAPTURE_ROOT) not in sys.path:
     sys.path.insert(0, str(BIGSCREEN_CAPTURE_ROOT))
+if PRODUCT_SELECTION_ROOT.exists() and str(PRODUCT_SELECTION_ROOT) not in sys.path:
+    sys.path.insert(0, str(PRODUCT_SELECTION_ROOT))
 
 
 # fmt: off
@@ -71,6 +74,9 @@ from bigscreen_capture.service import (
     write_capture_bundle as write_bigscreen_capture_bundle,
 )
 from bigscreen_capture.url_parser import BigscreenUrlError, parse_bigscreen_url
+from product_selection_agent.runtime import RunContext as ProductSelectionRunContext
+from product_selection_agent.runtime import SelectionCancelled
+from product_selection_agent.service import execute_selection as execute_product_selection
 # fmt: on
 RUNTIME_RETENTION_DAYS = 2
 
@@ -134,6 +140,7 @@ def create_app(
     room_input_dir = runtime_dir / "input" / "room-creator"
     room_output_dir = runtime_dir / "output" / "room-creator"
     bigscreen_output_dir = runtime_dir / "output" / "bigscreen-capture"
+    product_selection_output_dir = runtime_dir / "output" / "product-selection"
     template_file = (
         PROMOTION_BINDING_ROOT / "assets" / "商品上传模版（2026切片版）.xlsx"
     )
@@ -147,6 +154,7 @@ def create_app(
     room_input_dir.mkdir(parents=True, exist_ok=True)
     room_output_dir.mkdir(parents=True, exist_ok=True)
     bigscreen_output_dir.mkdir(parents=True, exist_ok=True)
+    product_selection_output_dir.mkdir(parents=True, exist_ok=True)
 
     app = Flask(__name__, template_folder=str(LIVE_WEB_ROOT / "templates"))
     app.config["PROMOTION_RESULTS"] = {}
@@ -168,6 +176,8 @@ def create_app(
     app.config["BIGSCREEN_OUTPUT_DIR"] = bigscreen_output_dir
     app.config["BIGSCREEN_RESULTS"] = {}
     app.config["BIGSCREEN_AUTH_FILE"] = PRICE_AUDIT_ROOT / "jd_auth.json"
+    app.config["PRODUCT_SELECTION_OUTPUT_DIR"] = product_selection_output_dir
+    app.config["PRODUCT_SELECTION_RESULTS"] = {}
     if usage_reporter is _DEFAULT_USAGE_REPORTER:
         usage_reporter = create_usage_reporter(enabled=not base_dir_provided)
     app.config["USAGE_REPORTER"] = usage_reporter
@@ -188,6 +198,9 @@ def create_app(
     bigscreen_status = _initial_bigscreen_status()
     bigscreen_stop_flag = threading.Event()
     bigscreen_login_event = threading.Event()
+    product_selection_status_lock = threading.Lock()
+    product_selection_status = _initial_product_selection_status()
+    product_selection_stop_event = threading.Event()
 
     def close_current_browsers():
         with browser_lock:
@@ -237,6 +250,164 @@ def create_app(
     @app.route("/api/health")
     def health():
         return jsonify({"success": True})
+
+    @app.route("/api/product-selection/status")
+    def product_selection_task_status():
+        with product_selection_status_lock:
+            return jsonify(_copy_product_selection_status(product_selection_status))
+
+    @app.route("/api/product-selection/start", methods=["POST"])
+    def start_product_selection():
+        data = request.get_json(silent=True) or {}
+        headless = bool(data.get("headless", True))
+        allow_partial = bool(data.get("allow_partial", False))
+        with product_selection_status_lock:
+            if product_selection_status["running"]:
+                return _json_error("选品任务正在运行，请等待完成或先停止", 409)
+
+            _cleanup_runtime_for_app(app)
+            task_id = uuid.uuid4().hex
+            task_dir = app.config["PRODUCT_SELECTION_OUTPUT_DIR"] / task_id
+            product_selection_stop_event.clear()
+            product_selection_status.clear()
+            product_selection_status.update(
+                {
+                    **_initial_product_selection_status(),
+                    "running": True,
+                    "stage": "running",
+                    "started_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                    "task_id": task_id,
+                }
+            )
+
+        report_usage(
+            "product_selection",
+            "task_start",
+            task_id=task_id,
+            status="started",
+        )
+
+        def append_product_selection_log(message: str):
+            with product_selection_status_lock:
+                product_selection_status["logs"].append(str(message))
+                product_selection_status["logs"] = product_selection_status["logs"][-1000:]
+
+        def run_product_selection_task():
+            try:
+                result = execute_product_selection(
+                    output_dir=task_dir,
+                    headless=headless,
+                    allow_partial=allow_partial,
+                    context=ProductSelectionRunContext(
+                        log_callback=append_product_selection_log,
+                        stop_event=product_selection_stop_event,
+                    ),
+                )
+                summary = _product_selection_summary(result.payload)
+                app.config["PRODUCT_SELECTION_RESULTS"][task_id] = {
+                    "json": Path(result.json_path),
+                    "excel": Path(result.excel_path),
+                }
+                warning = not (
+                    summary.get("fetch_complete") and summary.get("ai_complete")
+                )
+                with product_selection_status_lock:
+                    product_selection_status.update(
+                        {
+                            "running": False,
+                            "stopping": False,
+                            "stage": "completed_with_warnings" if warning else "completed",
+                            "finished_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                            "success": True,
+                            "summary": summary,
+                            "json_download_url": f"/api/product-selection/download/{task_id}/json",
+                            "excel_download_url": f"/api/product-selection/download/{task_id}/excel",
+                        }
+                    )
+                report_usage(
+                    "product_selection",
+                    "task_finish",
+                    task_id=task_id,
+                    status="warning" if warning else "success",
+                    extra=summary,
+                )
+            except SelectionCancelled as exc:
+                with product_selection_status_lock:
+                    product_selection_status.update(
+                        {
+                            "running": False,
+                            "stopping": False,
+                            "stage": "cancelled",
+                            "finished_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                            "success": False,
+                            "error": str(exc),
+                        }
+                    )
+                report_usage(
+                    "product_selection",
+                    "task_finish",
+                    task_id=task_id,
+                    status="cancelled",
+                )
+            except Exception as exc:
+                error = f"{type(exc).__name__}: {exc}"
+                append_product_selection_log(f"[main] 选品任务失败: {error}")
+                with product_selection_status_lock:
+                    product_selection_status.update(
+                        {
+                            "running": False,
+                            "stopping": False,
+                            "stage": "failed",
+                            "finished_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                            "success": False,
+                            "error": error,
+                        }
+                    )
+                report_usage(
+                    "product_selection",
+                    "task_finish",
+                    task_id=task_id,
+                    status="failed",
+                    error_code=type(exc).__name__,
+                )
+
+        threading.Thread(
+            target=run_product_selection_task,
+            name=f"product-selection-{task_id[:8]}",
+            daemon=True,
+        ).start()
+        return jsonify({"success": True, "task_id": task_id}), 202
+
+    @app.route("/api/product-selection/stop", methods=["POST"])
+    def stop_product_selection():
+        with product_selection_status_lock:
+            if not product_selection_status["running"]:
+                return _json_error("当前没有正在运行的选品任务", 409)
+            product_selection_stop_event.set()
+            product_selection_status["stopping"] = True
+            product_selection_status["stage"] = "stopping"
+            product_selection_status["logs"].append("[main] 收到停止请求")
+            payload = _copy_product_selection_status(product_selection_status)
+        return jsonify(payload)
+
+    @app.route("/api/product-selection/download/<task_id>/<kind>")
+    def download_product_selection(task_id: str, kind: str):
+        if kind not in {"json", "excel"}:
+            return _json_error("选品结果类型不存在", 404)
+        result = app.config["PRODUCT_SELECTION_RESULTS"].get(task_id)
+        if not result:
+            return _json_error("选品任务不存在或结果已清理", 404)
+        path = Path(result.get(kind, ""))
+        if not path.is_file():
+            return _json_error("选品结果文件不存在或已清理", 404)
+        report_usage(
+            "product_selection",
+            "download",
+            task_id=task_id,
+            status="success",
+            extra={"kind": kind},
+        )
+        return send_file(path, as_attachment=True, download_name=path.name)
 
     @app.route("/api/bigscreen-capture/preview", methods=["POST"])
     def preview_bigscreen_capture():
@@ -1870,6 +2041,48 @@ def _initial_bigscreen_status():
     }
 
 
+def _initial_product_selection_status():
+    return {
+        "running": False,
+        "stopping": False,
+        "stage": "idle",
+        "logs": [],
+        "started_at": "",
+        "finished_at": "",
+        "task_id": "",
+        "success": False,
+        "error": "",
+        "summary": {},
+        "json_download_url": "",
+        "excel_download_url": "",
+    }
+
+
+def _copy_product_selection_status(status: dict) -> dict:
+    payload = dict(status)
+    payload["logs"] = list(status.get("logs", []))
+    payload["summary"] = dict(status.get("summary", {}))
+    return payload
+
+
+def _product_selection_summary(payload: dict) -> dict:
+    diagnostics = payload.get("diagnostics", {})
+    selection = payload.get("selection", {})
+    return {
+        "source_count": len(diagnostics.get("sources", {})),
+        "category_count": sum(len(categories) for categories in selection.values()),
+        "selected_count": sum(
+            len(products)
+            for categories in selection.values()
+            for products in categories.values()
+        ),
+        "items_count": int(payload.get("items_count") or 0),
+        "recommendation_mode": payload.get("recommendation_mode", ""),
+        "fetch_complete": bool(diagnostics.get("fetch_complete")),
+        "ai_complete": bool(diagnostics.get("ai_complete")),
+    }
+
+
 def _cleanup_runtime_for_app(app: Flask):
     _cleanup_old_runtime_files(
         app.config["RUNTIME_CLEANUP_ROOTS"],
@@ -1882,6 +2095,7 @@ def _cleanup_runtime_for_app(app: Flask):
     app.config["ROOM_INPUT_DIR"].mkdir(parents=True, exist_ok=True)
     app.config["ROOM_OUTPUT_DIR"].mkdir(parents=True, exist_ok=True)
     app.config["BIGSCREEN_OUTPUT_DIR"].mkdir(parents=True, exist_ok=True)
+    app.config["PRODUCT_SELECTION_OUTPUT_DIR"].mkdir(parents=True, exist_ok=True)
 
 
 def _resolve_bigscreen_result_zip(app: Flask, task_id: str):
