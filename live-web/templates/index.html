@@ -39,7 +39,7 @@
 
         .tool-tabs {
             display: grid;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
+            grid-template-columns: repeat(5, minmax(0, 1fr));
             gap: 8px;
             background: #e9eef5;
             border-radius: 12px;
@@ -364,6 +364,7 @@
         .status-message.error { color: #991b1b; background: #fee2e2; }
         .status-message.info { color: #1e3a8a; background: #dbeafe; }
         .status-message.success { color: #166534; background: #dcfce7; }
+        .status-message.warning { color: #92400e; background: #fef3c7; }
 
         .progress-section { display: none; }
         .progress-section.active { display: block; }
@@ -572,7 +573,7 @@
     <div class="container">
         <div class="header">
             <h1>直播运营工具</h1>
-            <p>SKU 测价、绑定券码/促销ID、批量创建直播间、蓝屏自动截图统一入口</p>
+            <p>SKU 测价、绑定券码/促销ID、批量创建直播间、蓝屏自动截图统一入口，新增京东选品 Agent</p>
         </div>
 
         <div class="tool-tabs">
@@ -580,6 +581,7 @@
             <button class="tool-tab" data-tool="promotionPanel">绑定券码/促销ID</button>
             <button class="tool-tab" data-tool="roomCreatorPanel">批量创建直播间</button>
             <button class="tool-tab" data-tool="bigscreenCapturePanel">蓝屏自动截图</button>
+            <button class="tool-tab" data-tool="productSelectionPanel">选品 Agent</button>
         </div>
 
         <section class="tool-panel active" id="pricePanel">
@@ -958,6 +960,78 @@
             </div>
         </section>
 
+        <section class="tool-panel" id="productSelectionPanel">
+            <div class="card" id="productSelectionMainCard">
+                <div class="section-title">京东四来源选品</div>
+                <div style="font-size: 14px; color: #666; line-height: 1.8; margin-bottom: 16px;">
+                    从国家补贴、黑色星期五、排行榜和京东特价抓取商品；每类目保留最多 30 个候选，由 AI 一次筛选最多 Top10，并生成 JSON 与 Excel 审计结果。
+                </div>
+                <label class="checkbox-row">
+                    <input type="checkbox" id="productSelectionShowBrowser">
+                    <span>显示抓取浏览器窗口（排查页面问题时开启）</span>
+                </label>
+                <label class="checkbox-row">
+                    <input type="checkbox" id="productSelectionAllowPartial">
+                    <span>允许部分来源抓取失败后仍生成结果</span>
+                </label>
+                <div class="status-message" id="productSelectionMessage"></div>
+                <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-top: 20px;">
+                    <button class="btn btn-primary" id="productSelectionStartBtn">开始抓品并推荐</button>
+                    <button class="btn btn-secondary" id="productSelectionStopBtn" style="display: none; background: #e74c3c; color: white;">停止任务</button>
+                </div>
+            </div>
+
+            <div class="card progress-section" id="productSelectionProgressCard">
+                <div class="section-title">选品任务状态</div>
+                <div class="stats">
+                    <div class="stat">
+                        <div class="stat-value" id="productSelectionStage">准备中</div>
+                        <div class="stat-label">当前阶段</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-value" id="productSelectionFetchComplete">-</div>
+                        <div class="stat-label">抓取完整</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-value" id="productSelectionAiComplete">-</div>
+                        <div class="stat-label">AI 完整</div>
+                    </div>
+                </div>
+                <div class="log-wrapper">
+                    <div class="log-header">
+                        <div class="section-title" style="margin-bottom: 0;">实时日志</div>
+                        <button class="log-copy-btn" id="productSelectionCopyLogBtn">复制日志</button>
+                    </div>
+                    <div class="log-container" id="productSelectionLogs"></div>
+                </div>
+            </div>
+
+            <div class="card result-section" id="productSelectionResultCard">
+                <div class="result-icon">✓</div>
+                <div class="result-title">选品结果已生成</div>
+                <div class="summary-grid">
+                    <div class="summary-item">
+                        <div class="summary-value" id="productSelectionSourceCount">0</div>
+                        <div class="summary-label">来源数</div>
+                    </div>
+                    <div class="summary-item">
+                        <div class="summary-value" id="productSelectionCategoryCount">0</div>
+                        <div class="summary-label">类目数</div>
+                    </div>
+                    <div class="summary-item">
+                        <div class="summary-value" id="productSelectionSelectedCount">0</div>
+                        <div class="summary-label">入选商品数</div>
+                    </div>
+                </div>
+                <div class="result-desc" id="productSelectionResultDescription">可下载 Excel 查看候选池、选品明细、推荐结果和运行诊断。</div>
+                <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+                    <a class="btn btn-secondary" id="productSelectionJsonDownload" href="#">下载 JSON</a>
+                    <a class="btn btn-success" id="productSelectionExcelDownload" href="#">下载 Excel</a>
+                    <button class="btn btn-secondary" id="productSelectionRestartBtn">再次运行</button>
+                </div>
+            </div>
+        </section>
+
     </div>
 
     <div class="modal" id="loginModal">
@@ -1016,6 +1090,10 @@
         let bigscreenDownloadUrl = '';
         let bigscreenActiveTaskId = '';
         let lastBigscreenStatus = null;
+        const productSelectionStartBtn = document.getElementById('productSelectionStartBtn');
+        const productSelectionStopBtn = document.getElementById('productSelectionStopBtn');
+        const productSelectionMessage = document.getElementById('productSelectionMessage');
+        let productSelectionStatusInterval = null;
 
         document.querySelectorAll('.tool-tab').forEach((button) => {
             button.addEventListener('click', () => {
@@ -2115,6 +2193,141 @@
                 }, 2000);
             }).catch(() => alert('复制失败，请手动选择复制'));
         });
+
+        const productSelectionStageLabels = {
+            idle: '未开始',
+            running: '抓取/推荐中',
+            stopping: '正在停止',
+            completed: '已完成',
+            completed_with_warnings: '已完成（有警告）',
+            cancelled: '已停止',
+            failed: '失败'
+        };
+
+        function renderProductSelectionStatus(data) {
+            const summary = data.summary || {};
+            document.getElementById('productSelectionStage').textContent = productSelectionStageLabels[data.stage] || data.stage || '-';
+            document.getElementById('productSelectionFetchComplete').textContent = summary.fetch_complete === undefined ? '-' : (summary.fetch_complete ? '是' : '否');
+            document.getElementById('productSelectionAiComplete').textContent = summary.ai_complete === undefined ? '-' : (summary.ai_complete ? '是' : '否');
+
+            const logs = document.getElementById('productSelectionLogs');
+            logs.innerHTML = (data.logs || []).map((message) => {
+                let cls = '';
+                if (message.includes('失败') || message.includes('错误') || message.includes('熔断')) cls = 'log-error';
+                else if (message.includes('不足') || message.includes('回退') || message.includes('停止')) cls = 'log-warning';
+                else if (message.includes('完成') || message.includes('完整=True')) cls = 'log-success';
+                return `<div class="log-entry ${cls}">${escapeHtml(message)}</div>`;
+            }).join('');
+            logs.scrollTop = logs.scrollHeight;
+
+            productSelectionStartBtn.disabled = Boolean(data.running);
+            productSelectionStopBtn.style.display = data.running ? 'inline-flex' : 'none';
+            productSelectionStopBtn.disabled = Boolean(data.stopping);
+
+            if (data.success) {
+                document.getElementById('productSelectionResultCard').classList.add('active');
+                document.getElementById('productSelectionSourceCount').textContent = summary.source_count || 0;
+                document.getElementById('productSelectionCategoryCount').textContent = summary.category_count || 0;
+                document.getElementById('productSelectionSelectedCount').textContent = summary.selected_count || 0;
+                document.getElementById('productSelectionJsonDownload').href = data.json_download_url || '#';
+                document.getElementById('productSelectionExcelDownload').href = data.excel_download_url || '#';
+                const fullyComplete = summary.fetch_complete && summary.ai_complete;
+                document.getElementById('productSelectionResultDescription').textContent = fullyComplete
+                    ? '抓取和 AI 推荐均完整，可下载 Excel 查看候选池、推荐结果和运行诊断。'
+                    : `结果已生成，但抓取完整=${Boolean(summary.fetch_complete)}、AI完整=${Boolean(summary.ai_complete)}；请先查看运行诊断再使用。`;
+                showMessage(
+                    productSelectionMessage,
+                    fullyComplete ? '选品完成' : '选品完成，但存在抓取或 AI 回退警告',
+                    fullyComplete ? 'success' : 'warning'
+                );
+            } else if (!data.running && data.error) {
+                showMessage(productSelectionMessage, data.error, data.stage === 'cancelled' ? 'info' : 'error');
+            }
+        }
+
+        function pollProductSelectionStatus() {
+            fetch('/api/product-selection/status')
+                .then((res) => res.json())
+                .then((data) => {
+                    renderProductSelectionStatus(data);
+                    if (!data.running && productSelectionStatusInterval) {
+                        clearInterval(productSelectionStatusInterval);
+                        productSelectionStatusInterval = null;
+                    }
+                })
+                .catch(() => {
+                    if (productSelectionStatusInterval) clearInterval(productSelectionStatusInterval);
+                    productSelectionStatusInterval = null;
+                    productSelectionStartBtn.disabled = false;
+                    showMessage(productSelectionMessage, '连接服务失败，请重新启动直播运营工具', 'error');
+                });
+        }
+
+        function startProductSelectionPolling() {
+            if (productSelectionStatusInterval) clearInterval(productSelectionStatusInterval);
+            pollProductSelectionStatus();
+            productSelectionStatusInterval = setInterval(pollProductSelectionStatus, 1000);
+        }
+
+        productSelectionStartBtn.addEventListener('click', () => {
+            clearMessage(productSelectionMessage);
+            document.getElementById('productSelectionResultCard').classList.remove('active');
+            document.getElementById('productSelectionProgressCard').classList.add('active');
+            document.getElementById('productSelectionLogs').innerHTML = '';
+            productSelectionStartBtn.disabled = true;
+            fetch('/api/product-selection/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    headless: !document.getElementById('productSelectionShowBrowser').checked,
+                    allow_partial: document.getElementById('productSelectionAllowPartial').checked
+                })
+            })
+                .then(async (res) => ({ ok: res.ok, data: await res.json() }))
+                .then(({ ok, data }) => {
+                    if (!ok || !data.success) throw new Error(data.error || '启动失败');
+                    startProductSelectionPolling();
+                })
+                .catch((error) => {
+                    productSelectionStartBtn.disabled = false;
+                    showMessage(productSelectionMessage, error.message || '启动失败', 'error');
+                });
+        });
+
+        productSelectionStopBtn.addEventListener('click', () => {
+            if (!confirm('确定停止当前选品任务吗？当前浏览器或模型调用完成后会退出。')) return;
+            productSelectionStopBtn.disabled = true;
+            fetch('/api/product-selection/stop', { method: 'POST' })
+                .then((res) => res.json())
+                .then(renderProductSelectionStatus)
+                .catch(() => showMessage(productSelectionMessage, '停止请求发送失败', 'error'));
+        });
+
+        document.getElementById('productSelectionRestartBtn').addEventListener('click', () => {
+            document.getElementById('productSelectionResultCard').classList.remove('active');
+            document.getElementById('productSelectionProgressCard').classList.remove('active');
+            clearMessage(productSelectionMessage);
+            document.getElementById('productSelectionMainCard').scrollIntoView({ behavior: 'smooth' });
+        });
+
+        document.getElementById('productSelectionCopyLogBtn').addEventListener('click', () => {
+            const text = Array.from(document.querySelectorAll('#productSelectionLogs .log-entry'))
+                .map((entry) => entry.textContent)
+                .join('\n');
+            if (!text) return alert('暂无日志可复制');
+            navigator.clipboard.writeText(text).catch(() => alert('复制失败，请手动选择复制'));
+        });
+
+        fetch('/api/product-selection/status')
+            .then((res) => res.json())
+            .then((data) => {
+                if (data.running || data.logs.length || data.success || data.error) {
+                    document.getElementById('productSelectionProgressCard').classList.add('active');
+                    renderProductSelectionStatus(data);
+                }
+                if (data.running) startProductSelectionPolling();
+            })
+            .catch(() => {});
 
     </script>
 </body>

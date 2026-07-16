@@ -6,6 +6,31 @@ from app import create_app
 
 
 class WebTemplateTest(unittest.TestCase):
+    def test_index_contains_product_selection_panel(self):
+        html = Path("templates/index.html").read_text(encoding="utf-8")
+
+        self.assertIn('data-tool="productSelectionPanel"', html)
+        self.assertIn('id="productSelectionPanel"', html)
+        self.assertIn('id="productSelectionShowBrowser"', html)
+        self.assertIn('id="productSelectionAllowPartial"', html)
+        self.assertIn('id="productSelectionStartBtn"', html)
+        self.assertIn('id="productSelectionStopBtn"', html)
+        self.assertIn('id="productSelectionLogs"', html)
+        self.assertIn('id="productSelectionJsonDownload"', html)
+        self.assertIn('id="productSelectionExcelDownload"', html)
+        self.assertIn("/api/product-selection/start", html)
+        self.assertIn("/api/product-selection/status", html)
+        self.assertIn("/api/product-selection/stop", html)
+        self.assertIn("fetch_complete", html)
+        self.assertIn("ai_complete", html)
+        for element_id in (
+            "productSelectionPanel",
+            "productSelectionStartBtn",
+            "productSelectionStopBtn",
+            "productSelectionLogs",
+        ):
+            self.assertEqual(html.count(f'id="{element_id}"'), 1)
+
     def test_index_contains_price_audit_and_promotion_binding_tabs(self):
         app = create_app(base_dir=Path(tempfile.mkdtemp()))
         response = app.test_client().get("/")
