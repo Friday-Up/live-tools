@@ -38,6 +38,7 @@ jobs:
           pip install -r live-promotion-binding/requirements.txt
           pip install -r live-room-creator/requirements.txt
           pip install -r live-bigscreen-capture/requirements.txt
+          pip install -r product-selection-agent/requirements.txt
           pip install pyinstaller
 
       - name: Install Playwright Chromium
@@ -67,6 +68,10 @@ jobs:
           python -m unittest discover -s tests -p "test_*.py" -v
           Pop-Location
 
+          Push-Location product-selection-agent
+          python -m unittest discover -s tests -p "test_*.py" -v
+          Pop-Location
+
           python -m unittest discover -s tests -p "test_*.py" -v
 
       - name: Build Live Tools Web with PyInstaller
@@ -79,6 +84,7 @@ jobs:
           $priceUtils = "live-sku-price-audit/utils"
           $roomCreatorPackage = "live-room-creator/room_creator"
           $bigscreenPackage = "live-bigscreen-capture/bigscreen_capture"
+          $productSelectionPackage = "product-selection-agent/product_selection_agent"
 
           pyinstaller --noconfirm --onedir --console `
             --name "Live-Tools-Web" `
@@ -87,6 +93,7 @@ jobs:
             --paths "live-sku-price-audit" `
             --paths "live-room-creator" `
             --paths "live-bigscreen-capture" `
+            --paths "product-selection-agent" `
             --collect-all playwright `
             --collect-all flask `
             --collect-all jinja2 `
@@ -112,12 +119,21 @@ jobs:
             --hidden-import bigscreen_capture.browser `
             --hidden-import bigscreen_capture.service `
             --hidden-import bigscreen_capture.capture_steps `
+            --hidden-import product_selection_agent `
+            --hidden-import product_selection_agent.config `
+            --hidden-import product_selection_agent.fetcher `
+            --hidden-import product_selection_agent.parser `
+            --hidden-import product_selection_agent.recommender `
+            --hidden-import product_selection_agent.runtime `
+            --hidden-import product_selection_agent.selector `
+            --hidden-import product_selection_agent.service `
             --add-data "$webTemplates;live-web/templates" `
             --add-data "$bindingAssets;live-promotion-binding/assets" `
             --add-data "$bindingPackage;live-promotion-binding/promotion_binding" `
             --add-data "$priceUtils;live-sku-price-audit/utils" `
             --add-data "$roomCreatorPackage;live-room-creator/room_creator" `
             --add-data "$bigscreenPackage;live-bigscreen-capture/bigscreen_capture" `
+            --add-data "$productSelectionPackage;product-selection-agent/product_selection_agent" `
             $webApp
 
       - name: Copy launcher and runtime folders
@@ -131,6 +147,8 @@ jobs:
 
           Copy-Item -Path "启动直播工具.bat" -Destination (Join-Path $distPath "启动直播工具.bat") -Force
           New-Item -ItemType Directory -Path (Join-Path $distPath "runtime") -Force | Out-Null
+          New-Item -ItemType Directory -Path (Join-Path $distPath "product-selection-agent") -Force | Out-Null
+          Copy-Item -Path "product-selection-agent/model-config.example.json" -Destination (Join-Path $distPath "product-selection-agent/model-config.example.json") -Force
 
       - name: Verify build output
         shell: pwsh
@@ -144,7 +162,9 @@ jobs:
             "live-promotion-binding/promotion_binding",
             "live-sku-price-audit/utils",
             "live-room-creator/room_creator",
-            "live-bigscreen-capture/bigscreen_capture"
+            "live-bigscreen-capture/bigscreen_capture",
+            "product-selection-agent/product_selection_agent",
+            "product-selection-agent/model-config.example.json"
           )
 
           foreach ($item in $required) {

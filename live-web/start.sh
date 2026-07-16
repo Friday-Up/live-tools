@@ -6,7 +6,7 @@ cd "$SCRIPT_DIR"
 
 PYTHON_CMD="${PYTHON_CMD:-python3}"
 
-if ! "$PYTHON_CMD" -c "import flask, openpyxl, PIL" >/dev/null 2>&1; then
+if ! "$PYTHON_CMD" -c "import flask, openpyxl, playwright, PIL" >/dev/null 2>&1; then
   echo "缺少依赖，请先安装：$PYTHON_CMD -m pip install -r requirements.txt"
   exit 1
 fi

@@ -7,7 +7,7 @@ set PYTHONIOENCODING=utf-8
 cd /d "%~dp0"
 set PYTHON_CMD=python
 
-%PYTHON_CMD% -c "import flask, openpyxl" >nul 2>&1
+%PYTHON_CMD% -c "import flask, openpyxl, playwright" >nul 2>&1
 if errorlevel 1 (
   echo 缺少依赖，请先安装：%PYTHON_CMD% -m pip install -r requirements.txt
   pause

@@ -2,7 +2,7 @@
 
 # 直播运营工具
 
-**直播业务本地运营工具统一入口，覆盖 SKU 测价、绑定券码/促销 ID、批量创建直播间与蓝屏自动截图**
+**直播业务本地运营工具统一入口，覆盖 SKU 测价、绑券、直播间创建、蓝屏截图与京东选品推荐**
 
 *Web 页面操作 · Excel 驱动 · 京东官方模板输出 · 使用监控统计 · Windows 一键打包*
 
@@ -19,14 +19,15 @@
 
 ## 简介
 
-直播运营工具是面向直播业务的本地 Web 工具集合。业务同事只需要打开一个页面，就可以完成当前已接入的四类高频操作：
+直播运营工具是面向直播业务的本地 Web 工具集合。业务同事只需要打开一个页面，就可以完成当前已接入的五类高频操作：
 
 - **SKU 测价**：批量读取商品 SKU，打开京东页面抓取实时售价，生成测价结果。
 - **绑定券码/促销 ID**：读取直播业务提报表，生成京东后台官方批量上传模板和异常报告。
 - **批量创建直播间**：读取直播标题、开播时间等信息，自动登录京东直播后台批量创建直播间并输出结果报告。
 - **蓝屏自动截图**：填写京东直播大屏链接，按整点自动截图并输出 ZIP 和截图清单。
+- **选品 Agent**：并发抓取京东四个活动来源，按来源和页面类目由 AI 筛选推荐，并输出可追溯的 JSON/Excel。
 
-项目按“统一入口 + 独立业务模块”的方式组织：`live-web` 只负责页面、上传、下载和任务编排；测价逻辑保留在 `live-sku-price-audit`；绑券逻辑保留在 `live-promotion-binding`；蓝屏截图逻辑保留在 `live-bigscreen-capture`。这样后续继续增加直播运营工具时，不会把所有业务规则混在一个目录里。
+项目按“统一入口 + 独立业务模块”的方式组织：`live-web` 只负责页面、上传、下载和任务编排；各业务能力分别保留在测价、绑券、直播间、蓝屏截图和选品模块中。这样后续继续增加工具时，不会把所有业务规则混在一个目录里。
 
 从 `v0.3.18` 开始，统一入口默认上报工具使用事件，用于统计实际使用人数、任务量、成功率、处理规模和耗时。上报采用异步 best-effort 方式，远端不可用时不会阻断测价、绑券、直播间创建或截图任务。
 
@@ -41,6 +42,7 @@
 | **绑定券码/促销 ID** | 上传业务提报表，生成京东官方上传模板和异常报告 |
 | **批量创建直播间** | 上传 Excel，自动登录京东直播后台串行创建直播间，输出结果报告 |
 | **蓝屏自动截图** | 输入 `jlive.jd.com/bigScreen` 链接，立即截图或按整点自动截图 |
+| **选品 Agent** | 从四个京东来源抓取每类目最多 30 个候选，AI 筛选最多 10 个并说明淘汰与不足原因 |
 | **列映射确认** | 绑券上传后自动推荐 SKU 列、券码/促销编码列，也支持手动改选 |
 | **官方模板复用** | 保留京东后台官方 `商品上传模版（2026切片版）.xlsx`，只写入必要列 |
 | **异常报告** | 标记空值、无效文本、重复 SKU、多 KEY、多促销 ID、同 SKU 多绑定值等问题 |
@@ -72,6 +74,7 @@ http://127.0.0.1:8080
    - `绑定券码/促销ID`
    - `批量创建直播间`
    - `蓝屏自动截图`
+   - `选品 Agent`
 6. 用完后双击程序自动生成的 `关闭服务.bat`，或关闭启动窗口。
 
 从旧版本升级时，请先彻底关闭旧服务，再把新 ZIP 解压到新的空目录中运行，避免旧 EXE 和新文件混用。
@@ -106,6 +109,7 @@ python3 -m pip install -r live-promotion-binding/requirements.txt
 ```bash
 python3 -m pip install -r live-sku-price-audit/requirements.txt
 python3 -m pip install -r live-bigscreen-capture/requirements.txt
+python3 -m pip install -r product-selection-agent/requirements.txt
 python3 -m playwright install chromium
 ```
 
@@ -273,6 +277,19 @@ https://jlive.jd.com/bigScreen?id=46794566
 | `截图清单.xlsx` | 每项截图的计划整点、实际执行时间、状态和失败原因 |
 | `蓝屏数据截图_{id}__YYYYMMDD.zip` | 本次截图 ZIP |
 
+### 功能五：选品 Agent
+
+进入“选品 Agent”后选择是否显示浏览器，以及来源不完整时是否允许保留部分结果，然后点击“开始选品”。默认并发抓取国家补贴、黑色星期五、排行榜和京东特价；每个页面类目保留最多 30 个候选，再由 AI 单次筛选并排序最多 10 个。
+
+页面会持续展示抓取和推荐日志。任务完成后需要同时关注“抓取完整”和“AI 完整”：任一项为否时，页面会明确标为部分结果，不能把规则回退误认为完整 AI 推荐。
+
+| 文件 | 说明 |
+| --- | --- |
+| `selection_时间.json` | 候选池、最终入选、推荐说明和完整诊断 |
+| `selection_时间.xlsx` | 候选池、选品明细、推荐结果和运行诊断 |
+
+模型配置复制 `product-selection-agent/model-config.example.json` 为同目录的 `model-config.local.json`；本地配置已被 Git 忽略，也可使用 `SELECTION_AI_*` 环境变量。未配置模型或模型失败时会明确使用规则回退，不会伪装为 AI 完整结果。
+
 ---
 
 ## 监控统计
@@ -364,6 +381,12 @@ live/
 │   ├── bigscreen_capture/            # 链接解析、整点排期、截图步骤、ZIP 输出
 │   ├── requirements.txt
 │   └── tests/
+├── product-selection-agent/          # 京东多来源选品模块
+│   ├── product_selection_agent/      # 抓取、筛选、推荐、运行上下文和服务层
+│   ├── main.py                       # 开发调试用薄 CLI
+│   ├── model-config.example.json     # 模型配置示例（不含密钥）
+│   ├── requirements.txt
+│   └── tests/
 ├── docs/                             # SOP、方案和实施计划
 │   └── plans/
 └── tests/                            # 仓库级测试，例如 Windows 打包约束
@@ -383,7 +406,8 @@ live-web/runtime/
     ├── price-audit/
     ├── promotion-binding/
     ├── room-creator/
-    └── bigscreen-capture/
+    ├── bigscreen-capture/
+    └── product-selection/<task_id>/
 ```
 
 `runtime/` 不作为业务归档目录。服务启动、上传和生成前都会清理超过 2 天的历史临时文件。
@@ -397,7 +421,7 @@ live-web/runtime/
 | Python | 主要运行语言 |
 | Flask | 本地 Web 服务和 API |
 | openpyxl | Excel 读取、模板写入和异常报告生成 |
-| Playwright | SKU 测价、直播间创建和蓝屏截图时打开浏览器、复用京东登录态 |
+| Playwright | SKU 测价、直播间创建、蓝屏截图和选品抓取时打开浏览器、复用京东登录态 |
 | PyInstaller | Windows 一键包构建 |
 | unittest | 单元测试 |
 | GitHub Actions | Windows 自动打包和 Release 上传 |
@@ -427,6 +451,9 @@ python3 -m unittest discover -s tests -v
 
 cd ../live-bigscreen-capture
 python3 -m unittest discover -s tests -v
+
+cd ../product-selection-agent
+python3 -m unittest discover -s tests -v
 ```
 
 ### 常用局部测试
@@ -447,6 +474,10 @@ python3 -m unittest tests/test_excel_handler.py tests/test_audit_runner.py -v
 # 蓝屏自动截图
 cd ../live-bigscreen-capture
 python3 -m unittest tests/test_service.py tests/test_capture_steps.py -v
+
+# 选品 Agent
+cd ../product-selection-agent
+python3 -m unittest discover -s tests -v
 ```
 
 ---

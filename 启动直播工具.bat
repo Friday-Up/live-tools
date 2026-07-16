@@ -40,6 +40,7 @@ if %errorlevel% neq 0 (
     %PYTHON_CMD% -m pip install -r "live-web\requirements.txt"
     %PYTHON_CMD% -m pip install -r "live-sku-price-audit\requirements.txt"
     %PYTHON_CMD% -m pip install -r "live-promotion-binding\requirements.txt"
+    %PYTHON_CMD% -m pip install -r "product-selection-agent\requirements.txt"
     if %errorlevel% neq 0 (
         echo 依赖安装失败，请检查网络或 Python 环境。
         pause

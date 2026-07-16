@@ -13,14 +13,29 @@
 
 这四页不能共用 `qryJediPcBabelFloors`。旧实现产生的“黑五类目商品”实际存在跨页面延迟响应串源风险，排行榜和京东特价也没有完整进入结果。
 
-## 安装与运行
+## 推荐入口：统一 Web 页面
+
+业务使用从仓库根目录启动 `live-web`，打开页面后切换到“选品 Agent”。页面支持启动、停止、实时日志、完整性提示，以及 JSON/Excel 下载：
+
+```bash
+cd /Users/zhangyaolong.5/Friday/idea_workspace/me/live
+python3 -m pip install -r live-web/requirements.txt
+python3 -m playwright install chromium
+cd live-web && ./start.sh
+```
+
+默认访问 `http://127.0.0.1:8080`。Web 结果写入 `live-web/runtime/output/product-selection/<task_id>/`。
+
+## 开发调试：命令行
+
+`main.py` 只保留为薄命令行入口，实际能力在 `product_selection_agent/service.py`，Web 和 CLI 共用同一套抓取、推荐和报表逻辑。
 
 ```bash
 cd /Users/zhangyaolong.5/Friday/idea_workspace/me/live/product-selection-agent
 python3 -m pip install -r requirements.txt
 python3 -m playwright install chromium
 
-# 推荐：后台运行；任一来源为空会直接失败
+# 任一来源为空会直接失败
 python3 main.py --headless
 
 # 页面结构临时异常时，允许输出部分结果（报表会在“运行诊断”中标红）
@@ -39,7 +54,7 @@ SELECTION_FETCH_WORKERS=3 SELECTION_MAX_CANDIDATES_PER_CATEGORY=20 python3 main.
 JD_AUTH_PATH=/absolute/path/to/jd_auth.json python3 main.py --headless
 ```
 
-输出位于 `output/`：
+命令行输出位于 `output/`：
 
 - `selection_时间.json`：包含完整 `candidate_pool`、最终 `selection`、`recommendation` 和来源诊断；
 - `selection_时间.xlsx`：包含 `候选池`、`选品明细`、`推荐结果`、`运行诊断` 四个 Sheet。
