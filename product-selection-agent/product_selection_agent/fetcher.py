@@ -24,7 +24,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, sync_playwright
 
-import config
+from . import config
 
 
 def _walk_dicts(value) -> Iterable[dict]:

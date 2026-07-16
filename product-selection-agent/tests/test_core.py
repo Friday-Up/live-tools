@@ -10,20 +10,20 @@ from unittest import mock
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_DIR)
 
-import fetcher
-from fetcher import (
+from product_selection_agent import fetcher
+from product_selection_agent.fetcher import (
     _dedup_goods,
     _extract_flex_goods,
     _extract_goods_from_body,
     _limit_candidates,
     _rank_product_to_goods,
 )
-from parser import parse_all, parse_quantity_text
-import recommender
-from recommender import recommend
-from recommender import _extract_json_object
-from recommender import _read_stream_content
-from selector import select_top
+from product_selection_agent.parser import parse_all, parse_quantity_text
+from product_selection_agent import recommender
+from product_selection_agent.recommender import recommend
+from product_selection_agent.recommender import _extract_json_object
+from product_selection_agent.recommender import _read_stream_content
+from product_selection_agent.selector import select_top
 
 
 class QuantityParserTest(unittest.TestCase):
@@ -56,7 +56,7 @@ class SourceAdapterTest(unittest.TestCase):
             SOURCES=sources,
             FETCH_WORKERS=4,
             AUTH_PATH="/path/does/not/exist",
-        ), mock.patch("fetcher._fetch_source_isolated", side_effect=fake_fetch):
+        ), mock.patch("product_selection_agent.fetcher._fetch_source_isolated", side_effect=fake_fetch):
             result = fetcher.fetch_all(headless=True)
         elapsed = time.monotonic() - start
 
@@ -138,7 +138,7 @@ class SourceAdapterTest(unittest.TestCase):
 
 class SelectionAndRecommendationTest(unittest.TestCase):
     def test_selection_prompt_uses_commercial_metrics_only_for_ranking(self):
-        from recommender import _build_selection_prompt
+        from product_selection_agent.recommender import _build_selection_prompt
 
         prompt = _build_selection_prompt(
             "国家补贴",
@@ -155,7 +155,7 @@ class SelectionAndRecommendationTest(unittest.TestCase):
         self.assertIn("rejected 只列出被硬过滤的候选", prompt)
 
     def test_platform_category_ids_filter_known_cross_category_products(self):
-        from recommender import _prefilter_candidates
+        from product_selection_agent.recommender import _prefilter_candidates
 
         medical = [
             {"sku_id": "food", "category_id2": "9195"},
@@ -179,7 +179,7 @@ class SelectionAndRecommendationTest(unittest.TestCase):
         self.assertEqual(electric_excluded, {"accessory": "平台类目ID与电动车不匹配"})
 
     def test_candidate_pool_keeps_up_to_thirty(self):
-        from selector import build_candidate_pool
+        from product_selection_agent.selector import build_candidate_pool
 
         goods = [
             {
@@ -210,8 +210,8 @@ class SelectionAndRecommendationTest(unittest.TestCase):
             recommender._AI_REQUEST_TIMES.clear()
         try:
             with mock.patch.object(recommender.config, "AI_RPS_LIMIT", 2), \
-                    mock.patch("recommender.time.monotonic", side_effect=lambda: clock[0]), \
-                    mock.patch("recommender.time.sleep", side_effect=fake_sleep):
+                    mock.patch("product_selection_agent.recommender.time.monotonic", side_effect=lambda: clock[0]), \
+                    mock.patch("product_selection_agent.recommender.time.sleep", side_effect=fake_sleep):
                 recommender._wait_for_ai_rate_slot()
                 recommender._wait_for_ai_rate_slot()
                 recommender._wait_for_ai_rate_slot()
@@ -262,7 +262,7 @@ class SelectionAndRecommendationTest(unittest.TestCase):
         self.assertEqual(parsed["shortfall_reason"], "仅2个合格")
 
     def test_legacy_items_response_is_coerced_to_selected_protocol(self):
-        from recommender import _coerce_ai_selection_payload
+        from product_selection_agent.recommender import _coerce_ai_selection_payload
 
         parsed = {
             "items": [
@@ -283,7 +283,7 @@ class SelectionAndRecommendationTest(unittest.TestCase):
         )
 
     def test_top_level_array_is_coerced_to_selected_protocol(self):
-        from recommender import _coerce_ai_selection_payload
+        from product_selection_agent.recommender import _coerce_ai_selection_payload
 
         parsed = _extract_json_object(
             '[{"sku_id":"3","reason":"理由3","copy":"文案3"}]'
@@ -294,7 +294,7 @@ class SelectionAndRecommendationTest(unittest.TestCase):
         self.assertEqual(coerced["selected"][0]["rank"], 1)
 
     def test_ai_selection_protocol_filters_and_orders_candidates(self):
-        from recommender import _normalize_ai_selection
+        from product_selection_agent.recommender import _normalize_ai_selection
 
         candidates = [{"sku_id": str(index)} for index in range(1, 13)]
         parsed = {
@@ -333,7 +333,7 @@ class SelectionAndRecommendationTest(unittest.TestCase):
         self.assertTrue(any("超过上限" in warning for warning in normalized["warnings"]))
 
     def test_full_ai_selection_ignores_contradictory_shortfall_reason(self):
-        from recommender import _normalize_ai_selection
+        from product_selection_agent.recommender import _normalize_ai_selection
 
         candidates = [{"sku_id": str(index)} for index in range(1, 11)]
         parsed = {
@@ -358,7 +358,7 @@ class SelectionAndRecommendationTest(unittest.TestCase):
         )
 
     def test_prompt_echo_is_not_used_as_shortfall_reason(self):
-        from recommender import _normalize_ai_selection
+        from product_selection_agent.recommender import _normalize_ai_selection
 
         candidates = [{"sku_id": "1"}]
         parsed = {
@@ -397,7 +397,7 @@ class SelectionAndRecommendationTest(unittest.TestCase):
         self.assertEqual(selected[0]["sku_id"], "1")
         # 单元测试不应因开发机存在本地模型配置而发起真实网络请求。
         with mock.patch.multiple(
-            "recommender.config",
+            "product_selection_agent.recommender.config",
             AI_API_URL="",
             AI_API_KEY="",
             AI_MODEL="",
@@ -423,14 +423,14 @@ class SelectionAndRecommendationTest(unittest.TestCase):
         ]
         selection = select_top(parse_all({"test": {"name": "测试来源", "goods": goods}}))
         with mock.patch.multiple(
-            "recommender.config",
+            "product_selection_agent.recommender.config",
             AI_API_URL="http://model.test/chat/completions",
             AI_API_KEY="key",
             AI_MODEL="model",
             AI_CATEGORY_WORKERS=1,
             AI_CIRCUIT_FAILURE_THRESHOLD=3,
         ), mock.patch(
-            "recommender._llm_select_category",
+            "product_selection_agent.recommender._llm_select_category",
             side_effect=TimeoutError("timed out"),
         ) as select:
             blocks = recommend(selection)["测试来源"]
@@ -456,20 +456,20 @@ class SelectionAndRecommendationTest(unittest.TestCase):
         selection = select_top(parse_all({"test": {"name": "测试来源", "goods": goods}}))
         error = json.JSONDecodeError("Extra data", "{}{}", 2)
         with mock.patch.multiple(
-            "recommender.config",
+            "product_selection_agent.recommender.config",
             AI_API_URL="http://model.test/chat/completions",
             AI_API_KEY="key",
             AI_MODEL="model",
             AI_CATEGORY_WORKERS=1,
             AI_CIRCUIT_FAILURE_THRESHOLD=3,
-        ), mock.patch("recommender._llm_select_category", side_effect=error) as select:
+        ), mock.patch("product_selection_agent.recommender._llm_select_category", side_effect=error) as select:
             blocks = recommend(selection)["测试来源"]
 
         self.assertEqual(select.call_count, 4)
         self.assertTrue(all("模型熔断" not in block["ai_error"] for block in blocks.values()))
 
     def test_ai_selects_seven_from_thirty_in_one_request(self):
-        from selector import build_candidate_pool
+        from product_selection_agent.selector import build_candidate_pool
 
         goods = [
             {
@@ -510,11 +510,11 @@ class SelectionAndRecommendationTest(unittest.TestCase):
             }
 
         with mock.patch.multiple(
-            "recommender.config",
+            "product_selection_agent.recommender.config",
             AI_API_URL="http://model.test/chat/completions",
             AI_API_KEY="key",
             AI_MODEL="model",
-        ), mock.patch("recommender._llm_select_category", side_effect=fake_select) as select:
+        ), mock.patch("product_selection_agent.recommender._llm_select_category", side_effect=fake_select) as select:
             block = recommend(pool)["测试来源"]["测试类目"]
 
         self.assertEqual(select.call_count, 1)
@@ -571,11 +571,11 @@ class SelectionAndRecommendationTest(unittest.TestCase):
             }
 
         with mock.patch.multiple(
-            "recommender.config",
+            "product_selection_agent.recommender.config",
             AI_API_URL="http://model.test/chat/completions",
             AI_API_KEY="key",
             AI_MODEL="model",
-        ), mock.patch("recommender._llm_select_category", side_effect=fake_select):
+        ), mock.patch("product_selection_agent.recommender._llm_select_category", side_effect=fake_select):
             block = recommend({"国家补贴": {"医疗器械": candidates}})["国家补贴"]["医疗器械"]
 
         self.assertEqual([item["sku_id"] for item in block["products"]], ["device"])
@@ -627,11 +627,11 @@ class SelectionAndRecommendationTest(unittest.TestCase):
             }
 
         with mock.patch("main._load_offline", return_value=raw), mock.patch.multiple(
-            "recommender.config",
+            "product_selection_agent.recommender.config",
             AI_API_URL="http://model.test/chat/completions",
             AI_API_KEY="key",
             AI_MODEL="model",
-        ), mock.patch("recommender._llm_select_category", side_effect=fake_select):
+        ), mock.patch("product_selection_agent.recommender._llm_select_category", side_effect=fake_select):
             payload = main.run(offline_path="ignored.json")
 
         candidates = payload["candidate_pool"]["测试来源"]["测试类目"]
@@ -790,11 +790,11 @@ class SelectionAndRecommendationTest(unittest.TestCase):
             }
 
         with mock.patch.multiple(
-            "recommender.config",
+            "product_selection_agent.recommender.config",
             AI_API_URL="http://model.test/chat/completions",
             AI_API_KEY="key",
             AI_MODEL="model",
-        ), mock.patch("recommender._llm_select_category", side_effect=fake_select) as select:
+        ), mock.patch("product_selection_agent.recommender._llm_select_category", side_effect=fake_select) as select:
             block = recommend(selection)["测试来源"]["测试类目"]
 
         self.assertEqual(select.call_count, 1)
@@ -836,13 +836,13 @@ class SelectionAndRecommendationTest(unittest.TestCase):
 
         start = time.monotonic()
         with mock.patch.multiple(
-            "recommender.config",
+            "product_selection_agent.recommender.config",
             AI_API_URL="http://model.test/chat/completions",
             AI_API_KEY="key",
             AI_MODEL="model",
             AI_CATEGORY_WORKERS=5,
             AI_RPS_LIMIT=5,
-        ), mock.patch("recommender._llm_select_category", side_effect=fake_select) as select:
+        ), mock.patch("product_selection_agent.recommender._llm_select_category", side_effect=fake_select) as select:
             result = recommend(selection)["测试来源"]
         elapsed = time.monotonic() - start
 

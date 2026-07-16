@@ -16,7 +16,7 @@ import urllib.request
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import config
+from . import config
 
 
 _MODEL_NETWORK_ERRORS = (

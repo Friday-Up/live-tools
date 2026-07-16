@@ -6,10 +6,10 @@ import datetime as dt
 import json
 import os
 
-import config
-from parser import parse_all
-from recommender import recommend
-from selector import build_candidate_pool
+from product_selection_agent import config
+from product_selection_agent.parser import parse_all
+from product_selection_agent.recommender import recommend
+from product_selection_agent.selector import build_candidate_pool
 
 
 def _timestamp() -> str:
@@ -113,7 +113,7 @@ def _load_offline(path: str) -> dict:
     with open(path, encoding="utf-8") as handle:
         raw = json.load(handle)
     if isinstance(raw, list):
-        from fetcher import _extract_goods_from_body
+        from product_selection_agent.fetcher import _extract_goods_from_body
 
         goods = []
         for body in raw:
@@ -130,7 +130,7 @@ def run(headless: bool = False, offline_path: str | None = None, allow_partial: 
     if offline_path:
         raw_data = _load_offline(offline_path)
     else:
-        from fetcher import fetch_all
+        from product_selection_agent.fetcher import fetch_all
 
         raw_data = fetch_all(headless=headless, allow_partial=allow_partial)
 

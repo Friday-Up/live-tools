@@ -1,7 +1,7 @@
 """按「来源 × 页面类目」分组，每组取前 N。"""
 from collections import defaultdict
 
-import config
+from . import config
 
 def _discount_ratio(item: dict) -> float:
     """折扣力度:1 - 到手价/划线价,越大越优惠。"""
@@ -70,32 +70,3 @@ def select_top(items: list, top_n: int = None) -> dict:
     """
     top_n = top_n or config.TOP_N_PER_CATEGORY
     return _group_ranked(items, top_n, "rank")
-
-
-def flatten_selection(selection: dict) -> list:
-    """把嵌套结果拍平成行,便于写 Excel。"""
-    rows = []
-    for source_name, cats in selection.items():
-        for cat_name, prods in cats.items():
-            for p in prods:
-                rows.append(p)
-    return rows
-
-
-if __name__ == "__main__":
-    import json
-    from parser import parse_all
-    from fetcher import _extract_goods_from_body
-
-    bodies = json.load(open("scripts/floor_full.json", encoding="utf-8"))
-    goods = []
-    for b in bodies:
-        goods.extend(_extract_goods_from_body(b))
-    items = parse_all({"gov_subsidy": {"name": "国家补贴", "goods": goods}})
-    sel = select_top(items)
-    for src, cats in sel.items():
-        print(f"\n=== {src} ===")
-        for cat, prods in cats.items():
-            print(f"  [{cat}] 共 {len(prods)} 个")
-            for p in prods[:3]:
-                print(f"    #{p['rank']} {p['name'][:20]} 销量{p['sales_num']} 到手{p['display_price']} 折扣{p['discount_ratio']}")
