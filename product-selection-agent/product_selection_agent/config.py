@@ -3,9 +3,14 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = (
+    os.path.join(os.path.dirname(sys.executable), "product-selection-agent")
+    if getattr(sys, "frozen", False)
+    else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 AUTH_PATH = os.getenv(
     "JD_AUTH_PATH",
     os.path.join(BASE_DIR, "..", "live-sku-price-audit", "jd_auth.json"),

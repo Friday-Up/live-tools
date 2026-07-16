@@ -25,6 +25,7 @@ if hasattr(sys.stdout, "reconfigure"):
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, sync_playwright
 
 from . import config
+from .runtime import RunContext
 
 
 def _walk_dicts(value) -> Iterable[dict]:
@@ -223,7 +224,7 @@ def _limit_candidates(goods: list[dict]) -> list[dict]:
     return _dedup_goods(goods)[: config.MAX_CANDIDATES_PER_CATEGORY]
 
 
-def _fetch_babel_tabs(page: Page, source: dict) -> list[dict]:
+def _fetch_babel_tabs(page: Page, source: dict, context: RunContext) -> list[dict]:
     bucket: list[dict] = []
 
     def on_response(response):
@@ -242,9 +243,10 @@ def _fetch_babel_tabs(page: Page, source: dict) -> list[dict]:
         if not names:
             raise RuntimeError("未发现国家补贴类目 Tab")
         expected_categories = {name for name in names if name and name not in config.SKIP_TABS}
-        print(f"[fetch] {source['name']} 发现 {len(names)} 个 Tab: {names}")
+        context.log(f"[fetch] {source['name']} 发现 {len(names)} 个 Tab: {names}")
         collected: list[dict] = []
         for index, name in enumerate(names):
+            context.check_cancelled()
             if not name or name in config.SKIP_TABS:
                 continue
             time.sleep(0.4)  # 先让上一个 Tab 的尾部响应自然结束
@@ -260,14 +262,14 @@ def _fetch_babel_tabs(page: Page, source: dict) -> list[dict]:
                 _scroll_feed(page, bucket, config.MAX_CANDIDATES_PER_CATEGORY)
                 _wait_for_quiet(bucket)
             except Exception as exc:
-                print(f"[fetch]   {source['name']}/{name} 失败: {exc}")
+                context.log(f"[fetch]   {source['name']}/{name} 失败: {exc}")
                 continue
             tab_goods = _limit_candidates([
                 {**item, "tab_category": name, "category_source": "page_tab", "source_rank": pos}
                 for pos, item in enumerate(bucket, 1)
             ])
             collected.extend(tab_goods)
-            print(
+            context.log(
                 f"[fetch]   {source['name']}/{name}: 候选 {len(tab_goods)} 个"
                 f"（上限 {config.MAX_CANDIDATES_PER_CATEGORY}）"
             )
@@ -280,7 +282,8 @@ def _fetch_babel_tabs(page: Page, source: dict) -> list[dict]:
         page.remove_listener("response", on_response)
 
 
-def _fetch_embedded_flex(page: Page, source: dict) -> list[dict]:
+def _fetch_embedded_flex(page: Page, source: dict, context: RunContext) -> list[dict]:
+    context.check_cancelled()
     page.goto(source["url"], wait_until="domcontentloaded", timeout=config.PAGE_TIMEOUT_MS)
     time.sleep(config.PAGE_READY_SECONDS)
     react_data = page.evaluate("window.__react_data__ || null")
@@ -291,11 +294,11 @@ def _fetch_embedded_flex(page: Page, source: dict) -> list[dict]:
     for item in goods:
         item["category_source"] = "source_fallback_no_tab"
         item["data_quality"] = "页面未提供销量与类目字段，保留页面原始排序"
-    print(f"[fetch] {source['name']}/{category}: 候选 {len(goods)} 个")
+    context.log(f"[fetch] {source['name']}/{category}: 候选 {len(goods)} 个")
     return goods
 
 
-def _fetch_flex_feed_tabs(page: Page, source: dict) -> list[dict]:
+def _fetch_flex_feed_tabs(page: Page, source: dict, context: RunContext) -> list[dict]:
     bucket: list[dict] = []
 
     def on_response(response):
@@ -314,9 +317,10 @@ def _fetch_flex_feed_tabs(page: Page, source: dict) -> list[dict]:
         if not names:
             raise RuntimeError("未发现京东特价类目 Tab")
         expected_categories = {name for name in names if name and name not in config.SKIP_TABS}
-        print(f"[fetch] {source['name']} 发现 {len(names)} 个 Tab: {names}")
+        context.log(f"[fetch] {source['name']} 发现 {len(names)} 个 Tab: {names}")
         collected: list[dict] = []
         for index, name in enumerate(names):
+            context.check_cancelled()
             if not name or name in config.SKIP_TABS:
                 continue
             time.sleep(0.4)
@@ -330,14 +334,14 @@ def _fetch_flex_feed_tabs(page: Page, source: dict) -> list[dict]:
                 _scroll_feed(page, bucket, config.MAX_CANDIDATES_PER_CATEGORY)
                 _wait_for_quiet(bucket)
             except Exception as exc:
-                print(f"[fetch]   {source['name']}/{name} 失败: {exc}")
+                context.log(f"[fetch]   {source['name']}/{name} 失败: {exc}")
                 continue
             tab_goods = _limit_candidates([
                 {**item, "tab_category": name, "category_source": "page_tab", "source_rank": pos}
                 for pos, item in enumerate(bucket, 1)
             ])
             collected.extend(tab_goods)
-            print(
+            context.log(
                 f"[fetch]   {source['name']}/{name}: 候选 {len(tab_goods)} 个"
                 f"（上限 {config.MAX_CANDIDATES_PER_CATEGORY}）"
             )
@@ -421,17 +425,18 @@ def _rank_detail_products(detail_page: Page, tab_name: str, board_name: str) -> 
     return goods
 
 
-def _fetch_rank_drilldown(page: Page, source: dict) -> list[dict]:
+def _fetch_rank_drilldown(page: Page, source: dict, context: RunContext) -> list[dict]:
     page.goto(source["url"], wait_until="domcontentloaded", timeout=config.PAGE_TIMEOUT_MS)
     time.sleep(config.PAGE_READY_SECONDS)
     names = _tab_names(page, source["tab_selector"])
     if not names:
         raise RuntimeError("未发现排行榜类目 Tab")
     expected_categories = {name for name in names if name and name not in config.SKIP_TABS}
-    print(f"[fetch] {source['name']} 发现 {len(names)} 个 Tab: {names}")
+    context.log(f"[fetch] {source['name']} 发现 {len(names)} 个 Tab: {names}")
     collected: list[dict] = []
 
     for index, name in enumerate(names):
+        context.check_cancelled()
         if not name or name in config.SKIP_TABS:
             continue
         try:
@@ -458,9 +463,9 @@ def _fetch_rank_drilldown(page: Page, source: dict) -> list[dict]:
             finally:
                 detail_page.close()
             collected.extend(goods)
-            print(f"[fetch]   {source['name']}/{name}/{board_name}: {len(goods)} 个")
+            context.log(f"[fetch]   {source['name']}/{name}/{board_name}: {len(goods)} 个")
         except (PlaywrightTimeoutError, Exception) as exc:
-            print(f"[fetch]   {source['name']}/{name} 下钻失败: {exc}")
+            context.log(f"[fetch]   {source['name']}/{name} 下钻失败: {exc}")
             continue
     actual_categories = {str(item.get("tab_category") or "") for item in collected}
     missing_categories = sorted(expected_categories - actual_categories)
@@ -477,17 +482,26 @@ ADAPTERS = {
 }
 
 
-def fetch_source(page: Page, source: dict) -> list[dict]:
+def fetch_source(page: Page, source: dict, context: RunContext | None = None) -> list[dict]:
+    context = context or RunContext()
+    context.check_cancelled()
     adapter_name = source.get("adapter")
     adapter = ADAPTERS.get(adapter_name)
     if not adapter:
         raise ValueError(f"未知来源适配器: {adapter_name}")
-    print(f"[fetch] {source['name']} -> {adapter_name}")
-    return adapter(page, source)
+    context.log(f"[fetch] {source['name']} -> {adapter_name}")
+    return adapter(page, source, context)
 
 
-def _fetch_source_isolated(source: dict, headless: bool, auth_path: str) -> list[dict]:
+def _fetch_source_isolated(
+    source: dict,
+    headless: bool,
+    auth_path: str,
+    context: RunContext | None = None,
+) -> list[dict]:
     """在线程内部创建并使用 Playwright，避免同步 Page 跨线程共享。"""
+    context = context or RunContext()
+    context.check_cancelled()
     context_options = {"viewport": {"width": 1440, "height": 900}}
     if os.path.exists(auth_path):
         context_options["storage_state"] = auth_path
@@ -497,30 +511,37 @@ def _fetch_source_isolated(source: dict, headless: bool, auth_path: str) -> list
         context = browser.new_context(**context_options)
         page = context.new_page()
         try:
-            return fetch_source(page, source)
+            return fetch_source(page, source, context)
         finally:
             page.close()
             context.close()
             browser.close()
 
 
-def fetch_all(headless: bool = False, allow_partial: bool = False) -> dict:
+def fetch_all(
+    headless: bool = False,
+    allow_partial: bool = False,
+    context: RunContext | None = None,
+) -> dict:
     """抓取全部来源；默认任一来源为空就失败，避免静默生成残缺报表。"""
+    context = context or RunContext()
+    context.check_cancelled()
     auth_path = os.path.abspath(config.AUTH_PATH)
     if os.path.exists(auth_path):
-        print(f"[auth] 使用登录态: {auth_path}")
+        context.log(f"[auth] 使用登录态: {auth_path}")
     else:
-        print(f"[auth] 未找到登录态，使用匿名访问: {auth_path}")
+        context.log(f"[auth] 未找到登录态，使用匿名访问: {auth_path}")
 
     worker_count = min(config.FETCH_WORKERS, len(config.SOURCES))
-    print(f"[fetch] 启用 {worker_count} 个独立浏览器并发（按来源隔离）")
+    context.log(f"[fetch] 启用 {worker_count} 个独立浏览器并发（按来源隔离）")
     completed: dict[str, dict] = {}
     with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="selection-fetch") as executor:
         future_sources = {
-            executor.submit(_fetch_source_isolated, source, headless, auth_path): source
+            executor.submit(_fetch_source_isolated, source, headless, auth_path, context): source
             for source in config.SOURCES
         }
         for future in as_completed(future_sources):
+            context.check_cancelled()
             source = future_sources[future]
             error = ""
             try:
@@ -528,7 +549,7 @@ def fetch_all(headless: bool = False, allow_partial: bool = False) -> dict:
             except Exception as exc:
                 goods = []
                 error = f"{type(exc).__name__}: {exc}"
-                print(f"[fetch] {source['name']} 失败: {error}")
+                context.log(f"[fetch] {source['name']} 失败: {error}")
             categories = sorted({str(g.get("tab_category") or "未分类") for g in goods})
             completed[source["key"]] = {
                 "name": source["name"],
@@ -546,9 +567,3 @@ def fetch_all(headless: bool = False, allow_partial: bool = False) -> dict:
     if empty_sources and not allow_partial:
         raise RuntimeError(f"以下来源没有抓到商品，拒绝生成残缺报表: {', '.join(empty_sources)}")
     return result
-
-
-if __name__ == "__main__":
-    data = fetch_all(headless=False)
-    for payload in data.values():
-        print(f"{payload['name']}: {len(payload['goods'])} 个商品 / {len(payload['categories'])} 个类目")

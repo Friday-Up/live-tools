@@ -46,7 +46,7 @@ class SourceAdapterTest(unittest.TestCase):
             for index in range(4)
         ]
 
-        def fake_fetch(source, headless, auth_path):
+        def fake_fetch(source, headless, auth_path, context=None):
             time.sleep(0.2)
             return [{"skuId": source["key"], "tab_category": "类目"}]
 
@@ -487,7 +487,7 @@ class SelectionAndRecommendationTest(unittest.TestCase):
         )
         calls = []
 
-        def fake_select(_source, _category, candidates, limit):
+        def fake_select(_source, _category, candidates, limit, _context=None):
             calls.append([item["sku_id"] for item in candidates])
             selected_ids = ["9", "2", "7", "1", "4", "6", "3"]
             return {
@@ -554,7 +554,7 @@ class SelectionAndRecommendationTest(unittest.TestCase):
             },
         ]
 
-        def fake_select(_source, _category, ai_candidates, _limit):
+        def fake_select(_source, _category, ai_candidates, _limit, _context=None):
             self.assertEqual([item["sku_id"] for item in ai_candidates], ["device"])
             return {
                 "selected": [
@@ -585,7 +585,7 @@ class SelectionAndRecommendationTest(unittest.TestCase):
         )
 
     def test_main_separates_candidate_pool_from_final_selection(self):
-        import main
+        from product_selection_agent import service as main
 
         goods = [
             {
@@ -606,7 +606,7 @@ class SelectionAndRecommendationTest(unittest.TestCase):
             }
         }
 
-        def fake_select(_source, _category, candidates, _limit):
+        def fake_select(_source, _category, candidates, _limit, _context=None):
             selected = candidates[:7]
             return {
                 "selected": [
@@ -626,13 +626,13 @@ class SelectionAndRecommendationTest(unittest.TestCase):
                 "warnings": [],
             }
 
-        with mock.patch("main._load_offline", return_value=raw), mock.patch.multiple(
+        with mock.patch("product_selection_agent.service._load_offline", return_value=raw), mock.patch.multiple(
             "product_selection_agent.recommender.config",
             AI_API_URL="http://model.test/chat/completions",
             AI_API_KEY="key",
             AI_MODEL="model",
         ), mock.patch("product_selection_agent.recommender._llm_select_category", side_effect=fake_select):
-            payload = main.run(offline_path="ignored.json")
+            payload = main.run_selection(offline_path="ignored.json")
 
         candidates = payload["candidate_pool"]["测试来源"]["测试类目"]
         selected = payload["selection"]["测试来源"]["测试类目"]
@@ -659,7 +659,7 @@ class SelectionAndRecommendationTest(unittest.TestCase):
         self.assertTrue(payload["ai_complete"])
 
     def test_ai_completeness_lists_fallback_categories(self):
-        import main
+        from product_selection_agent import service as main
 
         recommendation = {
             "测试来源": {
@@ -689,7 +689,7 @@ class SelectionAndRecommendationTest(unittest.TestCase):
         )
 
     def test_excel_contains_auditable_candidate_pool_sheet(self):
-        import main
+        from product_selection_agent import service as main
         from openpyxl import load_workbook
 
         product = {
@@ -772,7 +772,7 @@ class SelectionAndRecommendationTest(unittest.TestCase):
             for index in range(1, 11)
         ]
         selection = select_top(parse_all({"test": {"name": "测试来源", "goods": goods}}))
-        def fake_select(_source, _category, candidates, _limit):
+        def fake_select(_source, _category, candidates, _limit, _context=None):
             selected = candidates[:-1]
             return {
                 "selected": [
@@ -817,7 +817,7 @@ class SelectionAndRecommendationTest(unittest.TestCase):
         ]
         selection = select_top(parse_all({"test": {"name": "测试来源", "goods": goods}}))
 
-        def fake_select(_source, _category, candidates, _limit):
+        def fake_select(_source, _category, candidates, _limit, _context=None):
             time.sleep(0.2)
             return {
                 "selected": [

@@ -17,6 +17,7 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from . import config
+from .runtime import RunContext
 
 
 _MODEL_NETWORK_ERRORS = (
@@ -36,9 +37,11 @@ _AI_RATE_LOCK = threading.Lock()
 _AI_REQUEST_TIMES: deque[float] = deque()
 
 
-def _wait_for_ai_rate_slot() -> None:
+def _wait_for_ai_rate_slot(context: RunContext | None = None) -> None:
     """限制滚动 1 秒内的模型请求数，补偿重试也遵守同一上限。"""
+    context = context or RunContext()
     while True:
+        context.check_cancelled()
         with _AI_RATE_LOCK:
             now = time.monotonic()
             while _AI_REQUEST_TIMES and now - _AI_REQUEST_TIMES[0] >= 1.0:
@@ -425,7 +428,9 @@ def _llm_select_category(
     category_name: str,
     candidates: list[dict],
     limit: int,
+    context: RunContext | None = None,
 ) -> dict:
+    context = context or RunContext()
     prompt = _build_selection_prompt(source_name, category_name, candidates, limit)
     payload = {
         "model": config.AI_MODEL,
@@ -447,7 +452,8 @@ def _llm_select_category(
         },
         method="POST",
     )
-    _wait_for_ai_rate_slot()
+    _wait_for_ai_rate_slot(context)
+    context.check_cancelled()
     with urllib.request.urlopen(request, timeout=config.AI_TIMEOUT_SECONDS) as response:
         content = _read_stream_content(response)
     try:
@@ -492,7 +498,9 @@ def _recommend_category(
     recommend_top: int,
     mode: str,
     circuit: _AICircuitBreaker,
+    context: RunContext,
 ) -> dict:
+    context.check_cancelled()
     scored: list[dict] = []
     for item in items:
         row = dict(item)
@@ -515,17 +523,17 @@ def _recommend_category(
         circuit_error = circuit.current_error()
         if circuit_error:
             ai_error = f"模型熔断，跳过调用: {circuit_error}"
-            print(f"[recommend] {source_name}/{category_name}: {ai_error}")
+            context.log(f"[recommend] {source_name}/{category_name}: {ai_error}")
         else:
             try:
                 if platform_excluded:
-                    print(
+                    context.log(
                         f"[recommend] {source_name}/{category_name}: "
                         f"平台类目ID预过滤 {len(platform_excluded)} 个串类候选"
                     )
                 if not ai_candidates:
                     raise ValueError("平台类目ID预过滤后没有可供 AI 选择的候选")
-                print(
+                context.log(
                     f"[recommend] {source_name}/{category_name}: "
                     f"正在由 AI 从 {len(ai_candidates)} 个候选中筛选 Top{recommend_top}（本类目 1 次请求）"
                 )
@@ -534,6 +542,7 @@ def _recommend_category(
                     category_name,
                     ai_candidates,
                     recommend_top,
+                    context,
                 )
                 item_by_sku = {item["sku_id"]: item for item in scored}
                 picks = []
@@ -562,23 +571,23 @@ def _recommend_category(
                         "score_detail": item["score_detail"],
                     }
                 ai_succeeded = True
-                print(
+                context.log(
                     f"[recommend] {source_name}/{category_name}: "
                     f"AI 从 {len(ai_candidates)} 个候选中选出 {len(picks)} 个完成"
                 )
                 if shortfall_reason:
-                    print(f"[recommend] {source_name}/{category_name}: {shortfall_reason}")
+                    context.log(f"[recommend] {source_name}/{category_name}: {shortfall_reason}")
             except _MODEL_REQUEST_ERRORS as exc:
                 ai_error = f"{type(exc).__name__}: {exc}"
                 network_failure = isinstance(exc, _MODEL_NETWORK_ERRORS)
-                print(f"[recommend] {source_name}/{category_name}: 模型失败，回退规则评分: {ai_error}")
+                context.log(f"[recommend] {source_name}/{category_name}: 模型失败，回退规则评分: {ai_error}")
 
             # JSON/字段格式错误说明模型网络仍可达，不能因此跳过后续所有类目。
             opened_error = circuit.record(not network_failure, ai_error)
             if opened_error:
-                print(f"[recommend] 达到熔断阈值: {opened_error}")
+                context.log(f"[recommend] 达到熔断阈值: {opened_error}")
     elif scored:
-        print(f"[recommend] {source_name}/{category_name}: 规则推荐 {len(fallback_picks)} 个完成")
+        context.log(f"[recommend] {source_name}/{category_name}: 规则推荐 {len(fallback_picks)} 个完成")
 
     if not ai_succeeded:
         picks = []
@@ -611,7 +620,13 @@ def _recommend_category(
     }
 
 
-def recommend(candidate_pool: dict, recommend_top: int | None = None) -> dict:
+def recommend(
+    candidate_pool: dict,
+    recommend_top: int | None = None,
+    context: RunContext | None = None,
+) -> dict:
+    context = context or RunContext()
+    context.check_cancelled()
     recommend_top = recommend_top or config.RECOMMEND_TOP_PER_CATEGORY
     mode = recommendation_mode()
     jobs = [
@@ -625,7 +640,7 @@ def recommend(candidate_pool: dict, recommend_top: int | None = None) -> dict:
 
     if mode == "llm_enhanced" and jobs:
         worker_count = min(config.AI_CATEGORY_WORKERS, len(jobs))
-        print(
+        context.log(
             f"[recommend] 启用 {worker_count} 个类目并行；"
             f"每类目全部候选仅 1 次请求，最多选 Top{recommend_top}；"
             f"全局上限 {config.AI_RPS_LIMIT} RPS"
@@ -640,13 +655,16 @@ def recommend(candidate_pool: dict, recommend_top: int | None = None) -> dict:
                     recommend_top,
                     mode,
                     circuit,
+                    context,
                 ): (source_name, category_name)
                 for source_name, category_name, items in jobs
             }
             for future in as_completed(futures):
+                context.check_cancelled()
                 completed[futures[future]] = future.result()
     else:
         for source_name, category_name, items in jobs:
+            context.check_cancelled()
             completed[(source_name, category_name)] = _recommend_category(
                 source_name,
                 category_name,
@@ -654,6 +672,7 @@ def recommend(candidate_pool: dict, recommend_top: int | None = None) -> dict:
                 recommend_top,
                 mode,
                 circuit,
+                context,
             )
 
     # 并发完成顺序不稳定，按候选池原顺序重建，保证 JSON/Excel 顺序稳定。
