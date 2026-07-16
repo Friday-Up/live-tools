@@ -1,0 +1,7 @@
+__pycache__/
+.pytest_cache/
+output/*.json
+output/*.xlsx
+output/playwright/
+model-config.local.json
+!output/.gitkeep

@@ -1,0 +1,5 @@
+{
+  "SELECTION_AI_API_URL": "https://your-gateway.example/v1/chat/completions",
+  "SELECTION_AI_API_KEY": "replace-with-your-api-key",
+  "SELECTION_AI_MODEL": "your-model"
+}
