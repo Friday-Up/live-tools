@@ -500,21 +500,21 @@ def _fetch_source_isolated(
     context: RunContext | None = None,
 ) -> list[dict]:
     """在线程内部创建并使用 Playwright，避免同步 Page 跨线程共享。"""
-    context = context or RunContext()
-    context.check_cancelled()
+    run_context = context or RunContext()
+    run_context.check_cancelled()
     context_options = {"viewport": {"width": 1440, "height": 900}}
     if os.path.exists(auth_path):
         context_options["storage_state"] = auth_path
 
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=headless)
-        context = browser.new_context(**context_options)
-        page = context.new_page()
+        browser_context = browser.new_context(**context_options)
+        page = browser_context.new_page()
         try:
-            return fetch_source(page, source, context)
+            return fetch_source(page, source, run_context)
         finally:
             page.close()
-            context.close()
+            browser_context.close()
             browser.close()
 
 

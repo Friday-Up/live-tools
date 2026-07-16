@@ -115,7 +115,7 @@ def _load_offline(path: str) -> dict:
     with open(path, encoding="utf-8") as handle:
         raw = json.load(handle)
     if isinstance(raw, list):
-        from product_selection_agent.fetcher import _extract_goods_from_body
+        from .fetcher import _extract_goods_from_body
 
         goods = []
         for body in raw:

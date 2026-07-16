@@ -23,6 +23,7 @@ from product_selection_agent import recommender
 from product_selection_agent.recommender import recommend
 from product_selection_agent.recommender import _extract_json_object
 from product_selection_agent.recommender import _read_stream_content
+from product_selection_agent.runtime import RunContext
 from product_selection_agent.selector import select_top
 
 
@@ -62,6 +63,31 @@ class SourceAdapterTest(unittest.TestCase):
 
         self.assertEqual(list(result), [source["key"] for source in sources])
         self.assertLess(elapsed, 0.6)
+
+    def test_isolated_browser_keeps_run_context_for_logging_and_stop(self):
+        source = {"key": "test", "name": "测试来源", "adapter": "test"}
+        run_context = RunContext(log_callback=lambda _message: None)
+        page = mock.MagicMock(name="page")
+        browser_context = mock.MagicMock(name="browser_context")
+        browser_context.new_page.return_value = page
+        browser = mock.MagicMock(name="browser")
+        browser.new_context.return_value = browser_context
+        playwright = mock.MagicMock(name="playwright")
+        playwright.chromium.launch.return_value = browser
+        manager = mock.MagicMock(name="playwright_manager")
+        manager.__enter__.return_value = playwright
+
+        with mock.patch.object(fetcher, "sync_playwright", return_value=manager), mock.patch.object(
+            fetcher, "fetch_source", return_value=[]
+        ) as fetch_source:
+            fetcher._fetch_source_isolated(
+                source,
+                headless=True,
+                auth_path="/path/does/not/exist",
+                context=run_context,
+            )
+
+        fetch_source.assert_called_once_with(page, source, run_context)
 
     def test_gov_goods_nested_sku_is_kept(self):
         body = {

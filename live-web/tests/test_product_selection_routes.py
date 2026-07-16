@@ -117,6 +117,33 @@ class ProductSelectionRoutesTest(unittest.TestCase):
         self.assertEqual(unknown.status_code, 404)
         self.assertEqual(bad_kind.status_code, 404)
 
+    def test_worker_exposes_failed_and_cancelled_states(self):
+        with mock.patch.object(web_app.threading, "Thread", ImmediateThread), mock.patch.object(
+            web_app,
+            "execute_product_selection",
+            side_effect=RuntimeError("抓取失败"),
+        ):
+            failed = self.client.post("/api/product-selection/start", json={})
+
+        self.assertEqual(failed.status_code, 202)
+        failed_status = self.client.get("/api/product-selection/status").get_json()
+        self.assertEqual(failed_status["stage"], "failed")
+        self.assertFalse(failed_status["success"])
+        self.assertIn("抓取失败", failed_status["error"])
+
+        with mock.patch.object(web_app.threading, "Thread", ImmediateThread), mock.patch.object(
+            web_app,
+            "execute_product_selection",
+            side_effect=web_app.SelectionCancelled("选品任务已停止"),
+        ):
+            cancelled = self.client.post("/api/product-selection/start", json={})
+
+        self.assertEqual(cancelled.status_code, 202)
+        cancelled_status = self.client.get("/api/product-selection/status").get_json()
+        self.assertEqual(cancelled_status["stage"], "cancelled")
+        self.assertFalse(cancelled_status["success"])
+        self.assertIn("已停止", cancelled_status["error"])
+
 
 if __name__ == "__main__":
     unittest.main()
