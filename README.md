@@ -90,7 +90,13 @@ http://127.0.0.1:8080
 3. 双击 `启动直播工具.command`，浏览器会自动打开 `http://127.0.0.1:8080`。
 4. 用完后双击 `关闭直播工具.command`。
 
-当前自动构建产物尚未进行 Apple 开发者签名和公证。首次启动如果被 macOS 拦截，请在 Finder 中右键 `启动直播工具.command`，选择“打开”并确认；如果系统继续拦截内部程序，请到“系统设置 → 隐私与安全性”中对 `Live-Tools-Web` 选择“仍要打开”。不要关闭系统安全保护。
+当前自动构建产物会校验并补签内置 Python 运行时，但尚未进行 Apple Developer ID 签名和公证。首次启动如果被 macOS 拦截，请在 Finder 中右键 `启动直播工具.command`，选择“打开”并确认。如果提示 `Python.framework` 或 `Live-Tools-Web`“已损坏”，请在终端对**整个解压目录**递归移除下载隔离标记（可把该目录拖入终端替换示例路径）：
+
+```bash
+xattr -dr com.apple.quarantine "/完整路径/Live-Tools-Web"
+```
+
+然后重新右键打开 `启动直播工具.command`。不要只处理主程序或 `.command` 文件，也不要关闭系统安全保护。
 
 ### 开发者源码运行
 
@@ -513,7 +519,7 @@ Windows 和 macOS 包由 GitHub Actions 自动构建：
 - 构建产物：`Live-Tools-Windows.zip`、`Live-Tools-macOS-Intel.zip`、`Live-Tools-macOS-Apple-Silicon.zip`
 - Release 条件：推送 `v*` 标签时自动上传到 GitHub Release
 
-macOS 使用原生 Intel 和 Apple Silicon Runner 分别构建，避免把单架构程序发给另一类 Mac。当前未配置 Apple 代码签名与公证；如果以后有 Apple Developer ID，应把证书只配置在 GitHub Actions 的签名步骤中，模型密钥仍然不能放进客户端包。
+macOS 使用原生 Intel 和 Apple Silicon Runner 分别构建，避免把单架构程序发给另一类 Mac。构建流程会对 PyInstaller 内置的 `Python.framework` 重新签名，并在 ZIP 解压后再次验签；当前仍未配置 Apple Developer ID 签名与公证。如果以后有 Apple Developer ID，应把证书只配置在 GitHub Actions 的签名步骤中，模型密钥仍然不能放进客户端包。
 
 本地开发验证通过后，再按需要创建新版本标签：
 

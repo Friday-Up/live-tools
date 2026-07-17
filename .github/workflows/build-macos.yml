@@ -129,6 +129,14 @@ jobs:
           cp "product-selection-agent/model-config.example.json" "$dist_path/product-selection-agent/model-config.example.json"
           chmod +x "$dist_path/Live-Tools-Web" "$dist_path/启动直播工具.command" "$dist_path/关闭直播工具.command"
 
+      - name: Sign packaged macOS runtime
+        run: |
+          dist_path="dist/Live-Tools-Web"
+          xattr -cr "$dist_path"
+          codesign --force --deep --sign - "$dist_path/Python.framework"
+          codesign --verify --deep --strict --verbose=2 "$dist_path/Python.framework"
+          codesign --verify --strict --verbose=2 "$dist_path/Live-Tools-Web"
+
       - name: Verify build output
         run: |
           dist_path="dist/Live-Tools-Web"
@@ -188,6 +196,16 @@ jobs:
 
       - name: Compress output
         run: ditto -c -k --sequesterRsrc --keepParent "dist/Live-Tools-Web" "dist/${{ matrix.archive }}"
+
+      - name: Verify archived macOS package
+        run: |
+          verify_dir="$RUNNER_TEMP/live-tools-archive-check"
+          verify_app="$verify_dir/Live-Tools-Web"
+          rm -rf "$verify_dir"
+          mkdir -p "$verify_dir"
+          ditto -x -k "dist/${{ matrix.archive }}" "$verify_dir"
+          codesign --verify --deep --strict --verbose=2 "$verify_app/Python.framework"
+          codesign --verify --strict --verbose=2 "$verify_app/Live-Tools-Web"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

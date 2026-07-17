@@ -47,6 +47,43 @@ class MacOSPackagingTest(unittest.TestCase):
         self.assertIn("ditto -c -k --sequesterRsrc --keepParent", content)
         self.assertIn("actions/upload-artifact@v4", content)
 
+    def test_github_workflow_signs_embedded_python_framework(self):
+        workflow = LIVE_ROOT / ".github" / "workflows" / "build-macos.yml"
+
+        content = workflow.read_text(encoding="utf-8")
+        self.assertIn("Sign packaged macOS runtime", content)
+        self.assertIn(
+            'codesign --force --deep --sign - "$dist_path/Python.framework"',
+            content,
+        )
+        self.assertIn(
+            'codesign --verify --deep --strict --verbose=2 "$dist_path/Python.framework"',
+            content,
+        )
+
+    def test_github_workflow_verifies_signatures_after_archive_round_trip(self):
+        workflow = LIVE_ROOT / ".github" / "workflows" / "build-macos.yml"
+
+        content = workflow.read_text(encoding="utf-8")
+        self.assertIn("Verify archived macOS package", content)
+        self.assertIn('ditto -x -k "dist/${{ matrix.archive }}" "$verify_dir"', content)
+        self.assertIn(
+            'codesign --verify --deep --strict --verbose=2 "$verify_app/Python.framework"',
+            content,
+        )
+        self.assertIn(
+            'codesign --verify --strict --verbose=2 "$verify_app/Live-Tools-Web"',
+            content,
+        )
+
+    def test_readme_removes_quarantine_from_the_whole_macos_package(self):
+        readme = (LIVE_ROOT / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn(
+            'xattr -dr com.apple.quarantine "/完整路径/Live-Tools-Web"',
+            readme,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
