@@ -20,7 +20,6 @@ from config import CONFIG
 from utils.browser_manager import BrowserManager
 from utils.jd_crawler import capture_low_price_result_screenshots_with_page_factory, crawl_sku
 from utils.excel_handler import read_sku_list, write_results
-from utils.cleanup import auto_cleanup
 from utils.audit_runner import run_sku_batch
 
 
@@ -139,9 +138,6 @@ def main():
     print("="*60)
     print("🚀 直播-点菜 SKU 巡检 - 测价工具")
     print("="*60)
-
-    # 自动清理 Playwright 临时文件
-    auto_cleanup()
 
     # 获取价格门槛和输入文件
     threshold_price, input_file = get_inputs()

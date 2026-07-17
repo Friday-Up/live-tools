@@ -1,7 +1,6 @@
 """京东直播后台直播间创建浏览器自动化。"""
 from __future__ import annotations
 
-import os
 import sys
 import time
 from pathlib import Path

@@ -29,6 +29,18 @@ class WindowsPackagingTest(unittest.TestCase):
         self.assertIn('Get-Date -Format yyyyMMdd', content)
         self.assertIn('%PYTHON_CMD% app.py >> "%LOG_FILE%" 2>&1', content)
 
+    def test_legacy_price_audit_web_entry_is_not_kept_alongside_unified_web(self):
+        price_root = LIVE_ROOT / "live-sku-price-audit"
+
+        for legacy_path in (
+            price_root / "app.py",
+            price_root / "templates" / "index.html",
+            price_root / "start.sh",
+            price_root / "start.bat",
+            price_root / "utils" / "cleanup.py",
+        ):
+            self.assertFalse(legacy_path.exists(), f"应删除旧入口: {legacy_path}")
+
     def test_github_workflow_builds_live_tools_from_unified_web_entry(self):
         workflow = LIVE_ROOT / ".github" / "workflows" / "build-windows.yml"
 

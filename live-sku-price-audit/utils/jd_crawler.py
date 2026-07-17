@@ -708,13 +708,6 @@ def selected_item_text(items):
     return None
 
 
-def wait_page_event_tick(page, timeout_ms):
-    try:
-        page.wait_for_timeout(timeout_ms)
-    except Exception:
-        time.sleep(timeout_ms / 1000)
-
-
 def select_item_and_read_price_fast(page, get_items_func, item_text, price_type='current',
                                     response_timeout=FAST_PRICE_RESPONSE_TIMEOUT_MS):
     """

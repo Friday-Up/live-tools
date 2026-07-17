@@ -5,8 +5,7 @@
 import os
 import sys
 
-# 注意：这个 BASE_DIR 在源码运行时有效
-# 打包后，app.py 会重新计算并覆盖这个值
+# 源码运行时使用模块目录；统一 Windows 包中使用可执行文件目录。
 if getattr(sys, 'frozen', False):
     # PyInstaller 打包后的 EXE 运行
     base_dir = os.path.dirname(sys.executable)
