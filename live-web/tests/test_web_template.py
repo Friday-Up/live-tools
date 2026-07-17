@@ -67,7 +67,7 @@ class WebTemplateTest(unittest.TestCase):
         self.assertIn("https://joyspace.jd.com/pages/Knx10idaiNsUUaa7fD0C", html)
         self.assertIn('target="_blank"', html)
         self.assertIn('rel="noopener noreferrer"', html)
-        self.assertIn("SKU 测价、绑定券码/促销ID、批量创建直播间、蓝屏自动截图，选品 Agent", html)
+        self.assertIn("SKU 测价、绑定券码/促销ID、批量创建直播间、蓝屏自动截图、选品 Agent", html)
         self.assertNotIn("新增京东选品 Agent", html)
         self.assertNotIn("直播 SKU 价格巡检工具", html)
         self.assertIn("SKU 测价", html)
