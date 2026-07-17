@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import stat
 import unittest
@@ -13,11 +14,13 @@ class MacOSPackagingTest(unittest.TestCase):
 
         for launcher in (start, stop):
             self.assertTrue(launcher.exists())
-            self.assertTrue(launcher.stat().st_mode & stat.S_IXUSR)
+            if os.name != "nt":
+                self.assertTrue(launcher.stat().st_mode & stat.S_IXUSR)
 
         start_content = start.read_text(encoding="utf-8")
         stop_content = stop.read_text(encoding="utf-8")
         self.assertIn('APP="$SCRIPT_DIR/Live-Tools-Web"', start_content)
+        self.assertIn('PLAYWRIGHT_BROWSERS_PATH="$BROWSER_DIR"', start_content)
         self.assertIn("/api/health", start_content)
         self.assertIn('open "$URL"', start_content)
         self.assertIn("/api/shutdown", stop_content)
@@ -37,6 +40,9 @@ class MacOSPackagingTest(unittest.TestCase):
         self.assertIn("启动直播工具.command", content)
         self.assertIn("关闭直播工具.command", content)
         self.assertIn("model-config.example.json", content)
+        self.assertIn('browser_cache="$HOME/Library/Caches/ms-playwright"', content)
+        self.assertIn('ditto "$browser_cache" "$dist_path/ms-playwright"', content)
+        self.assertNotIn('PLAYWRIGHT_BROWSERS_PATH: "0"', content)
         self.assertIn("Private model config must not be included in the macOS package", content)
         self.assertIn("ditto -c -k --sequesterRsrc --keepParent", content)
         self.assertIn("actions/upload-artifact@v4", content)

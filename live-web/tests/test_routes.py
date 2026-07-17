@@ -14,6 +14,7 @@ from unittest.mock import patch
 import app as web_app
 
 from app import (
+    configure_packaged_playwright,
     create_app,
     resolve_live_dir,
     resolve_web_root,
@@ -35,6 +36,27 @@ class PromotionBindingRoutesTest(unittest.TestCase):
         web_root = source_root / "live-web"
         web_root.mkdir()
         self.assertEqual(resolve_web_root(source_root, source_app), web_root)
+
+    def test_packaged_app_uses_bundled_playwright_browser(self):
+        live_dir = Path(tempfile.mkdtemp())
+        browser_dir = live_dir / "ms-playwright"
+        browser_dir.mkdir()
+        environ = {}
+
+        selected = configure_packaged_playwright(live_dir, environ=environ, frozen=True)
+
+        self.assertEqual(selected, browser_dir)
+        self.assertEqual(environ["PLAYWRIGHT_BROWSERS_PATH"], str(browser_dir))
+
+    def test_packaged_app_preserves_explicit_playwright_browser_path(self):
+        environ = {"PLAYWRIGHT_BROWSERS_PATH": "/custom/browser"}
+
+        selected = configure_packaged_playwright(
+            Path(tempfile.mkdtemp()), environ=environ, frozen=True
+        )
+
+        self.assertIsNone(selected)
+        self.assertEqual(environ["PLAYWRIGHT_BROWSERS_PATH"], "/custom/browser")
 
     def test_web_entry_forces_utf8_stdio_for_windows_log_redirection(self):
         source = Path("app.py").read_text(encoding="utf-8")

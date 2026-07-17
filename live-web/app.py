@@ -43,7 +43,26 @@ def resolve_web_root(live_dir: str | Path, file_path: str | Path | None = None) 
     return Path(file_path or __file__).resolve().parent
 
 
+def configure_packaged_playwright(
+    live_dir: str | Path,
+    environ: dict[str, str] | None = None,
+    frozen: bool | None = None,
+) -> Path | None:
+    """Use the Chromium directory shipped beside the frozen executable."""
+    is_frozen = getattr(sys, "frozen", False) if frozen is None else frozen
+    target_environ = os.environ if environ is None else environ
+    if not is_frozen or target_environ.get("PLAYWRIGHT_BROWSERS_PATH"):
+        return None
+
+    browser_dir = Path(live_dir) / "ms-playwright"
+    if not browser_dir.is_dir():
+        return None
+    target_environ["PLAYWRIGHT_BROWSERS_PATH"] = str(browser_dir)
+    return browser_dir
+
+
 LIVE_DIR = resolve_live_dir()
+configure_packaged_playwright(LIVE_DIR)
 LIVE_WEB_ROOT = resolve_web_root(LIVE_DIR)
 PROMOTION_BINDING_ROOT = LIVE_DIR / "live-promotion-binding"
 PRICE_AUDIT_ROOT = LIVE_DIR / "live-sku-price-audit"

@@ -1007,28 +1007,31 @@ class SelectionAndRecommendationTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = main.save_excel(payload, directory, "test")
             workbook = load_workbook(path, read_only=True)
-            self.assertEqual(
-                workbook.sheetnames,
-                ["推荐结果", "选品明细", "候选池", "运行诊断"],
-            )
-            recommendation_headers = [
-                cell.value for cell in next(workbook["推荐结果"].iter_rows())
-            ]
-            self.assertNotIn("推荐模式", recommendation_headers)
-            headers = [cell.value for cell in next(workbook["候选池"].iter_rows())]
-            self.assertIn("候选排名", headers)
-            self.assertIn("最终是否入选", headers)
-            self.assertIn("AI是否入选", headers)
-            self.assertIn("AI推荐顺位", headers)
-            self.assertIn("淘汰原因", headers)
-            self.assertIn("合格不足说明", headers)
-            self.assertIn("选品方式", headers)
-            self.assertNotIn("推荐模式", headers)
-            mode_column = headers.index("选品方式") + 1
-            self.assertEqual(
-                workbook["候选池"].cell(row=2, column=mode_column).value,
-                "智能推荐",
-            )
+            try:
+                self.assertEqual(
+                    workbook.sheetnames,
+                    ["推荐结果", "选品明细", "候选池", "运行诊断"],
+                )
+                recommendation_headers = [
+                    cell.value for cell in next(workbook["推荐结果"].iter_rows())
+                ]
+                self.assertNotIn("推荐模式", recommendation_headers)
+                headers = [cell.value for cell in next(workbook["候选池"].iter_rows())]
+                self.assertIn("候选排名", headers)
+                self.assertIn("最终是否入选", headers)
+                self.assertIn("AI是否入选", headers)
+                self.assertIn("AI推荐顺位", headers)
+                self.assertIn("淘汰原因", headers)
+                self.assertIn("合格不足说明", headers)
+                self.assertIn("选品方式", headers)
+                self.assertNotIn("推荐模式", headers)
+                mode_column = headers.index("选品方式") + 1
+                self.assertEqual(
+                    workbook["候选池"].cell(row=2, column=mode_column).value,
+                    "智能推荐",
+                )
+            finally:
+                workbook.close()
 
     def test_fewer_selected_products_do_not_trigger_retry(self):
         goods = [

@@ -12,7 +12,6 @@ permissions:
   contents: write
 
 env:
-  PLAYWRIGHT_BROWSERS_PATH: "0"
   PYTHONUTF8: "1"
   PYTHONIOENCODING: "utf-8"
 
@@ -51,7 +50,9 @@ jobs:
           pip install pyinstaller
 
       - name: Install Playwright Chromium
-        run: playwright install chromium
+        run: |
+          playwright install chromium
+          test -d "$HOME/Library/Caches/ms-playwright"
 
       - name: Run unit tests
         run: |
@@ -118,10 +119,13 @@ jobs:
       - name: Copy launchers and runtime folders
         run: |
           dist_path="dist/Live-Tools-Web"
+          browser_cache="$HOME/Library/Caches/ms-playwright"
           test -d "$dist_path"
+          test -d "$browser_cache"
           cp "启动直播工具.command" "$dist_path/启动直播工具.command"
           cp "关闭直播工具.command" "$dist_path/关闭直播工具.command"
           mkdir -p "$dist_path/runtime" "$dist_path/product-selection-agent"
+          ditto "$browser_cache" "$dist_path/ms-playwright"
           cp "product-selection-agent/model-config.example.json" "$dist_path/product-selection-agent/model-config.example.json"
           chmod +x "$dist_path/Live-Tools-Web" "$dist_path/启动直播工具.command" "$dist_path/关闭直播工具.command"
 
@@ -140,6 +144,7 @@ jobs:
             "live-bigscreen-capture/bigscreen_capture"
             "product-selection-agent/product_selection_agent"
             "product-selection-agent/model-config.example.json"
+            "ms-playwright"
           )
 
           for item in "${required[@]}"; do
@@ -162,7 +167,8 @@ jobs:
       - name: Smoke test packaged app
         run: |
           dist_path="dist/Live-Tools-Web"
-          "$dist_path/Live-Tools-Web" > "$RUNNER_TEMP/live-tools-smoke.log" 2>&1 &
+          PLAYWRIGHT_BROWSERS_PATH="$PWD/$dist_path/ms-playwright" \
+            "$dist_path/Live-Tools-Web" > "$RUNNER_TEMP/live-tools-smoke.log" 2>&1 &
           app_pid=$!
           trap 'kill "$app_pid" >/dev/null 2>&1 || true' EXIT
 

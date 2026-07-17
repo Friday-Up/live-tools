@@ -10,6 +10,7 @@ LOG_DIR="$SCRIPT_DIR/logs"
 LOG_FILE="$LOG_DIR/live-tools.log"
 PID_FILE="$LOG_DIR/live-tools.pid"
 APP="$SCRIPT_DIR/Live-Tools-Web"
+BROWSER_DIR="$SCRIPT_DIR/ms-playwright"
 
 mkdir -p "$LOG_DIR"
 
@@ -25,6 +26,9 @@ if [[ ! -f "$APP" ]]; then
 fi
 
 chmod +x "$APP"
+if [[ -d "$BROWSER_DIR" ]]; then
+  export PLAYWRIGHT_BROWSERS_PATH="$BROWSER_DIR"
+fi
 nohup "$APP" >> "$LOG_FILE" 2>&1 &
 APP_PID=$!
 echo "$APP_PID" > "$PID_FILE"
