@@ -300,14 +300,15 @@ https://jlive.jd.com/bigScreen?id=46794566
 | --- | --- |
 | `选品_时间.xlsx` | 推荐结果、选品明细、候选池和运行诊断 |
 
-开发者本地可把 `product-selection-agent/model-config.example.json` 复制为同目录的 `model-config.local.json`。真实配置已被 Git 忽略，Windows 和 macOS 构建也会在发现该文件时直接失败。未配置模型或调用失败时，程序使用规则评分继续产出结果。
+业务安装包默认调用 AllSpark 的固定模型代理接口；真实 JD 模型网关 Key 只保存在 AllSpark/Nacos，不会进入 Git 或客户端。开发者本地仍可把 `product-selection-agent/model-config.example.json` 复制为同目录的 `model-config.local.json` 覆盖代理配置。真实本地配置已被 Git 忽略，Windows 和 macOS 构建也会在发布目录发现该文件时直接失败。代理不可达或模型调用失败时，程序使用规则评分继续产出结果。
 
 ### 模型凭证安全
 
 - `model-config.local.json` 仅供开发者本机调试，不提交 Git、不复制到发布包。
 - 不要把真实供应商密钥放入前端、EXE、`.command`、环境配置示例，也不要通过 GitHub Secrets 注入后再打包；客户端中的内容最终都可能被读取。
-- 正式给业务人员使用 AI 时，推荐接入公司内网的服务端模型网关：真实供应商密钥只保存在服务端，客户端仅访问受身份认证和限流保护的内部接口。
-- 内部网关未准备好之前，发布包保持无密钥状态，选品功能自动使用可解释规则评分。
+- 业务客户端只访问 `AllSpark/api/live-tools/llm/chat/completions`，安装包中的受限 Token 不能直接调用 JD 模型网关。
+- AllSpark 从 Nacos 读取真实模型 Key，强制固定模型并对所有业务用户统一执行 5 RPS 限流；代理不可用时客户端自动使用可解释规则评分。
+- 当前代理默认地址沿用已有 HTTP 日志入口，仅用于联调；正式发布前应为 AllSpark 配置 HTTPS，并用 `LIVE_LLM_PROXY_URL` 覆盖为 HTTPS 地址。
 
 ---
 

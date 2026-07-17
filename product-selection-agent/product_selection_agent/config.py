@@ -129,7 +129,17 @@ def _ai_setting(name: str) -> str:
 
 
 # 兼容 OpenAI Chat Completions 协议的内部/外部网关。
-AI_API_URL = _ai_setting("SELECTION_AI_API_URL")
-AI_API_KEY = _ai_setting("SELECTION_AI_API_KEY")
-AI_MODEL = _ai_setting("SELECTION_AI_MODEL")
-AI_TIMEOUT_SECONDS = int(os.getenv("SELECTION_AI_TIMEOUT_SECONDS", "90"))
+# 业务安装包默认只携带受限的 AllSpark 代理 Token；真实 JD 模型网关 Key
+# 永远保存在 AllSpark/Nacos。开发者仍可通过 SELECTION_AI_* 覆盖用于本机调试。
+LLM_PROXY_URL = os.getenv(
+    "LIVE_LLM_PROXY_URL",
+    "http://114.67.72.156/AllSpark/api/live-tools/llm/chat/completions",
+).strip()
+LLM_PROXY_TOKEN = os.getenv("LIVE_LLM_PROXY_TOKEN", "live-tools-llm-2026").strip()
+LLM_PROXY_MODEL = os.getenv("LIVE_LLM_PROXY_MODEL", "OxygenLLM-30B-A3B").strip()
+
+AI_API_URL = _ai_setting("SELECTION_AI_API_URL") or LLM_PROXY_URL
+AI_API_KEY = _ai_setting("SELECTION_AI_API_KEY") or LLM_PROXY_TOKEN
+AI_MODEL = _ai_setting("SELECTION_AI_MODEL") or LLM_PROXY_MODEL
+# AllSpark 最多允许排队 30 秒，上游流式读取最多 180 秒，本地总超时略高于两者。
+AI_TIMEOUT_SECONDS = int(os.getenv("SELECTION_AI_TIMEOUT_SECONDS", "210"))
