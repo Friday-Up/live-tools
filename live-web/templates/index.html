@@ -406,6 +406,19 @@
             color: #4a90e2;
         }
 
+        .loading-dots::after {
+            content: '...';
+            display: inline-block;
+            width: 0;
+            overflow: hidden;
+            vertical-align: bottom;
+            animation: loading-dots 1.2s steps(4, end) infinite;
+        }
+
+        @keyframes loading-dots {
+            to { width: 1.5em; }
+        }
+
         .stat-label {
             font-size: 12px;
             color: #888;
@@ -2199,9 +2212,15 @@
             failed: '失败'
         };
 
+        function setProductSelectionStage(stage) {
+            const element = document.getElementById('productSelectionStage');
+            element.textContent = productSelectionStageLabels[stage] || stage || '-';
+            element.classList.toggle('loading-dots', stage === 'running');
+        }
+
         function renderProductSelectionStatus(data) {
             const summary = data.summary || {};
-            document.getElementById('productSelectionStage').textContent = productSelectionStageLabels[data.stage] || data.stage || '-';
+            setProductSelectionStage(data.stage);
             document.getElementById('productSelectionStatusCategoryCount').textContent = summary.category_count === undefined ? '-' : summary.category_count;
             document.getElementById('productSelectionStatusSelectedCount').textContent = summary.selected_count === undefined ? '-' : summary.selected_count;
 
@@ -2216,6 +2235,7 @@
             logs.scrollTop = logs.scrollHeight;
 
             productSelectionStartBtn.disabled = Boolean(data.running);
+            productSelectionStartBtn.textContent = data.running ? '选品进行中...' : '开始抓品并推荐';
             productSelectionStopBtn.style.display = data.running ? 'inline-flex' : 'none';
             productSelectionStopBtn.disabled = Boolean(data.stopping);
 
@@ -2253,6 +2273,8 @@
                     if (productSelectionStatusInterval) clearInterval(productSelectionStatusInterval);
                     productSelectionStatusInterval = null;
                     productSelectionStartBtn.disabled = false;
+                    productSelectionStartBtn.textContent = '开始抓品并推荐';
+                    setProductSelectionStage('failed');
                     showMessage(productSelectionMessage, '连接服务失败，请重新启动直播运营工具', 'error');
                 });
         }
@@ -2264,11 +2286,14 @@
         }
 
         productSelectionStartBtn.addEventListener('click', () => {
+            if (productSelectionStartBtn.disabled) return;
             clearMessage(productSelectionMessage);
             document.getElementById('productSelectionResultCard').classList.remove('active');
             document.getElementById('productSelectionProgressCard').classList.add('active');
             document.getElementById('productSelectionLogs').innerHTML = '';
             productSelectionStartBtn.disabled = true;
+            productSelectionStartBtn.textContent = '选品进行中...';
+            setProductSelectionStage('running');
             fetch('/api/product-selection/start', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -2283,6 +2308,8 @@
                 })
                 .catch((error) => {
                     productSelectionStartBtn.disabled = false;
+                    productSelectionStartBtn.textContent = '开始抓品并推荐';
+                    setProductSelectionStage('failed');
                     showMessage(productSelectionMessage, error.message || '启动失败', 'error');
                 });
         });
