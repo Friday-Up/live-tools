@@ -8,7 +8,7 @@
 - SKU 测价：已接入，复用原测价核心逻辑和京东登录态。
 - 批量创建直播间：已接入，复用直播间创建模块。
 - 蓝屏自动截图：已接入，填写京东直播大屏链接后可立即截图或按整点自动截图。
-- 选品 Agent：已接入，并发抓取京东四个来源，按来源和页面类目交给 AI 筛选，输出 JSON 和 Excel。
+- 选品 Agent：已接入，并发抓取京东四个来源，按来源和页面类目交给 AI 筛选，输出业务 Excel。
 
 ## 启动
 
@@ -36,7 +36,7 @@ http://127.0.0.1:8080
 - `templates/index.html`：统一页面。
 - `runtime/input/`：上传文件暂存。
 - `runtime/output/`：生成文件输出。
-- `runtime/output/product-selection/<task_id>/`：选品任务的 JSON 和 Excel 输出。
+- `runtime/output/product-selection/<task_id>/`：选品任务的 Excel 输出。
 - `tests/`：Web 路由和页面测试。
 
 ## 说明

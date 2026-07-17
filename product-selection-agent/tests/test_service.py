@@ -25,7 +25,7 @@ class RunContextTest(unittest.TestCase):
 
 
 class SelectionServiceTest(unittest.TestCase):
-    def test_execute_selection_writes_json_and_excel(self):
+    def test_execute_selection_writes_excel_only(self):
         from product_selection_agent import service
         from product_selection_agent.runtime import RunContext
 
@@ -47,10 +47,10 @@ class SelectionServiceTest(unittest.TestCase):
                 context=RunContext(log_callback=messages.append),
             )
 
-        self.assertTrue(result.json_path.is_file())
         self.assertTrue(result.excel_path.is_file())
+        self.assertEqual(list(output_dir.glob("*.json")), [])
         self.assertEqual(result.payload, payload)
-        self.assertTrue(any("JSON" in message for message in messages))
+        self.assertFalse(any("JSON:" in message for message in messages))
         self.assertTrue(any("Excel" in message for message in messages))
 
     def test_fetcher_accepts_context_and_checks_cancel_before_start(self):

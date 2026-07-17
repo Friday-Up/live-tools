@@ -560,7 +560,7 @@ def fetch_all(
                 "goods": goods,
             }
 
-    # 并发完成顺序不稳定，按配置顺序组织输出，保证 JSON/Excel 可复现。
+    # 并发完成顺序不稳定，按配置顺序组织输出，保证 Excel 可复现。
     result = {source["key"]: completed[source["key"]] for source in config.SOURCES}
 
     empty_sources = [payload["name"] for payload in result.values() if not payload["goods"]]

@@ -45,18 +45,15 @@ class ProductSelectionRoutesTest(unittest.TestCase):
                 "success": False,
                 "error": "",
                 "summary": {},
-                "json_download_url": "",
                 "excel_download_url": "",
             },
         )
 
-    def test_start_runs_service_and_exposes_two_safe_downloads(self):
+    def test_start_runs_service_and_exposes_excel_download_only(self):
         def fake_execute(output_dir, headless, allow_partial, context):
             output_dir = Path(output_dir)
             output_dir.mkdir(parents=True, exist_ok=True)
-            json_path = output_dir / "selection.json"
             excel_path = output_dir / "selection.xlsx"
-            json_path.write_text("{}", encoding="utf-8")
             excel_path.write_bytes(b"xlsx")
             context.log("[fetch] 已抓取")
             return SimpleNamespace(
@@ -70,7 +67,6 @@ class ProductSelectionRoutesTest(unittest.TestCase):
                     },
                     "selection": {"来源": {"类目": [{"sku_id": "1"}]}},
                 },
-                json_path=json_path,
                 excel_path=excel_path,
             )
 
@@ -92,12 +88,10 @@ class ProductSelectionRoutesTest(unittest.TestCase):
         self.assertEqual(status["summary"]["selected_count"], 1)
         self.assertIn("已抓取", "\n".join(status["logs"]))
 
-        json_response = self.client.get(status["json_download_url"])
         excel_response = self.client.get(status["excel_download_url"])
-        self.assertEqual(json_response.data, b"{}")
         self.assertEqual(excel_response.data, b"xlsx")
-        json_response.close()
         excel_response.close()
+        self.assertNotIn("json_download_url", status)
 
     def test_rejects_duplicate_start_and_stop_marks_task_stopping(self):
         with mock.patch.object(web_app.threading, "Thread", DormantThread):
@@ -110,12 +104,10 @@ class ProductSelectionRoutesTest(unittest.TestCase):
         self.assertEqual(stopped.status_code, 200)
         self.assertTrue(stopped.get_json()["stopping"])
 
-    def test_download_rejects_unknown_task_or_kind(self):
-        unknown = self.client.get("/api/product-selection/download/missing/json")
-        bad_kind = self.client.get("/api/product-selection/download/missing/secret")
+    def test_download_rejects_unknown_task(self):
+        unknown = self.client.get("/api/product-selection/download/missing")
 
         self.assertEqual(unknown.status_code, 404)
-        self.assertEqual(bad_kind.status_code, 404)
 
     def test_worker_exposes_failed_and_cancelled_states(self):
         with mock.patch.object(web_app.threading, "Thread", ImmediateThread), mock.patch.object(

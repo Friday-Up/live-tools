@@ -188,13 +188,6 @@ def run_selection(
     }
 
 
-def save_json(payload: dict, out_dir: str, timestamp: str) -> str:
-    path = os.path.join(out_dir, f"selection_{timestamp}.json")
-    with open(path, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, ensure_ascii=False, indent=2)
-    return path
-
-
 def _autosize_and_filter(worksheet) -> None:
     worksheet.freeze_panes = "A2"
     worksheet.auto_filter.ref = worksheet.dimensions
@@ -295,7 +288,6 @@ def save_excel(payload: dict, out_dir: str, timestamp: str) -> str:
 @dataclass(frozen=True)
 class SelectionRunResult:
     payload: dict
-    json_path: Path
     excel_path: Path
 
 
@@ -306,7 +298,7 @@ def execute_selection(
     allow_partial: bool = False,
     context: RunContext | None = None,
 ) -> SelectionRunResult:
-    """执行完整选品并将两个审计结果写入指定目录。"""
+    """执行完整选品并将业务 Excel 报表写入指定目录。"""
     context = context or RunContext()
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -318,9 +310,7 @@ def execute_selection(
     )
     context.check_cancelled()
     timestamp = _timestamp()
-    json_path = Path(save_json(payload, str(output_dir), timestamp))
     excel_path = Path(save_excel(payload, str(output_dir), timestamp))
-    context.log(f"[main] JSON: {json_path}")
     context.log(f"[main] Excel: {excel_path}")
     context.log(f"[main] 推荐模式: {payload['recommendation_mode']}")
-    return SelectionRunResult(payload=payload, json_path=json_path, excel_path=excel_path)
+    return SelectionRunResult(payload=payload, excel_path=excel_path)

@@ -772,7 +772,7 @@ def recommend(
                 context,
             )
 
-    # 并发完成顺序不稳定，按候选池原顺序重建，保证 JSON/Excel 顺序稳定。
+    # 并发完成顺序不稳定，按候选池原顺序重建，保证 Excel 顺序稳定。
     result: dict = {}
     for source_name, categories in candidate_pool.items():
         result[source_name] = {}

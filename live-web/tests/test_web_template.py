@@ -16,11 +16,12 @@ class WebTemplateTest(unittest.TestCase):
         self.assertIn('id="productSelectionStartBtn"', html)
         self.assertIn('id="productSelectionStopBtn"', html)
         self.assertIn('id="productSelectionLogs"', html)
-        self.assertIn('id="productSelectionJsonDownload"', html)
         self.assertIn('id="productSelectionExcelDownload"', html)
         self.assertIn("/api/product-selection/start", html)
         self.assertIn("/api/product-selection/status", html)
         self.assertIn("/api/product-selection/stop", html)
+        self.assertNotIn("productSelectionJsonDownload", html)
+        self.assertNotIn("下载 JSON", html)
         self.assertIn("fetch_complete", html)
         self.assertIn("ai_complete", html)
         for element_id in (

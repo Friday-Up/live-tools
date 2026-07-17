@@ -305,7 +305,6 @@ def create_app(
                 )
                 summary = _product_selection_summary(result.payload)
                 app.config["PRODUCT_SELECTION_RESULTS"][task_id] = {
-                    "json": Path(result.json_path),
                     "excel": Path(result.excel_path),
                 }
                 warning = not (
@@ -320,8 +319,7 @@ def create_app(
                             "finished_at": datetime.now().astimezone().isoformat(timespec="seconds"),
                             "success": True,
                             "summary": summary,
-                            "json_download_url": f"/api/product-selection/download/{task_id}/json",
-                            "excel_download_url": f"/api/product-selection/download/{task_id}/excel",
+                            "excel_download_url": f"/api/product-selection/download/{task_id}",
                         }
                     )
                 report_usage(
@@ -390,14 +388,12 @@ def create_app(
             payload = _copy_product_selection_status(product_selection_status)
         return jsonify(payload)
 
-    @app.route("/api/product-selection/download/<task_id>/<kind>")
-    def download_product_selection(task_id: str, kind: str):
-        if kind not in {"json", "excel"}:
-            return _json_error("选品结果类型不存在", 404)
+    @app.route("/api/product-selection/download/<task_id>")
+    def download_product_selection(task_id: str):
         result = app.config["PRODUCT_SELECTION_RESULTS"].get(task_id)
         if not result:
             return _json_error("选品任务不存在或结果已清理", 404)
-        path = Path(result.get(kind, ""))
+        path = Path(result.get("excel", ""))
         if not path.is_file():
             return _json_error("选品结果文件不存在或已清理", 404)
         report_usage(
@@ -405,7 +401,7 @@ def create_app(
             "download",
             task_id=task_id,
             status="success",
-            extra={"kind": kind},
+            extra={"kind": "excel"},
         )
         return send_file(path, as_attachment=True, download_name=path.name)
 
@@ -2053,7 +2049,6 @@ def _initial_product_selection_status():
         "success": False,
         "error": "",
         "summary": {},
-        "json_download_url": "",
         "excel_download_url": "",
     }
 

@@ -964,7 +964,7 @@
             <div class="card" id="productSelectionMainCard">
                 <div class="section-title">京东四来源选品</div>
                 <div style="font-size: 14px; color: #666; line-height: 1.8; margin-bottom: 16px;">
-                    从国家补贴、黑色星期五、排行榜和京东特价抓取商品；每类目保留最多 30 个候选，由 AI 一次筛选最多 Top10，并生成 JSON 与 Excel 审计结果。
+                    从国家补贴、黑色星期五、排行榜和京东特价抓取商品；每类目保留最多 30 个候选，由 AI 一次筛选最多 Top10，并生成业务 Excel 报表。
                 </div>
                 <label class="checkbox-row">
                     <input type="checkbox" id="productSelectionShowBrowser">
@@ -1025,7 +1025,6 @@
                 </div>
                 <div class="result-desc" id="productSelectionResultDescription">可下载 Excel 查看候选池、选品明细、推荐结果和运行诊断。</div>
                 <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
-                    <a class="btn btn-secondary" id="productSelectionJsonDownload" href="#">下载 JSON</a>
                     <a class="btn btn-success" id="productSelectionExcelDownload" href="#">下载 Excel</a>
                     <button class="btn btn-secondary" id="productSelectionRestartBtn">再次运行</button>
                 </div>
@@ -2229,7 +2228,6 @@
                 document.getElementById('productSelectionSourceCount').textContent = summary.source_count || 0;
                 document.getElementById('productSelectionCategoryCount').textContent = summary.category_count || 0;
                 document.getElementById('productSelectionSelectedCount').textContent = summary.selected_count || 0;
-                document.getElementById('productSelectionJsonDownload').href = data.json_download_url || '#';
                 document.getElementById('productSelectionExcelDownload').href = data.excel_download_url || '#';
                 const fullyComplete = summary.fetch_complete && summary.ai_complete;
                 document.getElementById('productSelectionResultDescription').textContent = fullyComplete

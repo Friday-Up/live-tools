@@ -244,8 +244,16 @@ class PromotionBindingRoutesTest(unittest.TestCase):
         base_dir = Path(tempfile.mkdtemp())
         old_runtime_file = base_dir / "runtime" / "input" / "promotion-binding" / "old.xlsx"
         fresh_runtime_file = base_dir / "runtime" / "input" / "promotion-binding" / "fresh.xlsx"
+        old_selection_file = base_dir / "runtime" / "output" / "product-selection" / "old-task" / "old.xlsx"
+        fresh_selection_file = base_dir / "runtime" / "output" / "product-selection" / "fresh-task" / "fresh.xlsx"
         old_legacy_file = base_dir / "input" / "promotion-binding" / "legacy.xlsx"
-        for file_path in [old_runtime_file, fresh_runtime_file, old_legacy_file]:
+        for file_path in [
+            old_runtime_file,
+            fresh_runtime_file,
+            old_selection_file,
+            fresh_selection_file,
+            old_legacy_file,
+        ]:
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.write_bytes(b"x")
 
@@ -253,15 +261,19 @@ class PromotionBindingRoutesTest(unittest.TestCase):
         old_time = now - 3 * 24 * 60 * 60
         fresh_time = now - 24 * 60 * 60
         os.utime(old_runtime_file, (old_time, old_time))
+        os.utime(old_selection_file, (old_time, old_time))
         os.utime(old_legacy_file, (old_time, old_time))
         os.utime(fresh_runtime_file, (fresh_time, fresh_time))
+        os.utime(fresh_selection_file, (fresh_time, fresh_time))
 
         app = create_app(base_dir=base_dir)
 
         self.assertEqual(app.config["RUNTIME_RETENTION_DAYS"], 2)
         self.assertFalse(old_runtime_file.exists())
+        self.assertFalse(old_selection_file.exists())
         self.assertFalse(old_legacy_file.exists())
         self.assertTrue(fresh_runtime_file.exists())
+        self.assertTrue(fresh_selection_file.exists())
         self.assertEqual(app.config["PRICE_INPUT_DIR"], base_dir / "runtime" / "input" / "price-audit")
 
     def test_rejects_non_xlsx_upload(self):

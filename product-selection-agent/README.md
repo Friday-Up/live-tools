@@ -15,7 +15,7 @@
 
 ## 推荐入口：统一 Web 页面
 
-业务使用从仓库根目录启动 `live-web`，打开页面后切换到“选品 Agent”。页面支持启动、停止、实时日志、完整性提示，以及 JSON/Excel 下载：
+业务使用从仓库根目录启动 `live-web`，打开页面后切换到“选品 Agent”。页面支持启动、停止、实时日志、完整性提示，以及 Excel 下载：
 
 ```bash
 cd /Users/zhangyaolong.5/Friday/idea_workspace/me/live
@@ -56,8 +56,9 @@ JD_AUTH_PATH=/absolute/path/to/jd_auth.json python3 main.py --headless
 
 命令行输出位于 `output/`：
 
-- `selection_时间.json`：包含完整 `candidate_pool`、最终 `selection`、`recommendation` 和来源诊断；
 - `selection_时间.xlsx`：包含 `候选池`、`选品明细`、`推荐结果`、`运行诊断` 四个 Sheet。
+
+Web 运行结果属于临时文件，与其他直播运营工具一致保留 2 天；服务启动或执行新任务前会自动清理过期结果，避免长期占用本地磁盘。
 
 “候选池”会保留每个商品的候选排名、规则参考分、AI 是否入选、AI 排名、淘汰理由和合格不足说明，方便追溯模型决策。“选品明细”和“推荐结果”只展示最终入选商品。
 
@@ -78,7 +79,7 @@ export SELECTION_AI_MODEL='your-model'
 python3 main.py --headless
 ```
 
-模型调用失败会回退到可解释评分，并在 JSON 的 `ai_error` 和 Excel 推荐模式中体现，不会静默伪装成 AI 结果。AI 正常返回少于 10 个时，`shortfall_reason` 和运行诊断会记录“合格候选不足”。重复、未知 SKU 导致数量不足或不足说明与实际数量矛盾时，会判定该类目协议失败并规则回退。模型偶尔返回旧的 `selected`、`items` 或纯数组协议时会自动转换为 `selected_sku_ids` 并保留协议告警。
+模型调用失败会回退到可解释评分，并在 Excel 推荐模式和运行诊断中体现，不会静默伪装成 AI 结果。AI 正常返回少于 10 个时，`shortfall_reason` 和运行诊断会记录“合格候选不足”。重复、未知 SKU 导致数量不足或不足说明与实际数量矛盾时，会判定该类目协议失败并规则回退。模型偶尔返回旧的 `selected`、`items` 或纯数组协议时会自动转换为 `selected_sku_ids` 并保留协议告警。
 
 完整性分开判断：`diagnostics.fetch_complete` 表示四个来源是否抓取完整，`diagnostics.ai_complete` 和顶层 `ai_complete` 表示所有类目是否都完成 AI 选品；`diagnostics.ai_failed_categories` 会列出发生规则回退的来源、类目和错误。控制台最后会同时打印“抓取完整”和“AI完整”。
 
