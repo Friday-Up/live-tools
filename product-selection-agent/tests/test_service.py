@@ -48,6 +48,7 @@ class SelectionServiceTest(unittest.TestCase):
             )
 
         self.assertTrue(result.excel_path.is_file())
+        self.assertTrue(result.excel_path.name.startswith("选品_"))
         self.assertEqual(list(output_dir.glob("*.json")), [])
         self.assertEqual(result.payload, payload)
         self.assertFalse(any("JSON:" in message for message in messages))

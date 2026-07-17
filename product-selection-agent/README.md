@@ -35,7 +35,7 @@ cd /Users/zhangyaolong.5/Friday/idea_workspace/me/live/product-selection-agent
 python3 -m pip install -r requirements.txt
 python3 -m playwright install chromium
 
-# 任一来源为空会直接失败
+# 命令行默认任一来源为空会直接失败
 python3 main.py --headless
 
 # 页面结构临时异常时，允许输出部分结果（报表会在“运行诊断”中标红）
@@ -56,9 +56,10 @@ JD_AUTH_PATH=/absolute/path/to/jd_auth.json python3 main.py --headless
 
 命令行输出位于 `output/`：
 
-- `selection_时间.xlsx`：包含 `候选池`、`选品明细`、`推荐结果`、`运行诊断` 四个 Sheet。
+- `选品_时间.xlsx`：依次包含 `推荐结果`、`选品明细`、`候选池`、`运行诊断` 四个 Sheet。
 
 Web 运行结果属于临时文件，与其他直播运营工具一致保留 2 天；服务启动或执行新任务前会自动清理过期结果，避免长期占用本地磁盘。
+Web 默认允许部分来源临时失败时继续生成其余可用结果，不向业务用户提供额外开关；具体缺失信息保留在“运行诊断”中。
 
 “候选池”会保留每个商品的候选排名、规则参考分、AI 是否入选、AI 排名、淘汰理由和合格不足说明，方便追溯模型决策。“选品明细”和“推荐结果”只展示最终入选商品。
 

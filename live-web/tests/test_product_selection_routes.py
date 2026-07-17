@@ -50,7 +50,12 @@ class ProductSelectionRoutesTest(unittest.TestCase):
         )
 
     def test_start_runs_service_and_exposes_excel_download_only(self):
+        received_options = {}
+
         def fake_execute(output_dir, headless, allow_partial, context):
+            received_options.update(
+                {"headless": headless, "allow_partial": allow_partial}
+            )
             output_dir = Path(output_dir)
             output_dir.mkdir(parents=True, exist_ok=True)
             excel_path = output_dir / "selection.xlsx"
@@ -87,11 +92,29 @@ class ProductSelectionRoutesTest(unittest.TestCase):
         self.assertEqual(status["summary"]["category_count"], 1)
         self.assertEqual(status["summary"]["selected_count"], 1)
         self.assertIn("已抓取", "\n".join(status["logs"]))
+        self.assertTrue(received_options["allow_partial"])
 
         excel_response = self.client.get(status["excel_download_url"])
         self.assertEqual(excel_response.data, b"xlsx")
         excel_response.close()
         self.assertNotIn("json_download_url", status)
+
+    def test_web_always_allows_partial_source_results(self):
+        received_options = {}
+
+        def fake_execute(**kwargs):
+            received_options.update(kwargs)
+            raise RuntimeError("stop after capturing options")
+
+        with mock.patch.object(web_app.threading, "Thread", ImmediateThread), mock.patch.object(
+            web_app, "execute_product_selection", side_effect=fake_execute
+        ):
+            self.client.post(
+                "/api/product-selection/start",
+                json={"allow_partial": False},
+            )
+
+        self.assertTrue(received_options["allow_partial"])
 
     def test_rejects_duplicate_start_and_stop_marks_task_stopping(self):
         with mock.patch.object(web_app.threading, "Thread", DormantThread):

@@ -260,7 +260,8 @@ def create_app(
     def start_product_selection():
         data = request.get_json(silent=True) or {}
         headless = bool(data.get("headless", True))
-        allow_partial = bool(data.get("allow_partial", False))
+        # Web 面向业务使用：单个来源临时失败时仍输出其余可用结果。
+        allow_partial = True
         with product_selection_status_lock:
             if product_selection_status["running"]:
                 return _json_error("选品任务正在运行，请等待完成或先停止", 409)

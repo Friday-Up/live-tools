@@ -12,7 +12,10 @@ class WebTemplateTest(unittest.TestCase):
         self.assertIn('data-tool="productSelectionPanel"', html)
         self.assertIn('id="productSelectionPanel"', html)
         self.assertIn('id="productSelectionShowBrowser"', html)
-        self.assertIn('id="productSelectionAllowPartial"', html)
+        self.assertNotIn('id="productSelectionAllowPartial"', html)
+        self.assertNotIn("允许部分来源抓取失败后仍生成结果", html)
+        self.assertIn("显示抓取浏览器窗口", html)
+        self.assertNotIn("排查页面问题时开启", html)
         self.assertIn('id="productSelectionStartBtn"', html)
         self.assertIn('id="productSelectionStopBtn"', html)
         self.assertIn('id="productSelectionLogs"', html)
@@ -22,8 +25,14 @@ class WebTemplateTest(unittest.TestCase):
         self.assertIn("/api/product-selection/stop", html)
         self.assertNotIn("productSelectionJsonDownload", html)
         self.assertNotIn("下载 JSON", html)
-        self.assertIn("fetch_complete", html)
-        self.assertIn("ai_complete", html)
+        self.assertNotIn('id="productSelectionFetchComplete"', html)
+        self.assertNotIn('id="productSelectionAiComplete"', html)
+        self.assertIn('id="productSelectionStatusCategoryCount"', html)
+        self.assertIn('id="productSelectionStatusSelectedCount"', html)
+        self.assertIn("completed_with_warnings: '已完成'", html)
+        self.assertNotIn("选品完成，但存在抓取或 AI 回退警告", html)
+        self.assertNotIn("抓取完整=${", html)
+        self.assertIn("结果已生成，请先查看运行诊断再使用。", html)
         for element_id in (
             "productSelectionPanel",
             "productSelectionStartBtn",

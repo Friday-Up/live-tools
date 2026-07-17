@@ -968,11 +968,7 @@
                 </div>
                 <label class="checkbox-row">
                     <input type="checkbox" id="productSelectionShowBrowser">
-                    <span>显示抓取浏览器窗口（排查页面问题时开启）</span>
-                </label>
-                <label class="checkbox-row">
-                    <input type="checkbox" id="productSelectionAllowPartial">
-                    <span>允许部分来源抓取失败后仍生成结果</span>
+                    <span>显示抓取浏览器窗口</span>
                 </label>
                 <div class="status-message" id="productSelectionMessage"></div>
                 <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-top: 20px;">
@@ -989,12 +985,12 @@
                         <div class="stat-label">当前阶段</div>
                     </div>
                     <div class="stat">
-                        <div class="stat-value" id="productSelectionFetchComplete">-</div>
-                        <div class="stat-label">抓取完整</div>
+                        <div class="stat-value" id="productSelectionStatusCategoryCount">-</div>
+                        <div class="stat-label">覆盖类目</div>
                     </div>
                     <div class="stat">
-                        <div class="stat-value" id="productSelectionAiComplete">-</div>
-                        <div class="stat-label">AI 完整</div>
+                        <div class="stat-value" id="productSelectionStatusSelectedCount">-</div>
+                        <div class="stat-label">入选商品</div>
                     </div>
                 </div>
                 <div class="log-wrapper">
@@ -2195,10 +2191,10 @@
 
         const productSelectionStageLabels = {
             idle: '未开始',
-            running: '抓取/推荐中',
+            running: '选品中',
             stopping: '正在停止',
             completed: '已完成',
-            completed_with_warnings: '已完成（有警告）',
+            completed_with_warnings: '已完成',
             cancelled: '已停止',
             failed: '失败'
         };
@@ -2206,8 +2202,8 @@
         function renderProductSelectionStatus(data) {
             const summary = data.summary || {};
             document.getElementById('productSelectionStage').textContent = productSelectionStageLabels[data.stage] || data.stage || '-';
-            document.getElementById('productSelectionFetchComplete').textContent = summary.fetch_complete === undefined ? '-' : (summary.fetch_complete ? '是' : '否');
-            document.getElementById('productSelectionAiComplete').textContent = summary.ai_complete === undefined ? '-' : (summary.ai_complete ? '是' : '否');
+            document.getElementById('productSelectionStatusCategoryCount').textContent = summary.category_count === undefined ? '-' : summary.category_count;
+            document.getElementById('productSelectionStatusSelectedCount').textContent = summary.selected_count === undefined ? '-' : summary.selected_count;
 
             const logs = document.getElementById('productSelectionLogs');
             logs.innerHTML = (data.logs || []).map((message) => {
@@ -2231,12 +2227,12 @@
                 document.getElementById('productSelectionExcelDownload').href = data.excel_download_url || '#';
                 const fullyComplete = summary.fetch_complete && summary.ai_complete;
                 document.getElementById('productSelectionResultDescription').textContent = fullyComplete
-                    ? '抓取和 AI 推荐均完整，可下载 Excel 查看候选池、推荐结果和运行诊断。'
-                    : `结果已生成，但抓取完整=${Boolean(summary.fetch_complete)}、AI完整=${Boolean(summary.ai_complete)}；请先查看运行诊断再使用。`;
+                    ? '选品完成，可下载 Excel 直接使用。'
+                    : '结果已生成，请先查看运行诊断再使用。';
                 showMessage(
                     productSelectionMessage,
-                    fullyComplete ? '选品完成' : '选品完成，但存在抓取或 AI 回退警告',
-                    fullyComplete ? 'success' : 'warning'
+                    '选品完成',
+                    'success'
                 );
             } else if (!data.running && data.error) {
                 showMessage(productSelectionMessage, data.error, data.stage === 'cancelled' ? 'info' : 'error');
@@ -2277,8 +2273,7 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    headless: !document.getElementById('productSelectionShowBrowser').checked,
-                    allow_partial: document.getElementById('productSelectionAllowPartial').checked
+                    headless: !document.getElementById('productSelectionShowBrowser').checked
                 })
             })
                 .then(async (res) => ({ ok: res.ok, data: await res.json() }))

@@ -4,6 +4,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -192,8 +193,26 @@ def _autosize_and_filter(worksheet) -> None:
     worksheet.freeze_panes = "A2"
     worksheet.auto_filter.ref = worksheet.dimensions
     for column in worksheet.columns:
-        width = max((len(str(cell.value)) for cell in column if cell.value is not None), default=10)
+        width = max(
+            (
+                sum(
+                    2 if unicodedata.east_asian_width(char) in {"W", "F", "A"} else 1
+                    for char in str(cell.value)
+                )
+                for cell in column
+                if cell.value is not None
+            ),
+            default=10,
+        )
         worksheet.column_dimensions[column[0].column_letter].width = min(width + 2, 55)
+
+
+def _recommendation_mode_label(mode: str | None) -> str:
+    return {
+        "llm_enhanced": "智能推荐",
+        "explainable_scoring": "规则推荐",
+        "mixed": "混合推荐",
+    }.get(str(mode or ""), "其他")
 
 
 def save_excel(payload: dict, out_dir: str, timestamp: str) -> str:
@@ -201,11 +220,15 @@ def save_excel(payload: dict, out_dir: str, timestamp: str) -> str:
     from openpyxl.styles import Font, PatternFill
 
     workbook = Workbook()
-    candidates = workbook.active
-    candidates.title = "候选池"
+    reco = workbook.active
+    reco.title = "推荐结果"
+    detail = workbook.create_sheet("选品明细")
+    candidates = workbook.create_sheet("候选池")
+    diag = workbook.create_sheet("运行诊断")
+
     candidates.append([
         "来源", "页面类目", "候选排名", "最终是否入选", "AI是否入选", "AI推荐顺位",
-        "淘汰原因", "合格不足说明", "推荐模式", "规则参考分", "评分明细", "商品名", "SKU",
+        "淘汰原因", "合格不足说明", "选品方式", "规则参考分", "评分明细", "商品名", "SKU",
         "页面/榜单位次", "榜单名", "到手价", "京东价", "划线价", "销量数",
         "销量口径", "折扣力度", "好评率", "自营", "卖点", "店铺", "商品链接",
     ])
@@ -217,7 +240,8 @@ def save_excel(payload: dict, out_dir: str, timestamp: str) -> str:
                     "是" if product.get("final_selected") else "否",
                     "是" if product.get("ai_selected") else "否", product.get("ai_rank"),
                     product.get("rejection_reason"), product.get("shortfall_reason"),
-                    product.get("recommendation_mode"), product.get("reco_score"),
+                    _recommendation_mode_label(product.get("recommendation_mode")),
+                    product.get("reco_score"),
                     json.dumps(product.get("score_detail", {}), ensure_ascii=False),
                     product.get("name"), product.get("sku_id"), product.get("source_rank"),
                     product.get("rank_board"), product.get("display_price"),
@@ -227,7 +251,6 @@ def save_excel(payload: dict, out_dir: str, timestamp: str) -> str:
                     product.get("selling_points"), product.get("shop_name"), product.get("url"),
                 ])
 
-    detail = workbook.create_sheet("选品明细")
     detail.append([
         "来源", "页面类目", "选品排名", "页面/榜单位次", "榜单名", "商品名", "SKU",
         "到手价", "京东价", "划线价", "销量数", "销量口径", "折扣力度", "好评率",
@@ -246,10 +269,9 @@ def save_excel(payload: dict, out_dir: str, timestamp: str) -> str:
                     product.get("data_quality"), product.get("url"), product.get("rank_board_url"),
                 ])
 
-    reco = workbook.create_sheet("推荐结果")
     reco.append([
         "来源", "页面类目", "推荐顺位", "商品名", "SKU", "到手价", "销量口径",
-        "推荐分", "评分明细", "推荐模式", "推荐理由", "推荐文案", "商品链接",
+        "推荐分", "评分明细", "推荐理由", "推荐文案", "商品链接",
     ])
     for source_name, categories in payload["recommendation"].items():
         for category_name, data in categories.items():
@@ -258,11 +280,9 @@ def save_excel(payload: dict, out_dir: str, timestamp: str) -> str:
                     source_name, category_name, index, product.get("name"), product.get("sku_id"),
                     product.get("display_price"), product.get("sales_text"), product.get("reco_score"),
                     json.dumps(product.get("score_detail", {}), ensure_ascii=False),
-                    product.get("recommendation_mode"), product.get("reason"), product.get("copy"),
-                    product.get("url"),
+                    product.get("reason"), product.get("copy"), product.get("url"),
                 ])
 
-    diag = workbook.create_sheet("运行诊断")
     diag.append([
         "来源", "适配器", "状态", "原始商品数", "候选商品数", "类目数",
         "入选商品数", "不足10条类目及原因", "错误",
@@ -280,7 +300,7 @@ def save_excel(payload: dict, out_dir: str, timestamp: str) -> str:
             cell.fill = PatternFill("solid", fgColor="C00000")
         _autosize_and_filter(worksheet)
 
-    path = os.path.join(out_dir, f"selection_{timestamp}.xlsx")
+    path = os.path.join(out_dir, f"选品_{timestamp}.xlsx")
     workbook.save(path)
     return path
 

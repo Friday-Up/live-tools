@@ -933,8 +933,12 @@ class SelectionAndRecommendationTest(unittest.TestCase):
             workbook = load_workbook(path, read_only=True)
             self.assertEqual(
                 workbook.sheetnames,
-                ["候选池", "选品明细", "推荐结果", "运行诊断"],
+                ["推荐结果", "选品明细", "候选池", "运行诊断"],
             )
+            recommendation_headers = [
+                cell.value for cell in next(workbook["推荐结果"].iter_rows())
+            ]
+            self.assertNotIn("推荐模式", recommendation_headers)
             headers = [cell.value for cell in next(workbook["候选池"].iter_rows())]
             self.assertIn("候选排名", headers)
             self.assertIn("最终是否入选", headers)
@@ -942,6 +946,13 @@ class SelectionAndRecommendationTest(unittest.TestCase):
             self.assertIn("AI推荐顺位", headers)
             self.assertIn("淘汰原因", headers)
             self.assertIn("合格不足说明", headers)
+            self.assertIn("选品方式", headers)
+            self.assertNotIn("推荐模式", headers)
+            mode_column = headers.index("选品方式") + 1
+            self.assertEqual(
+                workbook["候选池"].cell(row=2, column=mode_column).value,
+                "智能推荐",
+            )
 
     def test_fewer_selected_products_do_not_trigger_retry(self):
         goods = [
