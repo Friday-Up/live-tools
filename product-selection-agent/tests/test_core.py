@@ -94,6 +94,43 @@ class SourceAdapterTest(unittest.TestCase):
             )
 
         fetch_source.assert_called_once_with(page, source, run_context, None)
+        playwright.chromium.launch.assert_called_once_with(
+            headless=True,
+            channel="chromium",
+        )
+
+    def test_category_discovery_uses_chromium_channel(self):
+        source = {
+            "key": "test",
+            "name": "测试来源",
+            "adapter": "test",
+            "url": "https://example.test/activity",
+            "tab_selector": ".tab",
+        }
+        page = mock.MagicMock(name="page")
+        browser_context = mock.MagicMock(name="browser_context")
+        browser_context.new_page.return_value = page
+        browser = mock.MagicMock(name="browser")
+        browser.new_context.return_value = browser_context
+        playwright = mock.MagicMock(name="playwright")
+        playwright.chromium.launch.return_value = browser
+        manager = mock.MagicMock(name="playwright_manager")
+        manager.__enter__.return_value = playwright
+
+        with mock.patch.object(fetcher, "sync_playwright", return_value=manager), mock.patch.object(
+            fetcher, "_tab_names", return_value=["手机", "电视"]
+        ), mock.patch.object(fetcher.time, "sleep"):
+            result = fetcher._discover_source_categories_isolated(
+                source,
+                headless=True,
+                auth_path="/path/does/not/exist",
+            )
+
+        self.assertEqual(result, ["手机", "电视"])
+        playwright.chromium.launch.assert_called_once_with(
+            headless=True,
+            channel="chromium",
+        )
 
     def test_selected_categories_skip_unselected_sources_before_browser_start(self):
         sources = [

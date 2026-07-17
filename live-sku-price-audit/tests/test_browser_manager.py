@@ -235,7 +235,10 @@ class BrowserManagerLoginTests(unittest.TestCase):
             manager = BrowserManager(headless=True)
             manager.start()
 
-        self.assertEqual(fake_playwright.chromium.launch_calls, [{"headless": True}])
+        self.assertEqual(
+            fake_playwright.chromium.launch_calls,
+            [{"headless": True, "channel": "chromium"}],
+        )
 
     def test_start_can_skip_fast_resource_blocking_for_login_browser(self):
         fake_playwright = FakePlaywright()

@@ -559,7 +559,10 @@ def _fetch_source_isolated(
         context_options["storage_state"] = auth_path
 
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=headless)
+        browser = playwright.chromium.launch(
+            headless=headless,
+            channel="chromium",
+        )
         browser_context = browser.new_context(**context_options)
         page = browser_context.new_page()
         try:
@@ -587,7 +590,10 @@ def _discover_source_categories_isolated(
         context_options["storage_state"] = auth_path
 
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=headless)
+        browser = playwright.chromium.launch(
+            headless=headless,
+            channel="chromium",
+        )
         browser_context = browser.new_context(**context_options)
         page = browser_context.new_page()
         try:

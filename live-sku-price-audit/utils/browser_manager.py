@@ -77,7 +77,7 @@ class BrowserManager:
         """
         self.playwright = sync_playwright().start()
         # 登录窗口需要可视化；批量测价 worker 可用无头模式避免抢占桌面。
-        launch_kwargs = {"headless": self.headless}
+        launch_kwargs = {"headless": self.headless, "channel": "chromium"}
         args = _chromium_launch_args(self.block_images)
         if args:
             launch_kwargs["args"] = args
