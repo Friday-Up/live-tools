@@ -45,6 +45,10 @@ jobs:
         run: |
           playwright install chromium --no-shell
 
+      - name: Smoke test Playwright Chromium channel
+        run: |
+          python -c "from playwright.sync_api import sync_playwright; p = sync_playwright().start(); b = p.chromium.launch(headless=True, channel='chromium'); b.close(); p.stop()"
+
       - name: Run unit tests
         shell: pwsh
         run: |

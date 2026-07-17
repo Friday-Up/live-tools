@@ -54,6 +54,10 @@ jobs:
           playwright install chromium --no-shell
           test -d "$HOME/Library/Caches/ms-playwright"
 
+      - name: Smoke test Playwright Chromium channel
+        run: |
+          python -c "from playwright.sync_api import sync_playwright; p = sync_playwright().start(); b = p.chromium.launch(headless=True, channel='chromium'); b.close(); p.stop()"
+
       - name: Run unit tests
         run: |
           (cd live-promotion-binding && python -m unittest discover -s tests -p "test_*.py" -v)

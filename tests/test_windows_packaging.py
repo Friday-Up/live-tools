@@ -67,6 +67,8 @@ class WindowsPackagingTest(unittest.TestCase):
         self.assertIn("Test directories must not be included in the Windows package", content)
         self.assertIn("Private model config must not be included in the Windows package", content)
         self.assertIn("playwright install chromium --no-shell", content)
+        self.assertIn("Smoke test Playwright Chromium channel", content)
+        self.assertIn("launch(headless=True, channel='chromium')", content)
         self.assertIn("Headless Shell must not be included in the Windows package", content)
         self.assertIn('$_.Name -like "chromium_headless_shell-*"', content)
         self.assertNotIn("启动测价工具.bat", content)
