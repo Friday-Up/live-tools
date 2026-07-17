@@ -65,7 +65,7 @@ JD_AUTH_PATH=/absolute/path/to/jd_auth.json python3 main.py --headless
 
 未配置模型或模型调用失败时使用 `explainable_scoring`：按可用字段动态归一化销量、折扣、类目内相对价格、页面/榜单位次、好评率，规则选取最多 10 个作为明确标记的回退结果；缺失字段不会被当作 0 分惩罚。
 
-配置兼容 OpenAI Chat Completions 协议的模型网关后，自动切换为 `llm_enhanced`。每个类目的全部候选默认一次性发送。AI 只会硬淘汰串类、凑单或服务链接、赠品或非商品、重复变体；低销量、高价格、折扣弱、缺少好评率和非自营只能影响排序，不得作为淘汰理由。相关有效商品达到 10 个时必须选择 10 个，确实不足时才允许少选。最多 5 个类目并行执行，并由全局 5 RPS 限流器统一控速：
+配置兼容 OpenAI Chat Completions 协议的模型网关后，自动切换为 `llm_enhanced`。每个类目的全部候选默认一次性发送。AI 只负责返回按推荐顺序排列的 `selected_sku_ids`，并可选返回 `selected_reasons`；推荐理由或文案缺失时，程序会依据真实价格、销量、折扣、页面位次等字段生成，不会删除已选 SKU。AI 只会硬淘汰串类、凑单或服务链接、赠品或非商品、重复变体；低销量、高价格、折扣弱、缺少好评率和非自营只能影响排序，不得作为淘汰理由。相关有效商品达到 10 个时必须选择 10 个，确实不足时才允许少选。最多 5 个类目并行执行，并由全局 5 RPS 限流器统一控速：
 
 对已经从真实页面确认存在稳定京东二级类目 ID 的高风险 Tab，会在 AI 前做确定性预过滤。目前医疗器械只保留 `9197/13893`，电动车只保留 `27509`；被排除候选仍保存在“候选池”，淘汰原因标记为“平台类目ID与页面类目不匹配”。未配置或缺少类目 ID 的情况仍交给 AI 判断，不做猜测性过滤。
 
@@ -78,7 +78,7 @@ export SELECTION_AI_MODEL='your-model'
 python3 main.py --headless
 ```
 
-模型调用失败会回退到可解释评分，并在 JSON 的 `ai_error` 和 Excel 推荐模式中体现，不会静默伪装成 AI 结果。AI 正常返回少于 10 个时，`shortfall_reason` 和运行诊断会记录“合格候选不足”。模型偶尔返回旧的 `items` 或纯数组协议时会自动转换为 `selected` 并保留协议告警，不再直接回退。
+模型调用失败会回退到可解释评分，并在 JSON 的 `ai_error` 和 Excel 推荐模式中体现，不会静默伪装成 AI 结果。AI 正常返回少于 10 个时，`shortfall_reason` 和运行诊断会记录“合格候选不足”。重复、未知 SKU 导致数量不足或不足说明与实际数量矛盾时，会判定该类目协议失败并规则回退。模型偶尔返回旧的 `selected`、`items` 或纯数组协议时会自动转换为 `selected_sku_ids` 并保留协议告警。
 
 完整性分开判断：`diagnostics.fetch_complete` 表示四个来源是否抓取完整，`diagnostics.ai_complete` 和顶层 `ai_complete` 表示所有类目是否都完成 AI 选品；`diagnostics.ai_failed_categories` 会列出发生规则回退的来源、类目和错误。控制台最后会同时打印“抓取完整”和“AI完整”。
 

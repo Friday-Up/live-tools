@@ -2,12 +2,14 @@
 
 没有配置 AI 网关时，输出会明确标记 ``explainable_scoring``，不会把模板规则
 冒充成 AI。配置 SELECTION_AI_API_URL / KEY / MODEL 后，每个类目的全部候选只
-调用一次兼容 OpenAI Chat Completions 协议的模型，由模型筛选、排序并生成文案。
+调用一次兼容 OpenAI Chat Completions 协议的模型，由模型筛选并排序 SKU；推荐
+理由和文案属于可选返回，缺失时由程序依据真实商品字段生成。
 """
 from __future__ import annotations
 
 import json
 import math
+import re
 import socket
 import threading
 import time
@@ -195,23 +197,38 @@ def _extract_json_object(text: str) -> dict:
     selection_values = [
         value
         for value in values
-        if isinstance(value, dict) and isinstance(value.get("selected"), list)
+        if isinstance(value, dict)
+        and (
+            isinstance(value.get("selected_sku_ids"), list)
+            or isinstance(value.get("selected"), list)
+        )
     ]
     if selection_values:
+        selected_sku_ids: list = []
         selected: list = []
+        selected_reasons: list = []
         rejected: list = []
         shortfall_reason = ""
         for value in selection_values:
+            if isinstance(value.get("selected_sku_ids"), list):
+                selected_sku_ids.extend(value["selected_sku_ids"])
             selected.extend(value.get("selected", []))
+            if isinstance(value.get("selected_reasons"), list):
+                selected_reasons.extend(value["selected_reasons"])
             if isinstance(value.get("rejected"), list):
                 rejected.extend(value["rejected"])
             if value.get("shortfall_reason"):
                 shortfall_reason = str(value["shortfall_reason"])
-        return {
+        result = {
             "selected": selected,
             "rejected": rejected,
             "shortfall_reason": shortfall_reason,
         }
+        if any("selected_sku_ids" in value for value in selection_values):
+            result["selected_sku_ids"] = selected_sku_ids
+        if selected_reasons:
+            result["selected_reasons"] = selected_reasons
+        return result
 
     merged_items: dict[str, dict] = {}
     for value in values:
@@ -229,21 +246,38 @@ def _extract_json_object(text: str) -> dict:
 
 
 def _coerce_ai_selection_payload(parsed: dict) -> dict:
-    """把旧 items/纯数组响应转换为当前 selected 协议。"""
-    if isinstance(parsed.get("selected"), list):
+    """把旧 selected/items 响应转换为有序 SKU ID 协议。"""
+    if isinstance(parsed.get("selected_sku_ids"), list):
         return parsed
-    items = parsed.get("items")
+    protocol_name = "selected"
+    items = parsed.get("selected")
     if not isinstance(items, list):
-        raise ValueError("AI 响应缺少 selected 数组")
+        protocol_name = "items"
+        items = parsed.get("items")
+    if not isinstance(items, list):
+        raise ValueError("AI 响应缺少 selected_sku_ids 数组")
     selected = []
     for rank, item in enumerate(items, 1):
         if isinstance(item, dict):
             selected.append({**item, "rank": item.get("rank") or rank})
+
+    def safe_rank(item: dict) -> int:
+        try:
+            return int(item.get("rank") or 999999)
+        except (TypeError, ValueError):
+            return 999999
+
+    selected.sort(key=safe_rank)
     return {
+        "selected_sku_ids": [
+            str(item.get("sku_id")) for item in selected if item.get("sku_id")
+        ],
         "selected": selected,
         "rejected": parsed.get("rejected", []),
         "shortfall_reason": parsed.get("shortfall_reason", ""),
-        "_protocol_warnings": ["模型返回兼容旧 items 协议，已自动转换为 selected"],
+        "_protocol_warnings": [
+            f"模型返回兼容旧 {protocol_name} 协议，已自动转换为 selected_sku_ids"
+        ],
     }
 
 
@@ -252,50 +286,83 @@ def _normalize_ai_selection(
     candidates: list[dict],
     limit: int,
 ) -> dict:
-    """校验 AI 选品协议，只保留候选池中的唯一 SKU 并规范排名。"""
-    candidate_skus = {str(item.get("sku_id")) for item in candidates if item.get("sku_id")}
+    """校验有序 SKU，推荐理由/文案缺失时使用程序生成内容。"""
+    candidate_by_sku = {
+        str(item.get("sku_id")): item for item in candidates if item.get("sku_id")
+    }
+    candidate_skus = set(candidate_by_sku)
     warnings = [str(item) for item in parsed.get("_protocol_warnings", [])]
-    valid_selected: list[tuple[int, int, dict]] = []
+    invalid_selected_ids = 0
+    valid_selected: list[dict] = []
     seen: set[str] = set()
 
-    selected = parsed.get("selected", []) if isinstance(parsed, dict) else []
-    if not isinstance(selected, list):
-        selected = []
-        warnings.append("selected 不是数组")
-    for position, decision in enumerate(selected, 1):
-        if not isinstance(decision, dict):
-            warnings.append(f"忽略第 {position} 条非对象入选结果")
+    details_by_sku: dict[str, dict] = {}
+    for field in ("selected", "selected_reasons"):
+        details = parsed.get(field, []) if isinstance(parsed, dict) else []
+        if not isinstance(details, list):
             continue
-        sku_id = str(decision.get("sku_id") or "")
+        for detail in details:
+            if not isinstance(detail, dict) or not detail.get("sku_id"):
+                continue
+            sku_id = str(detail["sku_id"])
+            current = details_by_sku.setdefault(sku_id, {})
+            for key in ("reason", "copy"):
+                value = str(detail.get(key) or "").strip()
+                if value:
+                    current[key] = value
+
+    selected_sku_ids = parsed.get("selected_sku_ids") if isinstance(parsed, dict) else None
+    if not isinstance(selected_sku_ids, list):
+        legacy_selected = parsed.get("selected", []) if isinstance(parsed, dict) else []
+        if not isinstance(legacy_selected, list):
+            legacy_selected = []
+
+        def legacy_rank(entry) -> int:
+            position, item = entry
+            if not isinstance(item, dict):
+                return position
+            try:
+                return int(item.get("rank") or position)
+            except (TypeError, ValueError):
+                return position
+
+        ordered_legacy = sorted(
+            enumerate(legacy_selected, 1),
+            key=lambda entry: (legacy_rank(entry), entry[0]),
+        )
+        selected_sku_ids = [
+            item.get("sku_id")
+            for _position, item in ordered_legacy
+            if isinstance(item, dict) and item.get("sku_id")
+        ]
+
+    for position, raw_sku_id in enumerate(selected_sku_ids, 1):
+        sku_id = str(raw_sku_id or "")
+        if not sku_id:
+            warnings.append(f"忽略第 {position} 个空 SKU")
+            invalid_selected_ids += 1
+            continue
         if sku_id not in candidate_skus:
             warnings.append(f"忽略未知 SKU: {sku_id or '<empty>'}")
+            invalid_selected_ids += 1
             continue
         if sku_id in seen:
             warnings.append(f"忽略重复 SKU: {sku_id}")
+            invalid_selected_ids += 1
             continue
-        reason = str(decision.get("reason") or "").strip()
-        copy = str(decision.get("copy") or "").strip()
-        if not reason or not copy:
-            warnings.append(f"忽略缺少 reason/copy 的 SKU: {sku_id}")
-            continue
-        try:
-            requested_rank = int(decision.get("rank") or position)
-        except (TypeError, ValueError):
-            requested_rank = position
         seen.add(sku_id)
-        valid_selected.append(
-            (
-                requested_rank,
-                position,
-                {"sku_id": sku_id, "reason": reason, "copy": copy},
-            )
-        )
+        candidate = candidate_by_sku[sku_id]
+        details = details_by_sku.get(sku_id, {})
+        valid_selected.append({
+            "sku_id": sku_id,
+            "reason": details.get("reason") or candidate.get("reason") or _build_reason(candidate),
+            "copy": details.get("copy") or candidate.get("copy") or _build_copy(candidate),
+        })
 
-    valid_selected.sort(key=lambda entry: (entry[0], entry[1]))
     if len(valid_selected) > limit:
         warnings.append(f"AI 入选 {len(valid_selected)} 个，超过上限 {limit}，已截断")
     normalized_selected = []
-    for rank, (_requested_rank, _position, decision) in enumerate(valid_selected[:limit], 1):
+    for rank, decision in enumerate(valid_selected[:limit], 1):
         normalized_selected.append({**decision, "rank": rank})
 
     selected_skus = {item["sku_id"] for item in normalized_selected}
@@ -313,7 +380,11 @@ def _normalize_ai_selection(
         rejected_reasons.setdefault(sku_id, "AI 未入选（未返回详细理由）")
 
     shortfall_reason = str(parsed.get("shortfall_reason") or "").strip()
-    if (
+    protocol_errors: list[str] = []
+    if "不足上限时说明原因" in shortfall_reason:
+        warnings.append("不足说明仍是示例占位文本，已忽略")
+        shortfall_reason = ""
+    elif (
         shortfall_reason
         and "相关有效商品达到" in shortfall_reason
         and "必须选择" in shortfall_reason
@@ -324,11 +395,30 @@ def _normalize_ai_selection(
         warnings.append("入选已达上限，已忽略矛盾的合格不足说明")
         shortfall_reason = ""
 
+    expected_count = min(limit, len(candidates))
+    selected_count = len(normalized_selected)
+    if selected_count < expected_count:
+        if invalid_selected_ids:
+            protocol_errors.append(
+                f"返回含 {invalid_selected_ids} 个重复或未知 SKU，导致实际入选 {selected_count} 个"
+            )
+        if not shortfall_reason:
+            protocol_errors.append(
+                f"实际入选 {selected_count} 个，但没有有效的合格不足说明"
+            )
+        claimed = re.search(r"(?:已选择|选出)\s*(\d+)\s*个", shortfall_reason)
+        if claimed and int(claimed.group(1)) != selected_count:
+            protocol_errors.append(
+                f"不足说明声称入选 {claimed.group(1)} 个，实际入选 {selected_count} 个"
+            )
+
     return {
         "selected": normalized_selected,
         "rejected": rejected_reasons,
         "shortfall_reason": shortfall_reason,
         "warnings": warnings,
+        "protocol_complete": not protocol_errors,
+        "protocol_error": "；".join(protocol_errors),
     }
 
 
@@ -415,9 +505,11 @@ def _build_selection_prompt(
         "排序时仅依据输入中的销量、价格、折扣、页面或榜单位次、好评率、自营和卖点。"
         "只能使用输入事实，不得虚构销量、最低价、补贴金额、功效或促销。\n"
         "返回严格 JSON："
-        "{\"selected\":[{\"sku_id\":\"...\",\"rank\":1,\"reason\":\"...\",\"copy\":\"...\"}],"
+        "{\"selected_sku_ids\":[\"...\"],"
         "\"rejected\":[{\"sku_id\":\"...\",\"reason\":\"硬过滤原因\"}],"
-        "\"shortfall_reason\":\"不足上限时说明原因\"}。"
+        "\"shortfall_reason\":\"\"}。"
+        "selected_sku_ids 中的顺序就是推荐排名，只能填写候选池中的真实 SKU。"
+        "selected_reasons 可选且无需生成；如额外返回，可为入选 SKU 补充 reason/copy，缺失不影响入选。"
         "rejected 只列出被硬过滤的候选；正常相关但未进入 Top10 的商品不必列出。\n"
         f"来源={source_name}；类目={category_name}；候选={json.dumps(facts, ensure_ascii=False)}"
     )
@@ -544,6 +636,11 @@ def _recommend_category(
                     recommend_top,
                     context,
                 )
+                if not decision.get("protocol_complete", True):
+                    raise ValueError(
+                        "AI 选品协议不完整: "
+                        + (decision.get("protocol_error") or "返回结果未通过一致性校验")
+                    )
                 item_by_sku = {item["sku_id"]: item for item in scored}
                 picks = []
                 for selected in decision["selected"]:

@@ -179,6 +179,163 @@ class SelectionAndRecommendationTest(unittest.TestCase):
         self.assertIn("血压计、电动轮椅属于医疗器械", prompt)
         self.assertIn("黑芝麻丸属于食品", prompt)
         self.assertIn("rejected 只列出被硬过滤的候选", prompt)
+        self.assertIn('"selected_sku_ids":["..."]', prompt)
+        self.assertIn("selected_sku_ids 中的顺序就是推荐排名", prompt)
+        self.assertIn("selected_reasons 可选", prompt)
+        self.assertNotIn('"selected":[{"sku_id"', prompt)
+
+    def test_ordered_sku_ids_use_program_explanations_when_optional_details_missing(self):
+        from product_selection_agent.recommender import _normalize_ai_selection
+
+        candidates = [
+            {
+                "sku_id": "1",
+                "name": "商品一",
+                "display_price": 99,
+                "sales_text": "已售5000+",
+                "source_rank": 1,
+            },
+            {
+                "sku_id": "2",
+                "name": "商品二",
+                "display_price": 79,
+                "sales_text": "已售3000+",
+                "source_rank": 2,
+            },
+        ]
+        parsed = {
+            "selected_sku_ids": ["2", "1"],
+            "rejected": [],
+            "shortfall_reason": "仅有 2 个候选商品",
+        }
+
+        normalized = _normalize_ai_selection(parsed, candidates, limit=10)
+
+        self.assertEqual(
+            [item["sku_id"] for item in normalized["selected"]],
+            ["2", "1"],
+        )
+        self.assertEqual([item["rank"] for item in normalized["selected"]], [1, 2])
+        self.assertIn("当前展示价 79 元", normalized["selected"][0]["reason"])
+        self.assertIn("商品二", normalized["selected"][0]["copy"])
+        self.assertTrue(normalized["protocol_complete"])
+
+    def test_optional_ai_reason_overrides_program_generated_explanation(self):
+        from product_selection_agent.recommender import _normalize_ai_selection
+
+        normalized = _normalize_ai_selection(
+            {
+                "selected_sku_ids": ["1"],
+                "selected_reasons": [
+                    {"sku_id": "1", "reason": "AI 推荐理由", "copy": "AI 推荐文案"}
+                ],
+                "rejected": [],
+                "shortfall_reason": "仅有 1 个候选商品",
+            },
+            [{"sku_id": "1", "name": "商品一", "display_price": 99}],
+            limit=10,
+        )
+
+        self.assertEqual(normalized["selected"][0]["reason"], "AI 推荐理由")
+        self.assertEqual(normalized["selected"][0]["copy"], "AI 推荐文案")
+
+    def test_invalid_ordered_skus_make_ai_protocol_incomplete(self):
+        from product_selection_agent.recommender import _normalize_ai_selection
+
+        normalized = _normalize_ai_selection(
+            {
+                "selected_sku_ids": ["1", "1", "unknown"],
+                "rejected": [],
+                "shortfall_reason": "相关有效商品达到10个，已选择10个",
+            },
+            [{"sku_id": str(index), "name": f"商品{index}"} for index in range(1, 11)],
+            limit=10,
+        )
+
+        self.assertFalse(normalized["protocol_complete"])
+        self.assertIn("重复或未知 SKU", normalized["protocol_error"])
+        self.assertIn("实际入选 1 个", normalized["protocol_error"])
+
+    def test_legacy_selected_without_reason_or_copy_keeps_selected_sku(self):
+        from product_selection_agent.recommender import (
+            _coerce_ai_selection_payload,
+            _normalize_ai_selection,
+        )
+
+        coerced = _coerce_ai_selection_payload(
+            {
+                "selected": [{"sku_id": "1", "rank": 1}],
+                "rejected": [],
+                "shortfall_reason": "仅有 1 个候选商品",
+            }
+        )
+        normalized = _normalize_ai_selection(
+            coerced,
+            [{"sku_id": "1", "name": "商品一", "display_price": 99}],
+            limit=10,
+        )
+
+        self.assertEqual([item["sku_id"] for item in normalized["selected"]], ["1"])
+        self.assertIn("当前展示价 99 元", normalized["selected"][0]["reason"])
+
+    def test_legacy_items_without_reason_or_copy_keep_selected_skus(self):
+        from product_selection_agent.recommender import (
+            _coerce_ai_selection_payload,
+            _normalize_ai_selection,
+        )
+
+        coerced = _coerce_ai_selection_payload(
+            {"items": [{"sku_id": "2"}, {"sku_id": "1"}]}
+        )
+        normalized = _normalize_ai_selection(
+            coerced,
+            [
+                {"sku_id": "1", "name": "商品一", "display_price": 99},
+                {"sku_id": "2", "name": "商品二", "display_price": 79},
+            ],
+            limit=2,
+        )
+
+        self.assertEqual(
+            [item["sku_id"] for item in normalized["selected"]],
+            ["2", "1"],
+        )
+        self.assertTrue(normalized["protocol_complete"])
+
+    def test_incomplete_ai_protocol_falls_back_to_rule_selection(self):
+        candidates = [
+            {
+                "sku_id": str(index),
+                "name": f"商品{index}",
+                "display_price": 10 + index,
+                "sales_num": 100 - index,
+                "source_rank": index,
+            }
+            for index in range(1, 11)
+        ]
+        invalid_decision = {
+            "selected": [],
+            "rejected": {},
+            "shortfall_reason": "相关有效商品达到10个，已选择10个",
+            "warnings": ["忽略重复 SKU"],
+            "protocol_complete": False,
+            "protocol_error": "返回含重复 SKU，实际入选 8 个",
+        }
+
+        with mock.patch.multiple(
+            "product_selection_agent.recommender.config",
+            AI_API_URL="http://model.test/chat/completions",
+            AI_API_KEY="key",
+            AI_MODEL="model",
+        ), mock.patch(
+            "product_selection_agent.recommender._llm_select_category",
+            return_value=invalid_decision,
+        ):
+            block = recommend({"测试来源": {"测试类目": candidates}})["测试来源"]["测试类目"]
+
+        self.assertEqual(block["recommendation_mode"], "explainable_scoring")
+        self.assertEqual(len(block["products"]), 10)
+        self.assertIn("AI 选品协议不完整", block["ai_error"])
 
     def test_platform_category_ids_filter_known_cross_category_products(self):
         from product_selection_agent.recommender import _prefilter_candidates
