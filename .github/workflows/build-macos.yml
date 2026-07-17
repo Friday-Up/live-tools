@@ -51,7 +51,7 @@ jobs:
 
       - name: Install Playwright Chromium
         run: |
-          playwright install chromium
+          playwright install chromium --no-shell
           test -d "$HOME/Library/Caches/ms-playwright"
 
       - name: Run unit tests
@@ -169,6 +169,12 @@ jobs:
 
           if find "$dist_path" -type f -name model-config.local.json -print -quit | grep -q .; then
             echo "Private model config must not be included in the macOS package"
+            exit 1
+          fi
+
+          if find "$dist_path" -type d \( -name "chromium_headless_shell-*" -o -name "chrome-headless-shell" \) -print -quit | grep -q .; then
+            echo "Headless Shell must not be included in the macOS package"
+            find "$dist_path" -type d \( -name "chromium_headless_shell-*" -o -name "chrome-headless-shell" \) -print
             exit 1
           fi
 

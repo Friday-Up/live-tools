@@ -43,7 +43,7 @@ jobs:
 
       - name: Install Playwright Chromium
         run: |
-          playwright install chromium
+          playwright install chromium --no-shell
 
       - name: Run unit tests
         shell: pwsh
@@ -186,6 +186,14 @@ jobs:
           if ($privateConfigs) {
             Write-Host "Private model config must not be included in the Windows package:"
             $privateConfigs | ForEach-Object { Write-Host $_.FullName }
+            exit 1
+          }
+
+          $headlessShellDirs = Get-ChildItem -Path $distPath -Recurse -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like "chromium_headless_shell-*" -or $_.Name -eq "chrome-headless-shell" }
+          if ($headlessShellDirs) {
+            Write-Host "Headless Shell must not be included in the Windows package:"
+            $headlessShellDirs | ForEach-Object { Write-Host $_.FullName }
             exit 1
           }
 

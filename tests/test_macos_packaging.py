@@ -44,6 +44,9 @@ class MacOSPackagingTest(unittest.TestCase):
         self.assertIn('ditto "$browser_cache" "$dist_path/ms-playwright"', content)
         self.assertNotIn('PLAYWRIGHT_BROWSERS_PATH: "0"', content)
         self.assertIn("Private model config must not be included in the macOS package", content)
+        self.assertIn("playwright install chromium --no-shell", content)
+        self.assertIn("Headless Shell must not be included in the macOS package", content)
+        self.assertIn('-name "chromium_headless_shell-*"', content)
         self.assertIn("ditto -c -k --sequesterRsrc --keepParent", content)
         self.assertIn("actions/upload-artifact@v4", content)
 
