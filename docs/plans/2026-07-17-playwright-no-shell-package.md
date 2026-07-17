@@ -111,4 +111,3 @@ Wait for Windows, Intel macOS, and Apple Silicon macOS builds. Confirm runtime s
 **Step 5: Compare artifacts**
 
 Record artifact names and compressed sizes and compare with the previous successful run. Report the measured reduction rather than estimating.
-
