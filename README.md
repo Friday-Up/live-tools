@@ -4,9 +4,10 @@
 
 **直播业务本地运营工具统一入口，覆盖 SKU 测价、绑券、直播间创建、蓝屏截图与京东选品推荐**
 
-*Web 页面操作 · Excel 驱动 · 京东官方模板输出 · 使用监控统计 · Windows 一键打包*
+*Web 页面操作 · Excel 驱动 · 京东官方模板输出 · 使用监控统计 · Windows / macOS 一键打包*
 
 [![Build Live Tools Windows](https://github.com/Friday-Up/live-tools/actions/workflows/build-windows.yml/badge.svg)](https://github.com/Friday-Up/live-tools/actions/workflows/build-windows.yml)
+[![Build Live Tools macOS](https://github.com/Friday-Up/live-tools/actions/workflows/build-macos.yml/badge.svg)](https://github.com/Friday-Up/live-tools/actions/workflows/build-macos.yml)
 [![Release](https://img.shields.io/github/v/release/Friday-Up/live-tools?color=blue&logo=github)](https://github.com/Friday-Up/live-tools/releases)
 [![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS-lightgrey.svg)](#快速开始)
@@ -53,6 +54,7 @@
 | **使用监控统计** | 默认上报页面访问、上传、任务开始/结束和结果下载事件，支持统计人数、成功率、处理量和耗时 |
 | **运行时清理** | 上传文件和生成结果进入 `live-web/runtime/`，超过 2 天自动清理 |
 | **Windows 打包** | GitHub Actions 自动构建 `Live-Tools-Windows.zip`，业务用户解压即可使用 |
+| **macOS 打包** | GitHub Actions 分别构建 Intel 与 Apple 芯片安装包，业务用户解压后双击启动 |
 
 ---
 
@@ -79,7 +81,18 @@ http://127.0.0.1:8080
 
 从旧版本升级时，请先彻底关闭旧服务，再把新 ZIP 解压到新的空目录中运行，避免旧 EXE 和新文件混用。
 
-### macOS / 开发者源码运行
+### macOS 业务用户
+
+1. 打开 [Releases](https://github.com/Friday-Up/live-tools/releases)，根据“关于本机”中的芯片类型下载：
+   - Intel 芯片：`Live-Tools-macOS-Intel.zip`
+   - M1 / M2 / M3 / M4 等 Apple 芯片：`Live-Tools-macOS-Apple-Silicon.zip`
+2. 解压到本地文件夹。
+3. 双击 `启动直播工具.command`，浏览器会自动打开 `http://127.0.0.1:8080`。
+4. 用完后双击 `关闭直播工具.command`。
+
+当前自动构建产物尚未进行 Apple 开发者签名和公证。首次启动如果被 macOS 拦截，请在 Finder 中右键 `启动直播工具.command`，选择“打开”并确认；如果系统继续拦截内部程序，请到“系统设置 → 隐私与安全性”中对 `Live-Tools-Web` 选择“仍要打开”。不要关闭系统安全保护。
+
+### 开发者源码运行
 
 从仓库根目录启动统一页面：
 
@@ -281,14 +294,20 @@ https://jlive.jd.com/bigScreen?id=46794566
 
 进入“选品 Agent”后，页面会从国家补贴、黑色星期五、排行榜和京东特价动态读取当前品类并默认全选。可按来源勾选本次需要的品类，再选择是否显示浏览器并点击“开始抓品并推荐”；未选择的来源不会启动浏览器，已选来源也只处理勾选的页面类目。每个页面类目保留最多 30 个候选，再由 AI 单次筛选并排序最多 10 个。品类列表缓存 30 分钟，也可手动刷新。
 
-页面会持续展示抓取和推荐日志。任务完成后需要同时关注“抓取完整”和“AI 完整”：任一项为否时，页面会明确标为部分结果，不能把规则回退误认为完整 AI 推荐。
+页面会持续展示处理日志。任务完成后可直接下载业务 Excel；需要排查来源或模型问题时，再查看 Excel 中的“运行诊断”。
 
 | 文件 | 说明 |
 | --- | --- |
-| `selection_时间.json` | 候选池、最终入选、推荐说明和完整诊断 |
 | `选品_时间.xlsx` | 推荐结果、选品明细、候选池和运行诊断 |
 
-模型配置复制 `product-selection-agent/model-config.example.json` 为同目录的 `model-config.local.json`；本地配置已被 Git 忽略，也可使用 `SELECTION_AI_*` 环境变量。未配置模型或模型失败时会明确使用规则回退，不会伪装为 AI 完整结果。
+开发者本地可把 `product-selection-agent/model-config.example.json` 复制为同目录的 `model-config.local.json`。真实配置已被 Git 忽略，Windows 和 macOS 构建也会在发现该文件时直接失败。未配置模型或调用失败时，程序使用规则评分继续产出结果。
+
+### 模型凭证安全
+
+- `model-config.local.json` 仅供开发者本机调试，不提交 Git、不复制到发布包。
+- 不要把真实供应商密钥放入前端、EXE、`.command`、环境配置示例，也不要通过 GitHub Secrets 注入后再打包；客户端中的内容最终都可能被读取。
+- 正式给业务人员使用 AI 时，推荐接入公司内网的服务端模型网关：真实供应商密钥只保存在服务端，客户端仅访问受身份认证和限流保护的内部接口。
+- 内部网关未准备好之前，发布包保持无密钥状态，选品功能自动使用可解释规则评分。
 
 ---
 
@@ -355,6 +374,8 @@ set LIVE_USAGE_EVENT_ENABLED=true
 live/
 ├── README.md                         # 项目总说明
 ├── 启动直播工具.bat                   # Windows 业务入口
+├── 启动直播工具.command               # macOS 业务入口
+├── 关闭直播工具.command               # macOS 关闭入口
 ├── live-web/                         # 统一 Web 入口
 │   ├── app.py                        # Flask 服务和 API
 │   ├── config.py                     # 本地服务配置
@@ -389,7 +410,7 @@ live/
 │   └── tests/
 ├── docs/                             # SOP、方案和实施计划
 │   └── plans/
-└── tests/                            # 仓库级测试，例如 Windows 打包约束
+└── tests/                            # 仓库级测试，例如发布包与密钥安全约束
 ```
 
 ### 运行时目录
@@ -422,9 +443,9 @@ live-web/runtime/
 | Flask | 本地 Web 服务和 API |
 | openpyxl | Excel 读取、模板写入和异常报告生成 |
 | Playwright | SKU 测价、直播间创建、蓝屏截图和选品抓取时打开浏览器、复用京东登录态 |
-| PyInstaller | Windows 一键包构建 |
+| PyInstaller | Windows / macOS 一键包构建 |
 | unittest | 单元测试 |
-| GitHub Actions | Windows 自动打包和 Release 上传 |
+| GitHub Actions | Windows / macOS 自动打包和 Release 上传 |
 
 ---
 
@@ -484,11 +505,14 @@ python3 -m unittest discover -s tests -v
 
 ## 打包发版
 
-Windows 包由 GitHub Actions 自动构建：
+Windows 和 macOS 包由 GitHub Actions 自动构建：
 
-- workflow：`.github/workflows/build-windows.yml`
-- 构建产物：`Live-Tools-Windows.zip`
+- Windows workflow：`.github/workflows/build-windows.yml`
+- macOS workflow：`.github/workflows/build-macos.yml`
+- 构建产物：`Live-Tools-Windows.zip`、`Live-Tools-macOS-Intel.zip`、`Live-Tools-macOS-Apple-Silicon.zip`
 - Release 条件：推送 `v*` 标签时自动上传到 GitHub Release
+
+macOS 使用原生 Intel 和 Apple Silicon Runner 分别构建，避免把单架构程序发给另一类 Mac。当前未配置 Apple 代码签名与公证；如果以后有 Apple Developer ID，应把证书只配置在 GitHub Actions 的签名步骤中，模型密钥仍然不能放进客户端包。
 
 本地开发验证通过后，再按需要创建新版本标签：
 

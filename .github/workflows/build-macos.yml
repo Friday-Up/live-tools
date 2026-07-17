@@ -1,0 +1,210 @@
+name: Build Live Tools macOS
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  PLAYWRIGHT_BROWSERS_PATH: "0"
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: "utf-8"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            artifact: Live-Tools-macOS-Intel
+            archive: Live-Tools-macOS-Intel.zip
+          - runner: macos-15
+            artifact: Live-Tools-macOS-Apple-Silicon
+            archive: Live-Tools-macOS-Apple-Silicon.zip
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r live-web/requirements.txt
+          pip install -r live-sku-price-audit/requirements.txt
+          pip install -r live-promotion-binding/requirements.txt
+          pip install -r live-room-creator/requirements.txt
+          pip install -r live-bigscreen-capture/requirements.txt
+          pip install -r product-selection-agent/requirements.txt
+          pip install pyinstaller
+
+      - name: Install Playwright Chromium
+        run: playwright install chromium
+
+      - name: Run unit tests
+        run: |
+          (cd live-promotion-binding && python -m unittest discover -s tests -p "test_*.py" -v)
+          (cd live-web && python -m unittest discover -s tests -p "test_*.py" -v)
+          (cd live-sku-price-audit && python -m unittest discover -s tests -p "test_*.py" -v)
+          (cd live-room-creator && python -m unittest discover -s tests -p "test_*.py" -v)
+          (cd live-bigscreen-capture && python -m unittest discover -s tests -p "test_*.py" -v)
+          (cd product-selection-agent && python -m unittest discover -s tests -p "test_*.py" -v)
+          python -m unittest discover -s tests -p "test_*.py" -v
+
+      - name: Build Live Tools Web with PyInstaller
+        run: |
+          pyinstaller --noconfirm --onedir --console \
+            --name "Live-Tools-Web" \
+            --contents-directory "." \
+            --paths "live-promotion-binding" \
+            --paths "live-sku-price-audit" \
+            --paths "live-room-creator" \
+            --paths "live-bigscreen-capture" \
+            --paths "product-selection-agent" \
+            --collect-all playwright \
+            --collect-all flask \
+            --collect-all jinja2 \
+            --collect-all werkzeug \
+            --collect-all click \
+            --collect-all itsdangerous \
+            --collect-all markupsafe \
+            --hidden-import openpyxl \
+            --hidden-import PIL \
+            --hidden-import promotion_binding.service \
+            --hidden-import utils.audit_runner \
+            --hidden-import utils.browser_manager \
+            --hidden-import utils.excel_handler \
+            --hidden-import utils.jd_crawler \
+            --hidden-import room_creator \
+            --hidden-import room_creator.browser \
+            --hidden-import room_creator.excel_reader \
+            --hidden-import room_creator.runner \
+            --hidden-import room_creator.validator \
+            --hidden-import room_creator.report_writer \
+            --hidden-import room_creator.models \
+            --hidden-import bigscreen_capture \
+            --hidden-import bigscreen_capture.browser \
+            --hidden-import bigscreen_capture.service \
+            --hidden-import bigscreen_capture.capture_steps \
+            --hidden-import product_selection_agent \
+            --hidden-import product_selection_agent.config \
+            --hidden-import product_selection_agent.fetcher \
+            --hidden-import product_selection_agent.parser \
+            --hidden-import product_selection_agent.recommender \
+            --hidden-import product_selection_agent.runtime \
+            --hidden-import product_selection_agent.selector \
+            --hidden-import product_selection_agent.service \
+            --add-data "live-web/templates:live-web/templates" \
+            --add-data "live-promotion-binding/assets:live-promotion-binding/assets" \
+            --add-data "live-promotion-binding/promotion_binding:live-promotion-binding/promotion_binding" \
+            --add-data "live-sku-price-audit/utils:live-sku-price-audit/utils" \
+            --add-data "live-room-creator/room_creator:live-room-creator/room_creator" \
+            --add-data "live-bigscreen-capture/bigscreen_capture:live-bigscreen-capture/bigscreen_capture" \
+            --add-data "product-selection-agent/product_selection_agent:product-selection-agent/product_selection_agent" \
+            live-web/app.py
+
+      - name: Copy launchers and runtime folders
+        run: |
+          dist_path="dist/Live-Tools-Web"
+          test -d "$dist_path"
+          cp "启动直播工具.command" "$dist_path/启动直播工具.command"
+          cp "关闭直播工具.command" "$dist_path/关闭直播工具.command"
+          mkdir -p "$dist_path/runtime" "$dist_path/product-selection-agent"
+          cp "product-selection-agent/model-config.example.json" "$dist_path/product-selection-agent/model-config.example.json"
+          chmod +x "$dist_path/Live-Tools-Web" "$dist_path/启动直播工具.command" "$dist_path/关闭直播工具.command"
+
+      - name: Verify build output
+        run: |
+          dist_path="dist/Live-Tools-Web"
+          required=(
+            "Live-Tools-Web"
+            "启动直播工具.command"
+            "关闭直播工具.command"
+            "live-web/templates"
+            "live-promotion-binding/assets"
+            "live-promotion-binding/promotion_binding"
+            "live-sku-price-audit/utils"
+            "live-room-creator/room_creator"
+            "live-bigscreen-capture/bigscreen_capture"
+            "product-selection-agent/product_selection_agent"
+            "product-selection-agent/model-config.example.json"
+          )
+
+          for item in "${required[@]}"; do
+            if [[ ! -e "$dist_path/$item" ]]; then
+              echo "Missing required build item: $item"
+              exit 1
+            fi
+          done
+
+          if find "$dist_path" -type d -name tests -print -quit | grep -q .; then
+            echo "Test directories must not be included in the macOS package"
+            exit 1
+          fi
+
+          if find "$dist_path" -type f -name model-config.local.json -print -quit | grep -q .; then
+            echo "Private model config must not be included in the macOS package"
+            exit 1
+          fi
+
+      - name: Smoke test packaged app
+        run: |
+          dist_path="dist/Live-Tools-Web"
+          "$dist_path/Live-Tools-Web" > "$RUNNER_TEMP/live-tools-smoke.log" 2>&1 &
+          app_pid=$!
+          trap 'kill "$app_pid" >/dev/null 2>&1 || true' EXIT
+
+          for _ in {1..30}; do
+            if curl -fsS http://127.0.0.1:8080/api/health >/dev/null; then
+              exit 0
+            fi
+            if ! kill -0 "$app_pid" >/dev/null 2>&1; then
+              cat "$RUNNER_TEMP/live-tools-smoke.log"
+              exit 1
+            fi
+            sleep 1
+          done
+
+          cat "$RUNNER_TEMP/live-tools-smoke.log"
+          exit 1
+
+      - name: Compress output
+        run: ditto -c -k --sequesterRsrc --keepParent "dist/Live-Tools-Web" "dist/${{ matrix.archive }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.archive }}
+          retention-days: 30
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: Live-Tools-macOS-*
+          path: release
+          merge-multiple: true
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

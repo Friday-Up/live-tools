@@ -24,7 +24,7 @@
             position: relative;
             text-align: center;
             margin-bottom: 24px;
-            padding: 0 110px;
+            padding: 0;
         }
 
         .header h1 {
@@ -39,10 +39,16 @@
             font-size: 14px;
         }
 
-        .help-link {
+        .header-actions {
             position: absolute;
             top: 4px;
             right: 0;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .help-link {
             display: inline-flex;
             align-items: center;
             gap: 4px;
@@ -671,7 +677,7 @@
         @media (max-width: 720px) {
             .container { padding: 24px 14px; }
             .header { padding: 0; }
-            .help-link {
+            .header-actions {
                 position: static;
                 justify-content: center;
                 margin-top: 8px;
@@ -690,7 +696,10 @@
         <div class="header">
             <h1>直播运营工具</h1>
             <p>SKU 测价、绑定券码/促销ID、批量创建直播间、蓝屏自动截图、选品 Agent</p>
-            <a class="help-link" href="https://joyspace.jd.com/pages/Knx10idaiNsUUaa7fD0C" target="_blank" rel="noopener noreferrer">使用文档 ↗</a>
+            <div class="header-actions">
+                <a class="help-link" href="https://joyspace.jd.com/pages/Knx10idaiNsUUaa7fD0C" target="_blank" rel="noopener noreferrer">使用文档 ↗</a>
+                <a class="help-link" href="https://joyspace.jd.com/share/bdBb9YpwG8md7rx86lOW?sharedId=F0GdxTbgTp5KZB&amp;viewType=4" target="_blank" rel="noopener noreferrer">问题反馈 ↗</a>
+            </div>
         </div>
 
         <div class="tool-tabs">

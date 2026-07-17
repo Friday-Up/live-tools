@@ -182,6 +182,13 @@ jobs:
             exit 1
           }
 
+          $privateConfigs = Get-ChildItem -Path $distPath -Recurse -File -Filter "model-config.local.json" -ErrorAction SilentlyContinue
+          if ($privateConfigs) {
+            Write-Host "Private model config must not be included in the Windows package:"
+            $privateConfigs | ForEach-Object { Write-Host $_.FullName }
+            exit 1
+          }
+
       - name: Compress output
         shell: pwsh
         run: |

@@ -81,6 +81,8 @@ export SELECTION_AI_MODEL='your-model'
 python3 main.py --headless
 ```
 
+`model-config.local.json` 只用于开发者本机调试，不能提交 Git 或放入给业务人员的安装包。Windows 与 macOS GitHub Actions 只复制无密钥示例文件，并在发布目录中发现真实本地配置时直接终止构建。不要通过 GitHub Secrets 把模型供应商密钥注入客户端包，因为已下发到用户电脑的密钥仍可被提取。正式发布建议让客户端调用公司内网的服务端模型网关，供应商密钥只保存在网关服务端；网关未就绪时，发布包保持无模型密钥并使用规则评分。
+
 模型调用失败会回退到可解释评分，并在 Excel 推荐模式和运行诊断中体现，不会静默伪装成 AI 结果。AI 正常返回少于 10 个时，`shortfall_reason` 和运行诊断会记录“合格候选不足”。重复、未知 SKU 导致数量不足或不足说明与实际数量矛盾时，会判定该类目协议失败并规则回退。模型偶尔返回旧的 `selected`、`items` 或纯数组协议时会自动转换为 `selected_sku_ids` 并保留协议告警。
 
 完整性分开判断：`diagnostics.fetch_complete` 表示四个来源是否抓取完整，`diagnostics.ai_complete` 和顶层 `ai_complete` 表示所有类目是否都完成 AI 选品；`diagnostics.ai_failed_categories` 会列出发生规则回退的来源、类目和错误。控制台最后会同时打印“抓取完整”和“AI完整”。

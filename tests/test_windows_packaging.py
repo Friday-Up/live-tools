@@ -65,6 +65,7 @@ class WindowsPackagingTest(unittest.TestCase):
         self.assertIn("启动直播工具.bat", content)
         self.assertIn('Get-ChildItem -Path $distPath -Recurse -Directory -Filter "tests"', content)
         self.assertIn("Test directories must not be included in the Windows package", content)
+        self.assertIn("Private model config must not be included in the Windows package", content)
         self.assertNotIn("启动测价工具.bat", content)
 
 
