@@ -134,6 +134,7 @@ def run_selection(
     offline_path: str | None = None,
     allow_partial: bool = False,
     context: RunContext | None = None,
+    selected_categories: dict[str, list[str]] | None = None,
 ) -> dict:
     context = context or RunContext()
     context.check_cancelled()
@@ -146,7 +147,28 @@ def run_selection(
             headless=headless,
             allow_partial=allow_partial,
             context=context,
+            selected_categories=selected_categories,
         )
+
+    if selected_categories is not None:
+        selected_sets = {
+            key: {str(category).strip() for category in categories if str(category).strip()}
+            for key, categories in selected_categories.items()
+        }
+        filtered_raw_data = {}
+        for source_key, payload in raw_data.items():
+            categories = selected_sets.get(source_key, set())
+            if not categories:
+                continue
+            filtered_payload = dict(payload)
+            filtered_payload["goods"] = [
+                item
+                for item in payload.get("goods", [])
+                if str(item.get("tab_category") or "未分类") in categories
+            ]
+            filtered_payload["categories"] = sorted(categories)
+            filtered_raw_data[source_key] = filtered_payload
+        raw_data = filtered_raw_data
 
     context.check_cancelled()
     items = parse_all(raw_data)
@@ -317,6 +339,7 @@ def execute_selection(
     offline_path: str | None = None,
     allow_partial: bool = False,
     context: RunContext | None = None,
+    selected_categories: dict[str, list[str]] | None = None,
 ) -> SelectionRunResult:
     """执行完整选品并将业务 Excel 报表写入指定目录。"""
     context = context or RunContext()
@@ -326,6 +349,7 @@ def execute_selection(
         headless=headless,
         offline_path=offline_path,
         allow_partial=allow_partial,
+        selected_categories=selected_categories,
         context=context,
     )
     context.check_cancelled()

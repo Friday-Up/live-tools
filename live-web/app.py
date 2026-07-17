@@ -76,9 +76,12 @@ from bigscreen_capture.service import (
 from bigscreen_capture.url_parser import BigscreenUrlError, parse_bigscreen_url
 from product_selection_agent.runtime import RunContext as ProductSelectionRunContext
 from product_selection_agent.runtime import SelectionCancelled
+from product_selection_agent import config as product_selection_config
+from product_selection_agent.fetcher import discover_categories as discover_product_categories
 from product_selection_agent.service import execute_selection as execute_product_selection
 # fmt: on
 RUNTIME_RETENTION_DAYS = 2
+PRODUCT_SELECTION_CATEGORY_CACHE_SECONDS = 30 * 60
 
 
 def _load_price_audit_concurrent_workers() -> int:
@@ -201,6 +204,8 @@ def create_app(
     product_selection_status_lock = threading.Lock()
     product_selection_status = _initial_product_selection_status()
     product_selection_stop_event = threading.Event()
+    product_selection_category_lock = threading.Lock()
+    product_selection_category_cache = {"loaded_at": 0.0, "sources": []}
 
     def close_current_browsers():
         with browser_lock:
@@ -256,10 +261,72 @@ def create_app(
         with product_selection_status_lock:
             return jsonify(_copy_product_selection_status(product_selection_status))
 
+    @app.route("/api/product-selection/categories")
+    def product_selection_categories():
+        force_refresh = request.args.get("refresh") == "1"
+        with product_selection_category_lock:
+            cache_age = time.monotonic() - product_selection_category_cache["loaded_at"]
+            if (
+                not force_refresh
+                and product_selection_category_cache["sources"]
+                and cache_age < PRODUCT_SELECTION_CATEGORY_CACHE_SECONDS
+            ):
+                return jsonify(
+                    {
+                        "success": True,
+                        "cached": True,
+                        "sources": product_selection_category_cache["sources"],
+                    }
+                )
+
+            discovered = discover_product_categories(headless=True)
+            sources = [
+                {
+                    "key": source_key,
+                    "name": payload.get("name", source_key),
+                    "categories": payload.get("categories", []),
+                    "error": payload.get("error", ""),
+                }
+                for source_key, payload in discovered.items()
+            ]
+            product_selection_category_cache.update(
+                {"loaded_at": time.monotonic(), "sources": sources}
+            )
+            return jsonify({"success": True, "cached": False, "sources": sources})
+
     @app.route("/api/product-selection/start", methods=["POST"])
     def start_product_selection():
         data = request.get_json(silent=True) or {}
         headless = bool(data.get("headless", True))
+        selected_categories = data.get("selected_categories")
+        if selected_categories is not None:
+            if not isinstance(selected_categories, dict):
+                return _json_error("所选品类格式不正确", 400)
+            valid_source_keys = {
+                source["key"] for source in product_selection_config.SOURCES
+            }
+            unknown_source_keys = sorted(set(selected_categories) - valid_source_keys)
+            if unknown_source_keys:
+                return _json_error(
+                    f"包含未知来源: {', '.join(unknown_source_keys)}",
+                    400,
+                )
+            normalized_categories = {}
+            for source_key, categories in selected_categories.items():
+                if not isinstance(categories, list) or any(
+                    not isinstance(category, str) for category in categories
+                ):
+                    return _json_error("所选品类格式不正确", 400)
+                normalized_categories[source_key] = list(
+                    dict.fromkeys(
+                        category.strip()
+                        for category in categories
+                        if category.strip()
+                    )
+                )
+            if not any(normalized_categories.values()):
+                return _json_error("至少选择一个品类", 400)
+            selected_categories = normalized_categories
         # Web 面向业务使用：单个来源临时失败时仍输出其余可用结果。
         allow_partial = True
         with product_selection_status_lock:
@@ -299,6 +366,7 @@ def create_app(
                     output_dir=task_dir,
                     headless=headless,
                     allow_partial=allow_partial,
+                    selected_categories=selected_categories,
                     context=ProductSelectionRunContext(
                         log_callback=append_product_selection_log,
                         stop_event=product_selection_stop_event,

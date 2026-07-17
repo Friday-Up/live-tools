@@ -265,6 +265,77 @@
             accent-color: #4a90e2;
         }
 
+        .category-selector {
+            margin-top: 18px;
+            padding: 16px;
+            border: 1px solid #e7ebf0;
+            border-radius: 10px;
+            background: #fafbfc;
+        }
+
+        .category-selector-header,
+        .category-source-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .category-selector-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .category-selector-actions button {
+            border: 0;
+            background: transparent;
+            color: #4a90e2;
+            cursor: pointer;
+            padding: 2px 4px;
+            font-size: 13px;
+        }
+
+        .category-selector-status {
+            color: #888;
+            font-size: 13px;
+            margin: 10px 0;
+        }
+
+        .category-source-group {
+            padding: 12px 0;
+            border-top: 1px solid #edf0f3;
+        }
+
+        .category-source-name {
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .category-options {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 14px;
+            margin-top: 10px;
+        }
+
+        .category-option {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            color: #555;
+            font-size: 13px;
+            cursor: pointer;
+        }
+
+        .category-option input {
+            width: 15px;
+            height: 15px;
+            accent-color: #4a90e2;
+        }
+
         .column-mapping {
             display: none;
             margin-top: 20px;
@@ -983,9 +1054,21 @@
                     <input type="checkbox" id="productSelectionShowBrowser">
                     <span>显示抓取浏览器窗口</span>
                 </label>
+                <div class="category-selector">
+                    <div class="category-selector-header">
+                        <div class="section-title" style="margin-bottom: 0;">选择品类</div>
+                        <div class="category-selector-actions">
+                            <button type="button" id="productSelectionSelectAllCategories">全选</button>
+                            <button type="button" id="productSelectionClearCategories">清空</button>
+                            <button type="button" id="productSelectionRefreshCategories">刷新品类</button>
+                        </div>
+                    </div>
+                    <div class="category-selector-status" id="productSelectionCategoryStatus">正在读取活动页品类...</div>
+                    <div id="productSelectionCategoryGroups"></div>
+                </div>
                 <div class="status-message" id="productSelectionMessage"></div>
                 <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-top: 20px;">
-                    <button class="btn btn-primary" id="productSelectionStartBtn">开始抓品并推荐</button>
+                    <button class="btn btn-primary" id="productSelectionStartBtn" disabled>开始抓品并推荐</button>
                     <button class="btn btn-secondary" id="productSelectionStopBtn" style="display: none; background: #e74c3c; color: white;">停止任务</button>
                 </div>
             </div>
@@ -1101,7 +1184,13 @@
         const productSelectionStartBtn = document.getElementById('productSelectionStartBtn');
         const productSelectionStopBtn = document.getElementById('productSelectionStopBtn');
         const productSelectionMessage = document.getElementById('productSelectionMessage');
+        const productSelectionCategoryGroups = document.getElementById('productSelectionCategoryGroups');
+        const productSelectionCategoryStatus = document.getElementById('productSelectionCategoryStatus');
+        const productSelectionRefreshCategories = document.getElementById('productSelectionRefreshCategories');
         let productSelectionStatusInterval = null;
+        let productSelectionCategoriesLoaded = false;
+        let productSelectionCategoriesLoading = false;
+        let productSelectionRunning = false;
 
         document.querySelectorAll('.tool-tab').forEach((button) => {
             button.addEventListener('click', () => {
@@ -1109,6 +1198,9 @@
                 document.querySelectorAll('.tool-panel').forEach((panel) => panel.classList.remove('active'));
                 button.classList.add('active');
                 document.getElementById(button.dataset.tool).classList.add('active');
+                if (button.dataset.tool === 'productSelectionPanel') {
+                    loadProductSelectionCategories();
+                }
             });
         });
 
@@ -2212,6 +2304,112 @@
             failed: '失败'
         };
 
+        function collectProductSelectionCategories() {
+            const selected = {};
+            productSelectionCategoryGroups.querySelectorAll('.category-source-group').forEach((group) => {
+                selected[group.dataset.sourceKey] = Array.from(
+                    group.querySelectorAll('input[type="checkbox"]:checked')
+                ).map((input) => input.value);
+            });
+            return selected;
+        }
+
+        function countSelectedProductCategories() {
+            return productSelectionCategoryGroups.querySelectorAll('input[type="checkbox"]:checked').length;
+        }
+
+        function saveProductSelectionCategories() {
+            try {
+                localStorage.setItem(
+                    'productSelectionCategories',
+                    JSON.stringify(collectProductSelectionCategories())
+                );
+            } catch (_error) {}
+        }
+
+        function updateProductSelectionControls() {
+            const count = countSelectedProductCategories();
+            productSelectionStartBtn.disabled = productSelectionRunning
+                || productSelectionCategoriesLoading
+                || !productSelectionCategoriesLoaded
+                || count === 0;
+            productSelectionCategoryGroups.querySelectorAll('input[type="checkbox"]').forEach((input) => {
+                input.disabled = productSelectionRunning || productSelectionCategoriesLoading;
+            });
+            document.getElementById('productSelectionSelectAllCategories').disabled = productSelectionRunning || productSelectionCategoriesLoading;
+            document.getElementById('productSelectionClearCategories').disabled = productSelectionRunning || productSelectionCategoriesLoading;
+            productSelectionRefreshCategories.disabled = productSelectionRunning || productSelectionCategoriesLoading;
+            if (productSelectionCategoriesLoaded && !productSelectionCategoriesLoading) {
+                productSelectionCategoryStatus.textContent = count > 0
+                    ? `已选择 ${count} 个品类，只抓取所选品类`
+                    : '至少选择一个品类后才能开始选品';
+            }
+        }
+
+        function renderProductSelectionCategories(sources) {
+            let saved = null;
+            try {
+                saved = JSON.parse(localStorage.getItem('productSelectionCategories') || 'null');
+            } catch (_error) {}
+            productSelectionCategoryGroups.innerHTML = (sources || []).map((source) => {
+                const categories = source.categories || [];
+                const savedCategories = saved && Array.isArray(saved[source.key]) ? saved[source.key] : null;
+                const options = categories.map((category) => {
+                    const checked = savedCategories === null || savedCategories.includes(category);
+                    return `<label class="category-option"><input type="checkbox" value="${escapeHtml(category)}" ${checked ? 'checked' : ''}><span>${escapeHtml(category)}</span></label>`;
+                }).join('');
+                const unavailable = categories.length
+                    ? ''
+                    : `<div class="category-selector-status">当前未读取到品类，可点击“刷新品类”重试</div>`;
+                return `<div class="category-source-group" data-source-key="${escapeHtml(source.key)}"><div class="category-source-header"><span class="category-source-name">${escapeHtml(source.name)}</span><span class="sku-hint">${categories.length} 个品类</span></div><div class="category-options">${options}</div>${unavailable}</div>`;
+            }).join('');
+            productSelectionCategoryGroups.querySelectorAll('input[type="checkbox"]').forEach((input) => {
+                input.addEventListener('change', () => {
+                    saveProductSelectionCategories();
+                    updateProductSelectionControls();
+                });
+            });
+        }
+
+        function loadProductSelectionCategories(forceRefresh = false) {
+            if (productSelectionCategoriesLoading || (productSelectionCategoriesLoaded && !forceRefresh)) return;
+            productSelectionCategoriesLoading = true;
+            productSelectionCategoryStatus.textContent = '正在读取活动页品类...';
+            updateProductSelectionControls();
+            fetch('/api/product-selection/categories' + (forceRefresh ? '?refresh=1' : ''))
+                .then(async (res) => ({ ok: res.ok, data: await res.json() }))
+                .then(({ ok, data }) => {
+                    if (!ok || !data.success) throw new Error(data.error || '品类读取失败');
+                    renderProductSelectionCategories(data.sources || []);
+                    productSelectionCategoriesLoaded = productSelectionCategoryGroups.querySelectorAll('input[type="checkbox"]').length > 0;
+                    if (!productSelectionCategoriesLoaded) throw new Error('未读取到可选品类，请刷新后重试');
+                })
+                .catch((error) => {
+                    productSelectionCategoriesLoaded = false;
+                    productSelectionCategoryStatus.textContent = error.message || '品类读取失败，请重试';
+                })
+                .finally(() => {
+                    productSelectionCategoriesLoading = false;
+                    updateProductSelectionControls();
+                });
+        }
+
+        document.getElementById('productSelectionSelectAllCategories').addEventListener('click', () => {
+            productSelectionCategoryGroups.querySelectorAll('input[type="checkbox"]').forEach((input) => { input.checked = true; });
+            saveProductSelectionCategories();
+            updateProductSelectionControls();
+        });
+
+        document.getElementById('productSelectionClearCategories').addEventListener('click', () => {
+            productSelectionCategoryGroups.querySelectorAll('input[type="checkbox"]').forEach((input) => { input.checked = false; });
+            saveProductSelectionCategories();
+            updateProductSelectionControls();
+        });
+
+        productSelectionRefreshCategories.addEventListener('click', () => {
+            loadProductSelectionCategories(true);
+        });
+
         function setProductSelectionStage(stage) {
             const element = document.getElementById('productSelectionStage');
             element.textContent = productSelectionStageLabels[stage] || stage || '-';
@@ -2234,7 +2432,8 @@
             }).join('');
             logs.scrollTop = logs.scrollHeight;
 
-            productSelectionStartBtn.disabled = Boolean(data.running);
+            productSelectionRunning = Boolean(data.running);
+            updateProductSelectionControls();
             productSelectionStartBtn.textContent = data.running ? '选品进行中...' : '开始抓品并推荐';
             productSelectionStopBtn.style.display = data.running ? 'inline-flex' : 'none';
             productSelectionStopBtn.disabled = Boolean(data.stopping);
@@ -2272,7 +2471,8 @@
                 .catch(() => {
                     if (productSelectionStatusInterval) clearInterval(productSelectionStatusInterval);
                     productSelectionStatusInterval = null;
-                    productSelectionStartBtn.disabled = false;
+                    productSelectionRunning = false;
+                    updateProductSelectionControls();
                     productSelectionStartBtn.textContent = '开始抓品并推荐';
                     setProductSelectionStage('failed');
                     showMessage(productSelectionMessage, '连接服务失败，请重新启动直播运营工具', 'error');
@@ -2287,18 +2487,24 @@
 
         productSelectionStartBtn.addEventListener('click', () => {
             if (productSelectionStartBtn.disabled) return;
+            if (countSelectedProductCategories() === 0) {
+                showMessage(productSelectionMessage, '至少选择一个品类', 'error');
+                return;
+            }
             clearMessage(productSelectionMessage);
             document.getElementById('productSelectionResultCard').classList.remove('active');
             document.getElementById('productSelectionProgressCard').classList.add('active');
             document.getElementById('productSelectionLogs').innerHTML = '';
-            productSelectionStartBtn.disabled = true;
+            productSelectionRunning = true;
+            updateProductSelectionControls();
             productSelectionStartBtn.textContent = '选品进行中...';
             setProductSelectionStage('running');
             fetch('/api/product-selection/start', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    headless: !document.getElementById('productSelectionShowBrowser').checked
+                    headless: !document.getElementById('productSelectionShowBrowser').checked,
+                    selected_categories: collectProductSelectionCategories()
                 })
             })
                 .then(async (res) => ({ ok: res.ok, data: await res.json() }))
@@ -2307,7 +2513,8 @@
                     startProductSelectionPolling();
                 })
                 .catch((error) => {
-                    productSelectionStartBtn.disabled = false;
+                    productSelectionRunning = false;
+                    updateProductSelectionControls();
                     productSelectionStartBtn.textContent = '开始抓品并推荐';
                     setProductSelectionStage('failed');
                     showMessage(productSelectionMessage, error.message || '启动失败', 'error');

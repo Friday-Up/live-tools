@@ -224,7 +224,34 @@ def _limit_candidates(goods: list[dict]) -> list[dict]:
     return _dedup_goods(goods)[: config.MAX_CANDIDATES_PER_CATEGORY]
 
 
-def _fetch_babel_tabs(page: Page, source: dict, context: RunContext) -> list[dict]:
+def _build_tab_plan(
+    names: list[str],
+    selected_categories: set[str] | None,
+) -> tuple[list[tuple[int, str]], set[str]]:
+    """将页面 Tab 和用户选择合并成抓取计划，并识别已失效的选择。"""
+    available = {
+        name for name in names if name and name not in config.SKIP_TABS
+    }
+    unknown = (
+        set(selected_categories) - available
+        if selected_categories is not None
+        else set()
+    )
+    plan = [
+        (index, name)
+        for index, name in enumerate(names)
+        if name in available
+        and (selected_categories is None or name in selected_categories)
+    ]
+    return plan, unknown
+
+
+def _fetch_babel_tabs(
+    page: Page,
+    source: dict,
+    context: RunContext,
+    selected_categories: set[str] | None = None,
+) -> list[dict]:
     bucket: list[dict] = []
 
     def on_response(response):
@@ -242,13 +269,14 @@ def _fetch_babel_tabs(page: Page, source: dict, context: RunContext) -> list[dic
         names = _tab_names(page, source["tab_selector"])
         if not names:
             raise RuntimeError("未发现国家补贴类目 Tab")
-        expected_categories = {name for name in names if name and name not in config.SKIP_TABS}
+        tab_plan, unknown = _build_tab_plan(names, selected_categories)
+        if unknown:
+            raise RuntimeError(f"所选类目已不存在: {', '.join(sorted(unknown))}")
+        expected_categories = {name for _, name in tab_plan}
         context.log(f"[fetch] {source['name']} 发现 {len(names)} 个 Tab: {names}")
         collected: list[dict] = []
-        for index, name in enumerate(names):
+        for index, name in tab_plan:
             context.check_cancelled()
-            if not name or name in config.SKIP_TABS:
-                continue
             time.sleep(0.4)  # 先让上一个 Tab 的尾部响应自然结束
             bucket.clear()
             tab = page.locator(source["tab_selector"]).nth(index)
@@ -282,14 +310,21 @@ def _fetch_babel_tabs(page: Page, source: dict, context: RunContext) -> list[dic
         page.remove_listener("response", on_response)
 
 
-def _fetch_embedded_flex(page: Page, source: dict, context: RunContext) -> list[dict]:
+def _fetch_embedded_flex(
+    page: Page,
+    source: dict,
+    context: RunContext,
+    selected_categories: set[str] | None = None,
+) -> list[dict]:
     context.check_cancelled()
+    category = source.get("fallback_category", "未分类")
+    if selected_categories is not None and category not in selected_categories:
+        return []
     page.goto(source["url"], wait_until="domcontentloaded", timeout=config.PAGE_TIMEOUT_MS)
     time.sleep(config.PAGE_READY_SECONDS)
     react_data = page.evaluate("window.__react_data__ || null")
     if not isinstance(react_data, dict):
         raise RuntimeError("页面不存在 window.__react_data__")
-    category = source.get("fallback_category", "未分类")
     goods = _limit_candidates(_extract_flex_goods(react_data, category))
     for item in goods:
         item["category_source"] = "source_fallback_no_tab"
@@ -298,7 +333,12 @@ def _fetch_embedded_flex(page: Page, source: dict, context: RunContext) -> list[
     return goods
 
 
-def _fetch_flex_feed_tabs(page: Page, source: dict, context: RunContext) -> list[dict]:
+def _fetch_flex_feed_tabs(
+    page: Page,
+    source: dict,
+    context: RunContext,
+    selected_categories: set[str] | None = None,
+) -> list[dict]:
     bucket: list[dict] = []
 
     def on_response(response):
@@ -316,13 +356,14 @@ def _fetch_flex_feed_tabs(page: Page, source: dict, context: RunContext) -> list
         names = _tab_names(page, source["tab_selector"])
         if not names:
             raise RuntimeError("未发现京东特价类目 Tab")
-        expected_categories = {name for name in names if name and name not in config.SKIP_TABS}
+        tab_plan, unknown = _build_tab_plan(names, selected_categories)
+        if unknown:
+            raise RuntimeError(f"所选类目已不存在: {', '.join(sorted(unknown))}")
+        expected_categories = {name for _, name in tab_plan}
         context.log(f"[fetch] {source['name']} 发现 {len(names)} 个 Tab: {names}")
         collected: list[dict] = []
-        for index, name in enumerate(names):
+        for index, name in tab_plan:
             context.check_cancelled()
-            if not name or name in config.SKIP_TABS:
-                continue
             time.sleep(0.4)
             bucket.clear()
             tab = page.locator(source["tab_selector"]).nth(index)
@@ -425,20 +466,26 @@ def _rank_detail_products(detail_page: Page, tab_name: str, board_name: str) -> 
     return goods
 
 
-def _fetch_rank_drilldown(page: Page, source: dict, context: RunContext) -> list[dict]:
+def _fetch_rank_drilldown(
+    page: Page,
+    source: dict,
+    context: RunContext,
+    selected_categories: set[str] | None = None,
+) -> list[dict]:
     page.goto(source["url"], wait_until="domcontentloaded", timeout=config.PAGE_TIMEOUT_MS)
     time.sleep(config.PAGE_READY_SECONDS)
     names = _tab_names(page, source["tab_selector"])
     if not names:
         raise RuntimeError("未发现排行榜类目 Tab")
-    expected_categories = {name for name in names if name and name not in config.SKIP_TABS}
+    tab_plan, unknown = _build_tab_plan(names, selected_categories)
+    if unknown:
+        raise RuntimeError(f"所选类目已不存在: {', '.join(sorted(unknown))}")
+    expected_categories = {name for _, name in tab_plan}
     context.log(f"[fetch] {source['name']} 发现 {len(names)} 个 Tab: {names}")
     collected: list[dict] = []
 
-    for index, name in enumerate(names):
+    for index, name in tab_plan:
         context.check_cancelled()
-        if not name or name in config.SKIP_TABS:
-            continue
         try:
             tab = page.locator(source["tab_selector"]).nth(index)
             tab.scroll_into_view_if_needed(timeout=3000)
@@ -482,7 +529,12 @@ ADAPTERS = {
 }
 
 
-def fetch_source(page: Page, source: dict, context: RunContext | None = None) -> list[dict]:
+def fetch_source(
+    page: Page,
+    source: dict,
+    context: RunContext | None = None,
+    selected_categories: set[str] | None = None,
+) -> list[dict]:
     context = context or RunContext()
     context.check_cancelled()
     adapter_name = source.get("adapter")
@@ -490,7 +542,7 @@ def fetch_source(page: Page, source: dict, context: RunContext | None = None) ->
     if not adapter:
         raise ValueError(f"未知来源适配器: {adapter_name}")
     context.log(f"[fetch] {source['name']} -> {adapter_name}")
-    return adapter(page, source, context)
+    return adapter(page, source, context, selected_categories)
 
 
 def _fetch_source_isolated(
@@ -498,6 +550,7 @@ def _fetch_source_isolated(
     headless: bool,
     auth_path: str,
     context: RunContext | None = None,
+    selected_categories: set[str] | None = None,
 ) -> list[dict]:
     """在线程内部创建并使用 Playwright，避免同步 Page 跨线程共享。"""
     run_context = context or RunContext()
@@ -511,17 +564,102 @@ def _fetch_source_isolated(
         browser_context = browser.new_context(**context_options)
         page = browser_context.new_page()
         try:
-            return fetch_source(page, source, run_context)
+            return fetch_source(page, source, run_context, selected_categories)
         finally:
             page.close()
             browser_context.close()
             browser.close()
 
 
+def _discover_source_categories_isolated(
+    source: dict,
+    headless: bool,
+    auth_path: str,
+    context: RunContext | None = None,
+) -> list[str]:
+    """读取单个活动页当前可选类目，不触发商品抓取。"""
+    run_context = context or RunContext()
+    run_context.check_cancelled()
+    if source.get("adapter") == "embedded_flex":
+        return [source.get("fallback_category", "未分类")]
+
+    context_options = {"viewport": {"width": 1440, "height": 900}}
+    if os.path.exists(auth_path):
+        context_options["storage_state"] = auth_path
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=headless)
+        browser_context = browser.new_context(**context_options)
+        page = browser_context.new_page()
+        try:
+            page.goto(
+                source["url"],
+                wait_until="domcontentloaded",
+                timeout=config.PAGE_TIMEOUT_MS,
+            )
+            time.sleep(config.PAGE_READY_SECONDS)
+            names = _tab_names(page, source["tab_selector"])
+            categories = list(
+                dict.fromkeys(
+                    name
+                    for name in names
+                    if name and name not in config.SKIP_TABS
+                )
+            )
+            if not categories:
+                raise RuntimeError("页面未发现可选类目")
+            return categories
+        finally:
+            page.close()
+            browser_context.close()
+            browser.close()
+
+
+def discover_categories(
+    headless: bool = True,
+    context: RunContext | None = None,
+) -> dict[str, dict]:
+    """并发读取四个来源的品类，供 Web 页面在任务开始前选择。"""
+    context = context or RunContext()
+    context.check_cancelled()
+    auth_path = os.path.abspath(config.AUTH_PATH)
+    worker_count = min(config.FETCH_WORKERS, len(config.SOURCES))
+    completed: dict[str, dict] = {}
+    with ThreadPoolExecutor(
+        max_workers=worker_count,
+        thread_name_prefix="selection-category",
+    ) as executor:
+        future_sources = {
+            executor.submit(
+                _discover_source_categories_isolated,
+                source,
+                headless,
+                auth_path,
+                context,
+            ): source
+            for source in config.SOURCES
+        }
+        for future in as_completed(future_sources):
+            source = future_sources[future]
+            try:
+                categories = future.result()
+                error = ""
+            except Exception as exc:
+                categories = []
+                error = f"{type(exc).__name__}: {exc}"
+            completed[source["key"]] = {
+                "name": source["name"],
+                "categories": categories,
+                "error": error,
+            }
+    return {source["key"]: completed[source["key"]] for source in config.SOURCES}
+
+
 def fetch_all(
     headless: bool = False,
     allow_partial: bool = False,
     context: RunContext | None = None,
+    selected_categories: dict[str, list[str]] | None = None,
 ) -> dict:
     """抓取全部来源；默认任一来源为空就失败，避免静默生成残缺报表。"""
     context = context or RunContext()
@@ -532,13 +670,36 @@ def fetch_all(
     else:
         context.log(f"[auth] 未找到登录态，使用匿名访问: {auth_path}")
 
-    worker_count = min(config.FETCH_WORKERS, len(config.SOURCES))
+    selected_sets = (
+        {
+            key: {str(category).strip() for category in categories if str(category).strip()}
+            for key, categories in selected_categories.items()
+        }
+        if selected_categories is not None
+        else None
+    )
+    active_sources = [
+        source
+        for source in config.SOURCES
+        if selected_sets is None or selected_sets.get(source["key"], set())
+    ]
+    if not active_sources:
+        raise ValueError("至少选择一个品类")
+
+    worker_count = min(config.FETCH_WORKERS, len(active_sources))
     context.log(f"[fetch] 启用 {worker_count} 个独立浏览器并发（按来源隔离）")
     completed: dict[str, dict] = {}
     with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="selection-fetch") as executor:
         future_sources = {
-            executor.submit(_fetch_source_isolated, source, headless, auth_path, context): source
-            for source in config.SOURCES
+            executor.submit(
+                _fetch_source_isolated,
+                source,
+                headless,
+                auth_path,
+                context,
+                None if selected_sets is None else selected_sets[source["key"]],
+            ): source
+            for source in active_sources
         }
         for future in as_completed(future_sources):
             context.check_cancelled()
@@ -561,7 +722,7 @@ def fetch_all(
             }
 
     # 并发完成顺序不稳定，按配置顺序组织输出，保证 Excel 可复现。
-    result = {source["key"]: completed[source["key"]] for source in config.SOURCES}
+    result = {source["key"]: completed[source["key"]] for source in active_sources}
 
     empty_sources = [payload["name"] for payload in result.values() if not payload["goods"]]
     if empty_sources and not allow_partial:

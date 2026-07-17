@@ -47,7 +47,13 @@ class SourceAdapterTest(unittest.TestCase):
             for index in range(4)
         ]
 
-        def fake_fetch(source, headless, auth_path, context=None):
+        def fake_fetch(
+            source,
+            headless,
+            auth_path,
+            context=None,
+            selected_categories=None,
+        ):
             time.sleep(0.2)
             return [{"skuId": source["key"], "tab_category": "类目"}]
 
@@ -87,7 +93,77 @@ class SourceAdapterTest(unittest.TestCase):
                 context=run_context,
             )
 
-        fetch_source.assert_called_once_with(page, source, run_context)
+        fetch_source.assert_called_once_with(page, source, run_context, None)
+
+    def test_selected_categories_skip_unselected_sources_before_browser_start(self):
+        sources = [
+            {"key": "a", "name": "来源A", "adapter": "test"},
+            {"key": "b", "name": "来源B", "adapter": "test"},
+        ]
+        calls = []
+
+        def fake_fetch(
+            source,
+            headless,
+            auth_path,
+            context=None,
+            selected_categories=None,
+        ):
+            calls.append((source["key"], selected_categories))
+            return [{"skuId": "1", "tab_category": next(iter(selected_categories))}]
+
+        with mock.patch.multiple(
+            fetcher.config,
+            SOURCES=sources,
+            FETCH_WORKERS=2,
+            AUTH_PATH="/path/does/not/exist",
+        ), mock.patch(
+            "product_selection_agent.fetcher._fetch_source_isolated",
+            side_effect=fake_fetch,
+        ):
+            result = fetcher.fetch_all(
+                headless=True,
+                selected_categories={"a": ["类目A"], "b": []},
+            )
+
+        self.assertEqual(list(result), ["a"])
+        self.assertEqual(calls, [("a", {"类目A"})])
+
+    def test_tab_plan_only_keeps_selected_page_categories(self):
+        plan, unknown = fetcher._build_tab_plan(
+            ["推荐", "手机", "电视", "空调"],
+            {"电视", "空调"},
+        )
+
+        self.assertEqual(plan, [(2, "电视"), (3, "空调")])
+        self.assertEqual(unknown, set())
+
+    def test_discover_categories_keeps_source_order_and_errors(self):
+        sources = [
+            {"key": "a", "name": "来源A", "adapter": "test"},
+            {"key": "b", "name": "来源B", "adapter": "test"},
+        ]
+
+        def fake_discover(source, headless, auth_path, context=None):
+            if source["key"] == "b":
+                raise RuntimeError("页面变化")
+            return ["手机", "电视"]
+
+        with mock.patch.multiple(
+            fetcher.config,
+            SOURCES=sources,
+            FETCH_WORKERS=2,
+            AUTH_PATH="/path/does/not/exist",
+        ), mock.patch(
+            "product_selection_agent.fetcher._discover_source_categories_isolated",
+            side_effect=fake_discover,
+        ):
+            result = fetcher.discover_categories(headless=True)
+
+        self.assertEqual(list(result), ["a", "b"])
+        self.assertEqual(result["a"]["categories"], ["手机", "电视"])
+        self.assertEqual(result["b"]["categories"], [])
+        self.assertIn("页面变化", result["b"]["error"])
 
     def test_gov_goods_nested_sku_is_kept(self):
         body = {

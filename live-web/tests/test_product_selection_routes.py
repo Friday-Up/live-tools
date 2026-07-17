@@ -52,9 +52,19 @@ class ProductSelectionRoutesTest(unittest.TestCase):
     def test_start_runs_service_and_exposes_excel_download_only(self):
         received_options = {}
 
-        def fake_execute(output_dir, headless, allow_partial, context):
+        def fake_execute(
+            output_dir,
+            headless,
+            allow_partial,
+            context,
+            selected_categories=None,
+        ):
             received_options.update(
-                {"headless": headless, "allow_partial": allow_partial}
+                {
+                    "headless": headless,
+                    "allow_partial": allow_partial,
+                    "selected_categories": selected_categories,
+                }
             )
             output_dir = Path(output_dir)
             output_dir.mkdir(parents=True, exist_ok=True)
@@ -80,7 +90,14 @@ class ProductSelectionRoutesTest(unittest.TestCase):
         ):
             response = self.client.post(
                 "/api/product-selection/start",
-                json={"headless": True, "allow_partial": False},
+                json={
+                    "headless": True,
+                    "allow_partial": False,
+                    "selected_categories": {
+                        "gov_subsidy": ["电视", "空调"],
+                        "jd_special": [],
+                    },
+                },
             )
 
         self.assertEqual(response.status_code, 202)
@@ -93,6 +110,10 @@ class ProductSelectionRoutesTest(unittest.TestCase):
         self.assertEqual(status["summary"]["selected_count"], 1)
         self.assertIn("已抓取", "\n".join(status["logs"]))
         self.assertTrue(received_options["allow_partial"])
+        self.assertEqual(
+            received_options["selected_categories"],
+            {"gov_subsidy": ["电视", "空调"], "jd_special": []},
+        )
 
         excel_response = self.client.get(status["excel_download_url"])
         self.assertEqual(excel_response.data, b"xlsx")
@@ -115,6 +136,48 @@ class ProductSelectionRoutesTest(unittest.TestCase):
             )
 
         self.assertTrue(received_options["allow_partial"])
+
+    def test_categories_are_discovered_once_and_cached(self):
+        discovered = {
+            "gov_subsidy": {
+                "name": "国家补贴",
+                "categories": ["手机", "电视"],
+                "error": "",
+            },
+            "black_friday": {
+                "name": "黑色星期五",
+                "categories": ["全场精选（页面无类目Tab）"],
+                "error": "",
+            },
+        }
+        with mock.patch.object(
+            web_app,
+            "discover_product_categories",
+            return_value=discovered,
+        ) as discover:
+            first = self.client.get("/api/product-selection/categories")
+            second = self.client.get("/api/product-selection/categories")
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first.get_json()["sources"][0]["key"], "gov_subsidy")
+        self.assertEqual(first.get_json()["sources"][0]["categories"], ["手机", "电视"])
+        self.assertTrue(second.get_json()["cached"])
+        discover.assert_called_once()
+
+    def test_start_rejects_empty_or_unknown_category_selection(self):
+        empty = self.client.post(
+            "/api/product-selection/start",
+            json={"selected_categories": {"gov_subsidy": []}},
+        )
+        unknown = self.client.post(
+            "/api/product-selection/start",
+            json={"selected_categories": {"unknown": ["手机"]}},
+        )
+
+        self.assertEqual(empty.status_code, 400)
+        self.assertIn("至少选择一个品类", empty.get_json()["error"])
+        self.assertEqual(unknown.status_code, 400)
+        self.assertIn("未知来源", unknown.get_json()["error"])
 
     def test_rejects_duplicate_start_and_stop_marks_task_stopping(self):
         with mock.patch.object(web_app.threading, "Thread", DormantThread):
