@@ -163,7 +163,7 @@ jobs:
             --add-data "$roomCreatorPackage;live-room-creator/room_creator" `
             --add-data "$roomCreatorTemplate;live-room-creator/input" `
             --add-data "$redRainCreatorPackage;live-red-rain-creator/red_rain_creator" `
-            --add-data "$redRainTemplate;live-red-rain-creator/input/红包雨创建模板.xlsx" `
+            --add-data "$redRainTemplate;live-red-rain-creator/input" `
             --add-data "$bigscreenPackage;live-bigscreen-capture/bigscreen_capture" `
             --add-data "$productSelectionPackage;product-selection-agent/product_selection_agent" `
             $webApp
@@ -209,6 +209,22 @@ jobs:
             $path = Join-Path $distPath $item
             if (-not (Test-Path $path)) {
               Write-Host "Missing required build item: $item"
+              exit 1
+            }
+          }
+
+          $requiredFiles = @(
+            "Live-Tools-Web.exe",
+            "Live-Tools-Updater.exe",
+            "启动直播工具.bat",
+            "live-sku-price-audit/input/点菜清单模板.xlsx",
+            "live-room-creator/input/直播间创建模板.xlsx",
+            "live-red-rain-creator/input/红包雨创建模板.xlsx"
+          )
+          foreach ($item in $requiredFiles) {
+            $path = Join-Path $distPath $item
+            if (-not (Test-Path $path -PathType Leaf)) {
+              Write-Host "Required build file is missing or is not a file: $item"
               exit 1
             }
           }
