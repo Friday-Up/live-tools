@@ -1,4 +1,6 @@
 import importlib.util
+import io
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -115,6 +117,40 @@ class WindowsUpdaterTest(unittest.TestCase):
         with self.assertRaises(OSError):
             updater.validate_wait_result(updater.WAIT_FAILED, 5)
 
+    def test_health_wait_does_not_busy_loop_on_wrong_running_version(self):
+        class Process:
+            def __init__(self):
+                self.poll_count = 0
+
+            def poll(self):
+                self.poll_count += 1
+                return None if self.poll_count == 1 else 1
+
+        class Response:
+            status = 200
+
+            def __init__(self):
+                self.body = io.BytesIO(
+                    json.dumps({"success": True, "version": "0.5.0"}).encode()
+                )
+
+            def read(self):
+                return self.body.read()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+        with patch.object(updater, "urlopen", return_value=Response()), patch.object(
+            updater.time, "sleep"
+        ) as sleep:
+            healthy = updater.wait_for_health(Process(), expected_version="0.5.1")
+
+        self.assertFalse(healthy)
+        sleep.assert_called_once_with(1)
+
     def test_recovery_waits_for_live_update_owner(self):
         root = Path(tempfile.mkdtemp())
         install_dir = root / "Live-Tools-Web"
@@ -138,6 +174,28 @@ class WindowsUpdaterTest(unittest.TestCase):
             )
 
         mocked.assert_called_once()
+
+    def test_recovery_commits_when_expected_new_version_is_already_healthy(self):
+        root = Path(tempfile.mkdtemp())
+        install_dir = root / "Live-Tools-Web"
+        backup_dir = root / ".Live-Tools-Web-backup-test"
+        transaction_file = install_dir / "runtime" / updater.UPDATE_TRANSACTION_NAME
+        (install_dir / "runtime").mkdir(parents=True)
+        backup_dir.mkdir()
+        (backup_dir / "Live-Tools-Web.exe").write_text("old", encoding="utf-8")
+        (install_dir / "Live-Tools-Web.exe").write_text("new", encoding="utf-8")
+        updater.write_update_transaction(transaction_file, backup_dir, "0.5.1")
+
+        with patch.object(updater, "get_running_version", return_value="0.5.1"):
+            updater.recover_interrupted_update(
+                install_dir,
+                transaction_file,
+                lambda _message: None,
+            )
+
+        self.assertEqual((install_dir / "Live-Tools-Web.exe").read_text(), "new")
+        self.assertFalse(transaction_file.exists())
+        self.assertFalse(backup_dir.exists())
 
 
 if __name__ == "__main__":

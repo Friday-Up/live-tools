@@ -82,6 +82,29 @@ class UpdateManagerTest(unittest.TestCase):
         self.assertEqual(state["stage"], "available")
         self.assertEqual(mocked.call_count, 3)
 
+    def test_failed_refresh_does_not_leave_stale_manifest_downloadable(self):
+        self.manager._manifest = {
+            "version": "0.5.1",
+            "asset_url": "https://example.test/old.zip",
+            "sha256": "a" * 64,
+        }
+        self.manager._update_state(
+            stage="available",
+            latest_version="0.5.1",
+            release_url="https://example.test/old",
+        )
+
+        with patch("update_manager.urlopen", side_effect=TimeoutError("offline")), patch(
+            "update_manager.time.sleep"
+        ):
+            self.manager.start_check()
+            state = wait_for_stage(self.manager, {"error"})
+
+        self.assertIsNone(state["latest_version"])
+        self.assertIsNone(state["release_url"])
+        with self.assertRaisesRegex(RuntimeError, "先检查更新"):
+            self.manager.start_download()
+
     def test_download_runs_in_background_and_verifies_sha256(self):
         content = b"test update package"
         self.manager._manifest = {
@@ -117,6 +140,33 @@ class UpdateManagerTest(unittest.TestCase):
 
         self.assertEqual(partial.read_bytes(), b"first-second")
         self.assertEqual(mocked.call_args.args[0].headers["Range"], "bytes=6-")
+
+    def test_incomplete_response_is_kept_for_next_resume(self):
+        partial = self.temp_dir / "package.part"
+        response = FakeResponse(
+            b"short",
+            status=200,
+            headers={"Content-Length": "10"},
+        )
+        with patch("update_manager.urlopen", return_value=response):
+            with self.assertRaisesRegex(OSError, "传输不完整"):
+                self.manager._download_once("https://example.test/package.zip", partial)
+
+        self.assertEqual(partial.read_bytes(), b"short")
+
+    def test_mismatched_resume_range_restarts_on_next_attempt(self):
+        partial = self.temp_dir / "package.part"
+        partial.write_bytes(b"first-")
+        response = FakeResponse(
+            b"wrong",
+            status=206,
+            headers={"Content-Range": "bytes 3-7/8", "Content-Length": "5"},
+        )
+        with patch("update_manager.urlopen", return_value=response):
+            with self.assertRaisesRegex(OSError, "断点位置"):
+                self.manager._download_once("https://example.test/package.zip", partial)
+
+        self.assertFalse(partial.exists())
 
     def test_manifest_requires_https_and_sha256(self):
         with self.assertRaisesRegex(ValueError, "HTTPS"):

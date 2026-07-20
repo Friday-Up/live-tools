@@ -82,7 +82,21 @@ class UpdateManager:
         with self._lock:
             if self._state["stage"] in {"checking", "downloading", "ready", "installing"}:
                 return dict(self._state)
-            self._state.update(stage="checking", error=None)
+            # A failed refresh must not leave an older manifest downloadable.
+            # Keep partial files on disk for resume, but require a fresh,
+            # successfully validated manifest before they can be used again.
+            self._manifest = None
+            self._package_path = None
+            self._state.update(
+                stage="checking",
+                latest_version=None,
+                release_url=None,
+                notes="",
+                downloaded_bytes=0,
+                total_bytes=0,
+                progress=0,
+                error=None,
+            )
         threading.Thread(target=self._check_worker, daemon=True).start()
         return self.status()
 
@@ -107,7 +121,6 @@ class UpdateManager:
             if last_error is not None or manifest is None:
                 raise last_error or RuntimeError("未读取到更新清单")
             manifest = self._validate_manifest(manifest)
-            self._manifest = manifest
             latest_version = manifest["version"]
             common = {
                 "latest_version": latest_version,
@@ -115,10 +128,15 @@ class UpdateManager:
                 "notes": manifest.get("notes", ""),
                 "error": None,
             }
-            if parse_version(latest_version) > parse_version(self.current_version):
-                self._update_state(stage="available", **common)
-            else:
-                self._update_state(stage="up_to_date", **common)
+            update_available = parse_version(latest_version) > parse_version(
+                self.current_version
+            )
+            with self._lock:
+                self._manifest = manifest
+                if update_available:
+                    self._state.update(stage="available", **common)
+                else:
+                    self._state.update(stage="up_to_date", **common)
         except Exception as exc:
             self._update_state(stage="error", error=f"检查更新失败: {exc}")
 
@@ -153,13 +171,15 @@ class UpdateManager:
         return self.status()
 
     def _download_worker(self) -> None:
-        assert self._manifest is not None
-        version = self._manifest["version"]
+        with self._lock:
+            assert self._manifest is not None
+            manifest = dict(self._manifest)
+        version = manifest["version"]
         self.update_dir.mkdir(parents=True, exist_ok=True)
         target = self.update_dir / f"Live-Tools-Windows-{version}.zip"
         partial = target.with_suffix(".zip.part")
         try:
-            if target.is_file() and self._sha256(target) == self._manifest["sha256"]:
+            if target.is_file() and self._sha256(target) == manifest["sha256"]:
                 self._package_path = target
                 size = target.stat().st_size
                 self._update_state(
@@ -174,7 +194,7 @@ class UpdateManager:
             last_error: Exception | None = None
             for attempt in range(4):
                 try:
-                    self._download_once(self._manifest["asset_url"], partial)
+                    self._download_once(manifest["asset_url"], partial)
                     last_error = None
                     break
                 except Exception as exc:
@@ -184,7 +204,7 @@ class UpdateManager:
             if last_error is not None:
                 raise last_error
 
-            if self._sha256(partial) != self._manifest["sha256"]:
+            if self._sha256(partial) != manifest["sha256"]:
                 partial.unlink(missing_ok=True)
                 raise ValueError("更新包校验失败，请重新下载")
             partial.replace(target)
@@ -215,6 +235,13 @@ class UpdateManager:
 
         with response:
             resumed = response.status == 206 and existing_size > 0
+            if resumed:
+                range_start = self._content_range_start(
+                    response.headers.get("Content-Range", "")
+                )
+                if range_start != existing_size:
+                    partial.unlink(missing_ok=True)
+                    raise OSError("服务器返回的断点位置不一致，将重新下载")
             if not resumed:
                 existing_size = 0
             content_range = response.headers.get("Content-Range", "")
@@ -233,6 +260,10 @@ class UpdateManager:
                     output.write(chunk)
                     downloaded += len(chunk)
                     self._update_progress(downloaded, total_size)
+            if total_size and downloaded != total_size:
+                raise OSError(
+                    f"更新包传输不完整: 已下载 {downloaded} 字节，应为 {total_size} 字节"
+                )
 
     def _update_progress(self, downloaded: int, total: int) -> None:
         progress = int(downloaded * 100 / total) if total else 0
@@ -245,6 +276,11 @@ class UpdateManager:
     @staticmethod
     def _content_range_total(value: str) -> int | None:
         match = re.search(r"/(\d+)$", value or "")
+        return int(match.group(1)) if match else None
+
+    @staticmethod
+    def _content_range_start(value: str) -> int | None:
+        match = re.match(r"^bytes\s+(\d+)-\d+/", value or "", re.IGNORECASE)
         return int(match.group(1)) if match else None
 
     @staticmethod

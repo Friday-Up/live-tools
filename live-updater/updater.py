@@ -235,11 +235,38 @@ def recover_interrupted_update(
         ".Live-Tools-Web-backup-"
     ):
         raise ValueError("更新恢复记录中的备份路径无效")
+    expected_version = str(data.get("expected_version") or "").strip()
+    if (
+        expected_version
+        and (install_dir / "Live-Tools-Web.exe").is_file()
+        and get_running_version() == expected_version
+    ):
+        # The updater may have been terminated after the new application became
+        # healthy but before it committed the transaction. In that case the new
+        # executable is still running and cannot safely be replaced on Windows;
+        # its matching health version is sufficient to finish the commit.
+        log("检测到新版本已正常运行，正在完成更新清理")
+        transaction_file.unlink(missing_ok=True)
+        shutil.rmtree(backup_dir, ignore_errors=True)
+        log("更新恢复完成")
+        return
     if backup_dir.is_dir():
         log("检测到未完成更新，正在恢复旧版本")
         restore_backup(install_dir, backup_dir)
     transaction_file.unlink(missing_ok=True)
     log("未完成更新已恢复")
+
+
+def get_running_version() -> str | None:
+    try:
+        with urlopen(HEALTH_URL, timeout=2) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+            if response.status == 200 and payload.get("success") is True:
+                version = str(payload.get("version") or "").strip()
+                return version or None
+    except Exception:
+        pass
+    return None
 
 
 def launch_application(install_dir: Path) -> subprocess.Popen:
@@ -279,7 +306,8 @@ def wait_for_health(
                 ):
                     return True
         except Exception:
-            time.sleep(1)
+            pass
+        time.sleep(1)
     return False
 
 
