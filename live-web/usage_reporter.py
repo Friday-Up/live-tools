@@ -5,6 +5,7 @@ from __future__ import annotations
 import getpass
 import json
 import logging
+import queue
 import threading
 import uuid
 from datetime import datetime
@@ -47,6 +48,9 @@ class LiveToolUsageReporter:
         self.id_factory = id_factory or (lambda: uuid.uuid4().hex)
         self.now_func = now_func or (lambda: datetime.now().astimezone())
         self.urlopen = urlopen or urllib_request.urlopen
+        self._event_queue = queue.Queue()
+        self._worker_lock = threading.Lock()
+        self._worker = None
 
     def build_event(
         self,
@@ -114,8 +118,26 @@ class LiveToolUsageReporter:
     def report_async(self, **kwargs):
         if not self.enabled or not self.endpoint or not self.token:
             return
-        thread = threading.Thread(target=self.send_event, kwargs=kwargs, daemon=True)
-        thread.start()
+        with self._worker_lock:
+            self._event_queue.put(kwargs)
+            if self._worker is None or not self._worker.is_alive():
+                self._worker = threading.Thread(target=self._drain_events, daemon=True)
+                self._worker.start()
+
+    def _drain_events(self):
+        while True:
+            try:
+                event = self._event_queue.get(timeout=0.1)
+            except queue.Empty:
+                with self._worker_lock:
+                    if self._event_queue.empty():
+                        self._worker = None
+                        return
+                continue
+            try:
+                self.send_event(**event)
+            finally:
+                self._event_queue.task_done()
 
 
 def create_usage_reporter(enabled: bool = LIVE_USAGE_EVENT_ENABLED) -> LiveToolUsageReporter:

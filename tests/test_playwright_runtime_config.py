@@ -11,6 +11,7 @@ class PlaywrightRuntimeConfigTest(unittest.TestCase):
             "live-web/requirements.txt",
             "live-sku-price-audit/requirements.txt",
             "live-room-creator/requirements.txt",
+            "live-red-rain-creator/requirements.txt",
             "live-bigscreen-capture/requirements.txt",
             "product-selection-agent/requirements.txt",
         )

@@ -37,6 +37,7 @@ jobs:
           pip install -r live-sku-price-audit/requirements.txt
           pip install -r live-promotion-binding/requirements.txt
           pip install -r live-room-creator/requirements.txt
+          pip install -r live-red-rain-creator/requirements.txt
           pip install -r live-bigscreen-capture/requirements.txt
           pip install -r product-selection-agent/requirements.txt
           pip install pyinstaller
@@ -68,6 +69,10 @@ jobs:
           python -m unittest discover -s tests -p "test_*.py" -v
           Pop-Location
 
+          Push-Location live-red-rain-creator
+          python -m unittest discover -s tests -p "test_*.py" -v
+          Pop-Location
+
           Push-Location live-bigscreen-capture
           python -m unittest discover -s tests -p "test_*.py" -v
           Pop-Location
@@ -78,6 +83,13 @@ jobs:
 
           python -m unittest discover -s tests -p "test_*.py" -v
 
+      - name: Build standalone updater
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --onefile --console `
+            --name "Live-Tools-Updater" `
+            "live-updater/updater.py"
+
       - name: Build Live Tools Web with PyInstaller
         shell: pwsh
         run: |
@@ -86,7 +98,11 @@ jobs:
           $bindingAssets = "live-promotion-binding/assets"
           $bindingPackage = "live-promotion-binding/promotion_binding"
           $priceUtils = "live-sku-price-audit/utils"
+          $priceTemplate = "live-sku-price-audit/input/点菜清单模板.xlsx"
           $roomCreatorPackage = "live-room-creator/room_creator"
+          $roomCreatorTemplate = "live-room-creator/input/直播间创建模板.xlsx"
+          $redRainCreatorPackage = "live-red-rain-creator/red_rain_creator"
+          $redRainTemplate = "live-red-rain-creator/input/红包雨创建模板.xlsx"
           $bigscreenPackage = "live-bigscreen-capture/bigscreen_capture"
           $productSelectionPackage = "product-selection-agent/product_selection_agent"
 
@@ -96,6 +112,7 @@ jobs:
             --paths "live-promotion-binding" `
             --paths "live-sku-price-audit" `
             --paths "live-room-creator" `
+            --paths "live-red-rain-creator" `
             --paths "live-bigscreen-capture" `
             --paths "product-selection-agent" `
             --collect-all playwright `
@@ -119,6 +136,13 @@ jobs:
             --hidden-import room_creator.validator `
             --hidden-import room_creator.report_writer `
             --hidden-import room_creator.models `
+            --hidden-import red_rain_creator `
+            --hidden-import red_rain_creator.browser `
+            --hidden-import red_rain_creator.excel_reader `
+            --hidden-import red_rain_creator.runner `
+            --hidden-import red_rain_creator.validator `
+            --hidden-import red_rain_creator.report_writer `
+            --hidden-import red_rain_creator.models `
             --hidden-import bigscreen_capture `
             --hidden-import bigscreen_capture.browser `
             --hidden-import bigscreen_capture.service `
@@ -135,7 +159,11 @@ jobs:
             --add-data "$bindingAssets;live-promotion-binding/assets" `
             --add-data "$bindingPackage;live-promotion-binding/promotion_binding" `
             --add-data "$priceUtils;live-sku-price-audit/utils" `
+            --add-data "$priceTemplate;live-sku-price-audit/input" `
             --add-data "$roomCreatorPackage;live-room-creator/room_creator" `
+            --add-data "$roomCreatorTemplate;live-room-creator/input" `
+            --add-data "$redRainCreatorPackage;live-red-rain-creator/red_rain_creator" `
+            --add-data "$redRainTemplate;live-red-rain-creator/input/红包雨创建模板.xlsx" `
             --add-data "$bigscreenPackage;live-bigscreen-capture/bigscreen_capture" `
             --add-data "$productSelectionPackage;product-selection-agent/product_selection_agent" `
             $webApp
@@ -150,6 +178,7 @@ jobs:
           }
 
           Copy-Item -Path "启动直播工具.bat" -Destination (Join-Path $distPath "启动直播工具.bat") -Force
+          Copy-Item -Path "dist/Live-Tools-Updater.exe" -Destination (Join-Path $distPath "Live-Tools-Updater.exe") -Force
           New-Item -ItemType Directory -Path (Join-Path $distPath "runtime") -Force | Out-Null
           New-Item -ItemType Directory -Path (Join-Path $distPath "product-selection-agent") -Force | Out-Null
           Copy-Item -Path "product-selection-agent/model-config.example.json" -Destination (Join-Path $distPath "product-selection-agent/model-config.example.json") -Force
@@ -160,12 +189,17 @@ jobs:
           $distPath = "dist/Live-Tools-Web"
           $required = @(
             "Live-Tools-Web.exe",
+            "Live-Tools-Updater.exe",
             "启动直播工具.bat",
             "live-web/templates",
             "live-promotion-binding/assets",
             "live-promotion-binding/promotion_binding",
             "live-sku-price-audit/utils",
+            "live-sku-price-audit/input/点菜清单模板.xlsx",
             "live-room-creator/room_creator",
+            "live-room-creator/input/直播间创建模板.xlsx",
+            "live-red-rain-creator/red_rain_creator",
+            "live-red-rain-creator/input/红包雨创建模板.xlsx",
             "live-bigscreen-capture/bigscreen_capture",
             "product-selection-agent/product_selection_agent",
             "product-selection-agent/model-config.example.json"
@@ -208,17 +242,43 @@ jobs:
           $dest = "dist/Live-Tools-Windows.zip"
           Compress-Archive -Path $source -DestinationPath $dest -Force
 
+      - name: Generate update manifest
+        shell: pwsh
+        run: |
+          $version = python -c "import sys; sys.path.insert(0, 'live-web'); import config; print(config.LIVE_TOOLS_APP_VERSION)"
+          if ($env:GITHUB_REF -like "refs/tags/v*") {
+            $tagVersion = $env:GITHUB_REF_NAME.TrimStart("v")
+            if ($tagVersion -ne $version) {
+              Write-Host "Release tag $tagVersion does not match app version $version"
+              exit 1
+            }
+          }
+          $tag = "v$version"
+          $sha256 = (Get-FileHash "dist/Live-Tools-Windows.zip" -Algorithm SHA256).Hash.ToLower()
+          $manifest = [ordered]@{
+            version = $version
+            asset_url = "https://github.com/Friday-Up/live-tools/releases/download/$tag/Live-Tools-Windows.zip"
+            sha256 = $sha256
+            release_url = "https://github.com/Friday-Up/live-tools/releases/tag/$tag"
+            notes = ""
+          } | ConvertTo-Json
+          Set-Content -Path "dist/live-tools-update.json" -Value $manifest -Encoding utf8
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: Live-Tools-Windows
-          path: dist/Live-Tools-Windows.zip
+          path: |
+            dist/Live-Tools-Windows.zip
+            dist/live-tools-update.json
           retention-days: 30
 
       - name: Upload to Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/Live-Tools-Windows.zip
+          files: |
+            dist/Live-Tools-Windows.zip
+            dist/live-tools-update.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

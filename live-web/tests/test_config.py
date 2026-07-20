@@ -19,7 +19,11 @@ class UsageReportingConfigTest(unittest.TestCase):
             config["LIVE_USAGE_EVENT_TOKEN"],
             "live-tools-analytics-2026",
         )
-        self.assertEqual(config["LIVE_TOOLS_APP_VERSION"], "2026.07.10")
+        self.assertEqual(config["LIVE_TOOLS_APP_VERSION"], "0.5.0")
+        self.assertEqual(
+            config["LIVE_TOOLS_UPDATE_MANIFEST_URL"],
+            "https://github.com/Friday-Up/live-tools/releases/latest/download/live-tools-update.json",
+        )
 
     def test_environment_can_override_usage_reporting_defaults(self):
         environment = {
@@ -27,6 +31,7 @@ class UsageReportingConfigTest(unittest.TestCase):
             "LIVE_USAGE_EVENT_TOKEN": "override-token",
             "LIVE_USAGE_EVENT_ENABLED": "false",
             "LIVE_USAGE_EVENT_TIMEOUT_SECONDS": "4.5",
+            "LIVE_TOOLS_UPDATE_MANIFEST_URL": "https://updates.example/live-tools.json",
         }
         with patch.dict(os.environ, environment, clear=True):
             config = runpy.run_path(str(Path("config.py")))
@@ -38,6 +43,10 @@ class UsageReportingConfigTest(unittest.TestCase):
         )
         self.assertEqual(config["LIVE_USAGE_EVENT_TOKEN"], "override-token")
         self.assertEqual(config["LIVE_USAGE_EVENT_TIMEOUT_SECONDS"], 4.5)
+        self.assertEqual(
+            config["LIVE_TOOLS_UPDATE_MANIFEST_URL"],
+            "https://updates.example/live-tools.json",
+        )
 
 
 if __name__ == "__main__":

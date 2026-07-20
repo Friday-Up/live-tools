@@ -8,7 +8,7 @@ from pathlib import Path
 from urllib.parse import unquote
 from zipfile import ZipFile
 
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from unittest.mock import patch
 
 import app as web_app
@@ -25,6 +25,35 @@ from app import (
 
 
 class PromotionBindingRoutesTest(unittest.TestCase):
+    def test_price_input_template_has_expected_blank_header(self):
+        app = create_app(base_dir=Path(tempfile.mkdtemp()))
+        client = app.test_client()
+
+        cases = (("/api/price-audit/template", ["商品SKU"], "SKU测价模板.xlsx"),)
+        for url, expected_headers, expected_filename in cases:
+            response = client.get(url)
+            self.assertEqual(response.status_code, 200)
+            self.assertIn(expected_filename, unquote(response.headers["Content-Disposition"]))
+            self.assertGreater(len(response.data), 1000)
+            workbook = load_workbook(io.BytesIO(response.data), data_only=True)
+            try:
+                worksheet = workbook.worksheets[0]
+                self.assertEqual(
+                    [worksheet.cell(1, index).value for index in range(1, len(expected_headers) + 1)],
+                    expected_headers,
+                )
+                self.assertTrue(
+                    all(
+                        worksheet.cell(row_index, column_index).value is None
+                        for row_index in range(2, worksheet.max_row + 1)
+                        for column_index in range(1, len(expected_headers) + 1)
+                    )
+                )
+                self.assertIn("填写说明", workbook.sheetnames)
+            finally:
+                workbook.close()
+                response.close()
+
     def test_resolves_source_and_packaged_runtime_paths(self):
         source_app = Path("/repo/live/live-web/app.py")
         packaged_exe = Path("C:/tools/Live-Tools-Web/Live-Tools-Web.exe")

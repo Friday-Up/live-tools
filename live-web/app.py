@@ -20,7 +20,13 @@ if hasattr(sys.stderr, "reconfigure"):
 from flask import Flask, jsonify, render_template, request, send_file, url_for
 from werkzeug.utils import secure_filename
 
-from config import DEFAULT_HOST, DEFAULT_PORT
+from config import (
+    DEFAULT_HOST,
+    DEFAULT_PORT,
+    LIVE_TOOLS_APP_VERSION,
+    LIVE_TOOLS_UPDATE_MANIFEST_URL,
+)
+from update_manager import UpdateManager
 from usage_reporter import create_usage_reporter
 
 
@@ -67,6 +73,7 @@ LIVE_WEB_ROOT = resolve_web_root(LIVE_DIR)
 PROMOTION_BINDING_ROOT = LIVE_DIR / "live-promotion-binding"
 PRICE_AUDIT_ROOT = LIVE_DIR / "live-sku-price-audit"
 ROOM_CREATOR_ROOT = LIVE_DIR / "live-room-creator"
+RED_RAIN_CREATOR_ROOT = LIVE_DIR / "live-red-rain-creator"
 BIGSCREEN_CAPTURE_ROOT = LIVE_DIR / "live-bigscreen-capture"
 PRODUCT_SELECTION_ROOT = LIVE_DIR / "product-selection-agent"
 if str(PROMOTION_BINDING_ROOT) not in sys.path:
@@ -75,6 +82,8 @@ if str(PRICE_AUDIT_ROOT) not in sys.path:
     sys.path.insert(0, str(PRICE_AUDIT_ROOT))
 if str(ROOM_CREATOR_ROOT) not in sys.path:
     sys.path.insert(0, str(ROOM_CREATOR_ROOT))
+if str(RED_RAIN_CREATOR_ROOT) not in sys.path:
+    sys.path.insert(0, str(RED_RAIN_CREATOR_ROOT))
 if str(BIGSCREEN_CAPTURE_ROOT) not in sys.path:
     sys.path.insert(0, str(BIGSCREEN_CAPTURE_ROOT))
 if PRODUCT_SELECTION_ROOT.exists() and str(PRODUCT_SELECTION_ROOT) not in sys.path:
@@ -85,6 +94,9 @@ if PRODUCT_SELECTION_ROOT.exists() and str(PRODUCT_SELECTION_ROOT) not in sys.pa
 from room_creator import config as room_creator_config
 from room_creator.excel_reader import ColumnMapping as RoomColumnMapping
 from room_creator import BatchRunner, RoomCreatorBrowser, inspect_workbook
+from red_rain_creator.excel_reader import ColumnMapping as RedRainColumnMapping
+from red_rain_creator import RedRainCreatorBrowser
+from red_rain_creator import inspect_workbook as inspect_red_rain_workbook
 from promotion_binding.workbook_reader import ColumnMapping, inspect_business_workbook
 from promotion_binding.service import generate_binding_files
 from bigscreen_capture.schedule import PlannedSlot, build_hour_options, build_planned_slots
@@ -143,11 +155,13 @@ def parse_sku_input(raw):
 
 
 _DEFAULT_USAGE_REPORTER = object()
+_DEFAULT_UPDATE_MANAGER = object()
 
 
 def create_app(
     base_dir: str | Path | None = None,
     usage_reporter=_DEFAULT_USAGE_REPORTER,
+    update_manager=_DEFAULT_UPDATE_MANAGER,
 ) -> Flask:
     base_dir_provided = base_dir is not None
     base_dir = (
@@ -161,6 +175,8 @@ def create_app(
     price_screenshot_dir = price_output_dir / "screenshots"
     room_input_dir = runtime_dir / "input" / "room-creator"
     room_output_dir = runtime_dir / "output" / "room-creator"
+    red_rain_input_dir = runtime_dir / "input" / "red-rain-creator"
+    red_rain_output_dir = runtime_dir / "output" / "red-rain-creator"
     bigscreen_output_dir = runtime_dir / "output" / "bigscreen-capture"
     product_selection_output_dir = runtime_dir / "output" / "product-selection"
     template_file = (
@@ -175,6 +191,8 @@ def create_app(
     price_output_dir.mkdir(parents=True, exist_ok=True)
     room_input_dir.mkdir(parents=True, exist_ok=True)
     room_output_dir.mkdir(parents=True, exist_ok=True)
+    red_rain_input_dir.mkdir(parents=True, exist_ok=True)
+    red_rain_output_dir.mkdir(parents=True, exist_ok=True)
     bigscreen_output_dir.mkdir(parents=True, exist_ok=True)
     product_selection_output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -191,10 +209,18 @@ def create_app(
     app.config["PRICE_OUTPUT_DIR"] = price_output_dir
     app.config["PRICE_SCREENSHOT_DIR"] = price_screenshot_dir
     app.config["PRICE_AUTH_FILE"] = PRICE_AUDIT_ROOT / "jd_auth.json"
+    app.config["PRICE_INPUT_TEMPLATE_FILE"] = PRICE_AUDIT_ROOT / "input" / "点菜清单模板.xlsx"
     app.config["ROOM_INPUT_DIR"] = room_input_dir
     app.config["ROOM_OUTPUT_DIR"] = room_output_dir
+    app.config["ROOM_TEMPLATE_FILE"] = ROOM_CREATOR_ROOT / "input" / "直播间创建模板.xlsx"
     app.config["ROOM_CREATOR_RESULTS"] = {}
     app.config["ROOM_CREATOR_MAPPINGS"] = {}
+    app.config["RED_RAIN_INPUT_DIR"] = red_rain_input_dir
+    app.config["RED_RAIN_OUTPUT_DIR"] = red_rain_output_dir
+    app.config["RED_RAIN_TEMPLATE_FILE"] = RED_RAIN_CREATOR_ROOT / "input" / "红包雨创建模板.xlsx"
+    app.config["RED_RAIN_GUARD_FILE"] = runtime_dir / "red-rain-submission-guard.json"
+    app.config["RED_RAIN_UPLOADS"] = {}
+    app.config["RED_RAIN_MAPPINGS"] = {}
     app.config["BIGSCREEN_OUTPUT_DIR"] = bigscreen_output_dir
     app.config["BIGSCREEN_RESULTS"] = {}
     app.config["BIGSCREEN_AUTH_FILE"] = PRICE_AUDIT_ROOT / "jd_auth.json"
@@ -203,6 +229,14 @@ def create_app(
     if usage_reporter is _DEFAULT_USAGE_REPORTER:
         usage_reporter = create_usage_reporter(enabled=not base_dir_provided)
     app.config["USAGE_REPORTER"] = usage_reporter
+    if update_manager is _DEFAULT_UPDATE_MANAGER:
+        update_manager = UpdateManager(
+            current_version=LIVE_TOOLS_APP_VERSION,
+            install_dir=LIVE_DIR,
+            enabled=(not base_dir_provided and getattr(sys, "frozen", False) and os.name == "nt"),
+            manifest_url=LIVE_TOOLS_UPDATE_MANIFEST_URL,
+        )
+    app.config["UPDATE_MANAGER"] = update_manager
 
     status_lock = threading.Lock()
     price_status = _initial_price_status()
@@ -216,6 +250,12 @@ def create_app(
     room_login_event = threading.Event()
     room_browser_lock = threading.Lock()
     current_room_browser = {"browser": None}
+    red_rain_status_lock = threading.Lock()
+    red_rain_status = _initial_red_rain_status()
+    red_rain_stop_flag = threading.Event()
+    red_rain_login_event = threading.Event()
+    red_rain_browser_lock = threading.Lock()
+    current_red_rain_browser = {"browser": None}
     bigscreen_status_lock = threading.Lock()
     bigscreen_status = _initial_bigscreen_status()
     bigscreen_stop_flag = threading.Event()
@@ -257,6 +297,17 @@ def create_app(
                 pass
         return 1 if browser else 0
 
+    def close_current_red_rain_browser():
+        with red_rain_browser_lock:
+            browser = current_red_rain_browser.get("browser")
+            current_red_rain_browser["browser"] = None
+        if browser:
+            try:
+                browser.close(force=True)
+            except Exception:
+                pass
+        return 1 if browser else 0
+
     def report_usage(tool_code: str, action: str, **kwargs):
         reporter = app.config.get("USAGE_REPORTER")
         if reporter is None:
@@ -273,7 +324,63 @@ def create_app(
 
     @app.route("/api/health")
     def health():
-        return jsonify({"success": True})
+        return jsonify({"success": True, "version": LIVE_TOOLS_APP_VERSION})
+
+    @app.route("/api/update/status")
+    def update_status():
+        return jsonify(app.config["UPDATE_MANAGER"].status())
+
+    @app.route("/api/update/check", methods=["POST"])
+    def check_for_update():
+        return jsonify(app.config["UPDATE_MANAGER"].start_check())
+
+    @app.route("/api/update/download", methods=["POST"])
+    def download_update():
+        if request.headers.get("X-Live-Tools-Update") != "1":
+            return _json_error("无效的更新请求", status_code=403)
+        try:
+            return jsonify(app.config["UPDATE_MANAGER"].start_download())
+        except (RuntimeError, OSError) as exc:
+            return _json_error(str(exc), status_code=409)
+
+    @app.route("/api/update/install", methods=["POST"])
+    def install_update():
+        if request.headers.get("X-Live-Tools-Update") != "1":
+            return _json_error("无效的更新请求", status_code=403)
+        active_tasks = []
+        for name, lock, state in (
+            ("SKU 测价", status_lock, price_status),
+            ("批量创建直播间", room_status_lock, room_creator_status),
+            ("自动创建红包雨", red_rain_status_lock, red_rain_status),
+            ("蓝屏自动截图", bigscreen_status_lock, bigscreen_status),
+            ("选品 Agent", product_selection_status_lock, product_selection_status),
+        ):
+            with lock:
+                if state.get("running"):
+                    active_tasks.append(name)
+        if active_tasks:
+            return _json_error(
+                f"请等待当前任务完成后再安装更新：{'、'.join(active_tasks)}",
+                status_code=409,
+            )
+        try:
+            state = app.config["UPDATE_MANAGER"].launch_installer(os.getpid())
+        except (RuntimeError, OSError) as exc:
+            return _json_error(str(exc), status_code=409)
+
+        def shutdown_after_response():
+            time.sleep(0.8)
+            shutdown_server()
+
+        threading.Thread(target=shutdown_after_response, daemon=True).start()
+        return jsonify(state)
+
+    @app.route("/api/price-audit/template")
+    def download_price_audit_template():
+        template = Path(app.config["PRICE_INPUT_TEMPLATE_FILE"])
+        if not template.is_file():
+            return _json_error("SKU 测价模板不存在", status_code=404)
+        return send_file(template, as_attachment=True, download_name="SKU测价模板.xlsx")
 
     @app.route("/api/product-selection/status")
     def product_selection_task_status():
@@ -1045,6 +1152,13 @@ def create_app(
         )
         return send_file(path, as_attachment=True)
 
+    @app.route("/api/room-creator/template")
+    def download_room_creator_template():
+        template = Path(app.config["ROOM_TEMPLATE_FILE"])
+        if not template.is_file():
+            return _json_error("直播间创建模板不存在", status_code=404)
+        return send_file(template, as_attachment=True)
+
     @app.route("/api/room-creator/preview", methods=["POST"])
     def preview_room_creator():
         _cleanup_runtime_for_app(app)
@@ -1186,6 +1300,156 @@ def create_app(
 
         report_usage(
             "room_creator",
+            "download",
+            task_id=task_id,
+            status="success",
+            extra={"filename": Path(result_file).name},
+        )
+        return send_file(result_file, as_attachment=True)
+
+    @app.route("/api/red-rain/template")
+    def download_red_rain_template():
+        template = Path(app.config["RED_RAIN_TEMPLATE_FILE"])
+        if not template.is_file():
+            return _json_error("红包雨创建模板不存在", status_code=404)
+        return send_file(template, as_attachment=True)
+
+    @app.route("/api/red-rain/preview", methods=["POST"])
+    def preview_red_rain():
+        _cleanup_runtime_for_app(app)
+        uploaded = request.files.get("file")
+        if uploaded is None or not uploaded.filename:
+            return _json_error("未选择文件")
+        if not uploaded.filename.lower().endswith(".xlsx"):
+            return _json_error("仅支持 .xlsx 文件")
+
+        task_id = uuid.uuid4().hex
+        filename = _safe_xlsx_name(uploaded.filename, task_id)
+        input_path = app.config["RED_RAIN_INPUT_DIR"] / filename
+        uploaded.save(input_path)
+        try:
+            mapping, headers = inspect_red_rain_workbook(input_path)
+            from red_rain_creator.excel_reader import read_rows_with_errors as read_red_rain_rows
+            from red_rain_creator.validator import (
+                find_duplicate_red_packet_ids,
+                find_duplicates,
+                find_overlaps,
+                validate_row,
+            )
+
+            if not mapping.is_valid():
+                return _json_error("未识别到完整字段，请使用红包雨创建模板")
+            rows, parse_rejected = read_red_rain_rows(input_path, mapping)
+            if not rows and not parse_rejected:
+                input_path.unlink(missing_ok=True)
+                return _json_error("Excel 中没有可执行数据，请至少填写一行红包雨活动")
+            duplicates = find_duplicates(rows)
+            duplicate_ids = find_duplicate_red_packet_ids(rows)
+            overlaps = find_overlaps(rows)
+            invalid_count = len(parse_rejected)
+            for row in rows:
+                if (
+                    validate_row(row)
+                    or row.row_index in duplicates
+                    or row.row_index in duplicate_ids
+                    or row.row_index in overlaps
+                ):
+                    invalid_count += 1
+        except Exception as exc:
+            return _json_error(str(exc))
+
+        with red_rain_status_lock:
+            app.config["RED_RAIN_UPLOADS"][task_id] = input_path
+            app.config["RED_RAIN_MAPPINGS"][task_id] = mapping
+        report_usage(
+            "red_rain_creator",
+            "upload",
+            task_id=task_id,
+            status="success",
+            extra={"filename": filename, "row_count": len(rows) + len(parse_rejected), "invalid_count": invalid_count},
+        )
+        return jsonify(
+            {
+                "success": True,
+                "task_id": task_id,
+                "filename": filename,
+                "columns": headers,
+                "row_count": len(rows) + len(parse_rejected),
+                "invalid_count": invalid_count,
+                "mapping": {
+                    "activity_name_col": mapping.activity_name_col,
+                    "start_time_col": mapping.start_time_col,
+                    "end_time_col": mapping.end_time_col,
+                    "issue_method_col": mapping.issue_method_col,
+                    "red_packet_id_col": mapping.red_packet_id_col,
+                    "win_probability_col": mapping.win_probability_col,
+                },
+            }
+        )
+
+    @app.route("/api/red-rain/start", methods=["POST"])
+    def start_red_rain():
+        data = request.get_json(silent=True) or {}
+        task_id = str(data.get("task_id") or "")
+        input_path = app.config["RED_RAIN_UPLOADS"].get(task_id)
+        mapping = app.config["RED_RAIN_MAPPINGS"].get(task_id)
+        if not input_path or not Path(input_path).is_file() or not isinstance(mapping, RedRainColumnMapping):
+            return _json_error("文件不存在，请重新上传", status_code=404)
+        with red_rain_status_lock:
+            if red_rain_status["running"]:
+                return _json_error("已有红包雨创建任务正在运行")
+            red_rain_status.clear()
+            red_rain_status.update(_initial_red_rain_status())
+            red_rain_status["running"] = True
+            red_rain_status["task_id"] = task_id
+        red_rain_stop_flag.clear()
+        red_rain_login_event.clear()
+        show_browser = bool(data.get("show_browser", False))
+        thread = threading.Thread(
+            target=run_red_rain_task,
+            args=(Path(input_path), mapping, show_browser, task_id),
+            daemon=False,
+        )
+        report_usage(
+            "red_rain_creator",
+            "task_start",
+            task_id=task_id,
+            status="started",
+            extra={"show_browser": show_browser},
+        )
+        thread.start()
+        return jsonify({"success": True})
+
+    @app.route("/api/red-rain/status")
+    def get_red_rain_status():
+        with red_rain_status_lock:
+            return jsonify(dict(red_rain_status))
+
+    @app.route("/api/red-rain/continue", methods=["POST"])
+    def continue_red_rain():
+        red_rain_login_event.set()
+        add_red_rain_log('用户点击"我已登录"，继续运行')
+        return jsonify({"success": True})
+
+    @app.route("/api/red-rain/stop", methods=["POST"])
+    def stop_red_rain():
+        red_rain_stop_flag.set()
+        red_rain_login_event.set()
+        with red_rain_status_lock:
+            red_rain_status["stopping"] = True
+            red_rain_status["need_login"] = False
+        close_current_red_rain_browser()
+        return jsonify({"success": True})
+
+    @app.route("/api/red-rain/download")
+    def download_red_rain_result():
+        with red_rain_status_lock:
+            result_file = red_rain_status.get("result_file")
+            task_id = red_rain_status.get("task_id")
+        if not result_file or not Path(result_file).is_file():
+            return _json_error("结果文件不存在", status_code=404)
+        report_usage(
+            "red_rain_creator",
             "download",
             task_id=task_id,
             status="success",
@@ -1852,6 +2116,172 @@ def create_app(
             except Exception as exc:
                 add_room_log(f"清理上传文件失败: {exc}")
 
+    def add_red_rain_log(message: str):
+        with red_rain_status_lock:
+            red_rain_status["logs"].append(
+                {"time": time.strftime("%H:%M:%S"), "message": message}
+            )
+            if len(red_rain_status["logs"]) > 200:
+                red_rain_status["logs"] = red_rain_status["logs"][-200:]
+        print(f"[{time.strftime('%H:%M:%S')}] {message}")
+
+    def wait_for_red_rain_login(browser):
+        with red_rain_status_lock:
+            red_rain_status["need_login"] = True
+        add_red_rain_log("登录态已失效，请在浏览器窗口完成登录")
+        red_rain_login_event.clear()
+        browser.open_login_page()
+        while not red_rain_stop_flag.is_set():
+            if red_rain_login_event.wait(timeout=1):
+                break
+        with red_rain_status_lock:
+            red_rain_status["need_login"] = False
+        if red_rain_stop_flag.is_set() or not browser.finish_interactive_login():
+            return False
+        add_red_rain_log("登录状态已保存，继续创建红包雨")
+        return True
+
+    def run_red_rain_task(input_file, column_mapping, show_browser=False, task_id=""):
+        browser = None
+        started_monotonic = time.monotonic()
+        try:
+            from red_rain_creator.models import BatchResult
+            from red_rain_creator.report_writer import write_batch_report
+            from red_rain_creator.runner import BatchRunner as RedRainBatchRunner
+
+            with red_rain_status_lock:
+                red_rain_status.clear()
+                red_rain_status.update(_initial_red_rain_status())
+                red_rain_status["running"] = True
+                red_rain_status["task_id"] = task_id
+
+            add_red_rain_log("开始批量创建红包雨")
+            browser = RedRainCreatorBrowser(
+                auth_file=app.config["PRICE_AUTH_FILE"],
+                headless=not show_browser,
+                log_callback=add_red_rain_log,
+                guard_file=app.config["RED_RAIN_GUARD_FILE"],
+            )
+            runner = RedRainBatchRunner(
+                browser=browser,
+                log_callback=add_red_rain_log,
+                stop_event=red_rain_stop_flag,
+            )
+            valid_rows, rejected = runner.prepare_rows(input_file, column_mapping)
+            with red_rain_status_lock:
+                red_rain_status["total"] = len(valid_rows)
+                red_rain_status["skipped"] = len(rejected)
+            for item in rejected:
+                add_red_rain_log(f"第 {item.row_index} 行预校验跳过: {item.error}")
+
+            if valid_rows:
+                with red_rain_browser_lock:
+                    current_red_rain_browser["browser"] = browser
+                browser.start()
+                if not browser.ensure_login(interactive=False):
+                    if not show_browser:
+                        browser.close(force=True)
+                        browser = RedRainCreatorBrowser(
+                            auth_file=app.config["PRICE_AUTH_FILE"],
+                            headless=False,
+                            log_callback=add_red_rain_log,
+                            guard_file=app.config["RED_RAIN_GUARD_FILE"],
+                        )
+                        browser.start()
+                        runner.browser = browser
+                        with red_rain_browser_lock:
+                            current_red_rain_browser["browser"] = browser
+                    if not wait_for_red_rain_login(browser):
+                        raise RuntimeError("登录失败，请重新运行")
+
+                def recover_mid_batch_login():
+                    if browser.headless:
+                        add_red_rain_log("切换到可见浏览器，请完成京东登录")
+                        browser.restart_for_login()
+                    return wait_for_red_rain_login(browser)
+
+                runner.login_callback = recover_mid_batch_login
+
+                def on_progress(current, total, created, failed, existed, pending, activity_name):
+                    with red_rain_status_lock:
+                        red_rain_status["current"] = current
+                        red_rain_status["total"] = total
+                        red_rain_status["created_count"] = created
+                        red_rain_status["failed_count"] = failed
+                        red_rain_status["existed_count"] = existed
+                        red_rain_status["pending_count"] = pending
+                        red_rain_status["current_title"] = activity_name
+
+                runner.progress_callback = on_progress
+                result = runner.run_batch(valid_rows)
+            else:
+                result = BatchResult()
+
+            result.results.extend(rejected)
+            result.skipped_count += len(rejected)
+            output_path = write_batch_report(result, app.config["RED_RAIN_OUTPUT_DIR"])
+            with red_rain_status_lock:
+                red_rain_status["result_file"] = str(output_path)
+                red_rain_status["created_count"] = result.created_count
+                red_rain_status["failed_count"] = result.failed_count
+                red_rain_status["existed_count"] = result.existed_count
+                red_rain_status["pending_count"] = result.pending_count
+                red_rain_status["skipped"] = result.skipped_count
+                red_rain_status["current"] = min(
+                    len(valid_rows),
+                    result.created_count + result.failed_count + result.existed_count + result.pending_count,
+                )
+            add_red_rain_log(f"结果已保存: {output_path.name}")
+        except Exception as exc:
+            with red_rain_status_lock:
+                red_rain_status["error"] = str(exc)
+            add_red_rain_log(f"错误: {exc}")
+        finally:
+            if browser:
+                try:
+                    browser.close(force=True)
+                except Exception:
+                    pass
+            with red_rain_browser_lock:
+                current_red_rain_browser["browser"] = None
+            with red_rain_status_lock:
+                red_rain_status["running"] = False
+                red_rain_status["stopping"] = False
+                red_rain_status["need_login"] = False
+                app.config["RED_RAIN_UPLOADS"].pop(task_id, None)
+                app.config["RED_RAIN_MAPPINGS"].pop(task_id, None)
+                snapshot = dict(red_rain_status)
+            report_usage(
+                "red_rain_creator",
+                "task_finish",
+                task_id=task_id,
+                item_count=(snapshot.get("current", 0) or 0) + (snapshot.get("skipped", 0) or 0),
+                success_count=(snapshot.get("created_count", 0) or 0) + (snapshot.get("existed_count", 0) or 0),
+                fail_count=(snapshot.get("failed_count", 0) or 0) + (snapshot.get("skipped", 0) or 0),
+                duration_ms=int((time.monotonic() - started_monotonic) * 1000),
+                status=(
+                    "stopped"
+                    if red_rain_stop_flag.is_set()
+                    else "failed"
+                    if snapshot.get("error")
+                    else "partial_success"
+                    if (snapshot.get("failed_count", 0) or 0) + (snapshot.get("skipped", 0) or 0) > 0
+                    else "pending"
+                    if (snapshot.get("pending_count", 0) or 0) > 0
+                    else "success"
+                ),
+                extra={
+                    "existed_count": snapshot.get("existed_count", 0),
+                    "pending_count": snapshot.get("pending_count", 0),
+                    "show_browser": show_browser,
+                },
+            )
+            try:
+                if input_file.exists():
+                    input_file.unlink()
+            except Exception:
+                pass
+
     def add_bigscreen_log(message: str):
         with bigscreen_status_lock:
             bigscreen_status["logs"].append(
@@ -2103,6 +2533,26 @@ def _initial_room_creator_status():
     }
 
 
+def _initial_red_rain_status():
+    return {
+        "running": False,
+        "total": 0,
+        "current": 0,
+        "current_title": "",
+        "created_count": 0,
+        "failed_count": 0,
+        "skipped": 0,
+        "existed_count": 0,
+        "pending_count": 0,
+        "logs": [],
+        "result_file": None,
+        "error": None,
+        "need_login": False,
+        "stopping": False,
+        "task_id": "",
+    }
+
+
 def _initial_bigscreen_status():
     return {
         "running": False,
@@ -2177,6 +2627,8 @@ def _cleanup_runtime_for_app(app: Flask):
     app.config["PRICE_OUTPUT_DIR"].mkdir(parents=True, exist_ok=True)
     app.config["ROOM_INPUT_DIR"].mkdir(parents=True, exist_ok=True)
     app.config["ROOM_OUTPUT_DIR"].mkdir(parents=True, exist_ok=True)
+    app.config["RED_RAIN_INPUT_DIR"].mkdir(parents=True, exist_ok=True)
+    app.config["RED_RAIN_OUTPUT_DIR"].mkdir(parents=True, exist_ok=True)
     app.config["BIGSCREEN_OUTPUT_DIR"].mkdir(parents=True, exist_ok=True)
     app.config["PRODUCT_SELECTION_OUTPUT_DIR"].mkdir(parents=True, exist_ok=True)
 

@@ -59,9 +59,70 @@
 
         .help-link:hover { text-decoration: underline; }
 
+        .update-notice {
+            position: fixed;
+            top: 18px;
+            right: 18px;
+            z-index: 1200;
+            width: min(360px, calc(100vw - 36px));
+            padding: 16px;
+            border: 1px solid #d9e6f7;
+            border-radius: 12px;
+            background: white;
+            box-shadow: 0 8px 28px rgba(31, 65, 114, 0.18);
+        }
+
+        .update-notice[hidden] { display: none; }
+        .update-notice-title { font-size: 15px; font-weight: 600; padding-right: 28px; }
+        .update-notice-desc { margin-top: 6px; color: #666; font-size: 13px; }
+        .update-notice-close {
+            position: absolute;
+            top: 10px;
+            right: 12px;
+            border: none;
+            background: transparent;
+            color: #999;
+            cursor: pointer;
+            font-size: 20px;
+        }
+        .update-progress {
+            height: 7px;
+            margin-top: 12px;
+            overflow: hidden;
+            border-radius: 999px;
+            background: #edf1f7;
+        }
+        .update-progress-bar {
+            width: 0;
+            height: 100%;
+            border-radius: inherit;
+            background: #4a90e2;
+            transition: width 0.25s ease;
+        }
+        .update-actions { display: flex; gap: 8px; margin-top: 12px; }
+        .update-action-button {
+            flex: 1;
+            min-height: 34px;
+            border: none;
+            border-radius: 7px;
+            background: #4a90e2;
+            color: white;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .update-action-button:disabled { cursor: wait; opacity: 0.65; }
+        .update-release-link {
+            display: inline-flex;
+            align-items: center;
+            color: #4a90e2;
+            font-size: 12px;
+            text-decoration: none;
+        }
+
         .tool-tabs {
             display: grid;
-            grid-template-columns: repeat(5, minmax(0, 1fr));
+            grid-template-columns: repeat(6, minmax(0, 1fr));
             gap: 8px;
             background: #e9eef5;
             border-radius: 12px;
@@ -695,7 +756,7 @@
     <div class="container">
         <div class="header">
             <h1>直播运营工具</h1>
-            <p>SKU 测价、绑定券码/促销ID、批量创建直播间、蓝屏自动截图、选品 Agent</p>
+            <p>SKU 测价、绑定券码/促销ID、批量创建直播间、蓝屏自动截图、自动创建红包雨、选品 Agent</p>
             <div class="header-actions">
                 <a class="help-link" href="https://joyspace.jd.com/pages/Knx10idaiNsUUaa7fD0C" target="_blank" rel="noopener noreferrer">使用文档 ↗</a>
                 <a class="help-link" href="https://joyspace.jd.com/share/bdBb9YpwG8md7rx86lOW?sharedId=F0GdxTbgTp5KZB&amp;viewType=4" target="_blank" rel="noopener noreferrer">问题反馈 ↗</a>
@@ -707,6 +768,7 @@
             <button class="tool-tab" data-tool="promotionPanel">绑定券码/促销ID</button>
             <button class="tool-tab" data-tool="roomCreatorPanel">批量创建直播间</button>
             <button class="tool-tab" data-tool="bigscreenCapturePanel">蓝屏自动截图</button>
+            <button class="tool-tab" data-tool="redRainPanel">自动创建红包雨</button>
             <button class="tool-tab" data-tool="productSelectionPanel">选品 Agent</button>
         </div>
 
@@ -721,10 +783,13 @@
                     <div class="upload-area" id="uploadArea">
                         <div class="upload-icon">📄</div>
                         <div class="upload-text">点击上传或拖拽文件到此处</div>
-                        <div class="upload-hint">支持 .xlsx 格式，需包含「商品SKU」列</div>
+                    <div class="upload-hint">支持现有 .xlsx 业务表，只需包含「商品SKU」列，其他列可保留</div>
                     </div>
                     <input type="file" id="fileInput" accept=".xlsx" class="hidden">
                     <div class="file-list" id="fileList"></div>
+                    <div style="margin-top: 12px;">
+                        <a class="btn btn-secondary" href="/api/price-audit/template">下载简易模板（可选）</a>
+                    </div>
                 </div>
 
                 <div class="input-panel hidden" id="skuPanel">
@@ -908,6 +973,7 @@
                         <span>显示创建浏览器窗口</span>
                     </label>
                     <br>
+                    <a class="btn btn-secondary" href="/api/room-creator/template" style="margin-right: 8px;">下载填写模板</a>
                     <button class="btn btn-primary" id="roomCreatorStartBtn" disabled>开始创建</button>
                 </div>
             </div>
@@ -976,6 +1042,71 @@
                 <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
                     <button class="btn btn-success" id="roomCreatorDownloadBtn">下载结果</button>
                     <button class="btn btn-secondary" id="roomCreatorRestartBtn">再次创建</button>
+                </div>
+            </div>
+        </section>
+
+        <section class="tool-panel" id="redRainPanel">
+            <div class="card" id="redRainCard">
+                <div class="section-title">选择红包雨创建 Excel 文件</div>
+                <div style="font-size: 14px; color: #666; line-height: 1.8; margin-bottom: 16px;">
+                    固定使用 CMC 红包创建
+                </div>
+                <div class="upload-area" id="redRainUploadArea">
+                    <div class="upload-icon">🧧</div>
+                    <div class="upload-text">点击上传或拖拽文件到此处</div>
+                    <div class="upload-hint">支持 .xlsx，需包含活动名称、开始时间、结束时间、红包发放方式、红包ID</div>
+                </div>
+                <input type="file" id="redRainFileInput" accept=".xlsx" class="hidden">
+                <div class="file-list" id="redRainFileList"></div>
+                <div class="status-message" id="redRainStatusMessage"></div>
+                <div class="column-mapping" id="redRainMapping" style="margin-top: 16px;">
+                    <div class="section-title">文件检查</div>
+                    <div id="redRainMappingText" style="font-size: 13px; color: #666; line-height: 1.8;"></div>
+                </div>
+                <div id="redRainActions" style="margin-top: 20px;">
+                    <label class="checkbox-row" style="margin-bottom: 12px; display: inline-flex;">
+                        <input type="checkbox" id="showRedRainBrowserInput">
+                        <span>显示创建浏览器窗口</span>
+                    </label>
+                    <br>
+                    <a class="btn btn-secondary" href="/api/red-rain/template" style="margin-right: 8px;">下载填写模板</a>
+                    <button class="btn btn-primary" id="redRainStartBtn" disabled>开始创建</button>
+                </div>
+            </div>
+
+            <div class="card progress-section" id="redRainProgressCard">
+                <div class="section-title">创建进度</div>
+                <div class="stats">
+                    <div class="stat"><div class="stat-value" id="redRainStatCurrent">0/0</div><div class="stat-label">当前/总数</div></div>
+                    <div class="stat"><div class="stat-value" id="redRainStatSuccess" style="color:#27ae60;">0</div><div class="stat-label">成功</div></div>
+                    <div class="stat"><div class="stat-value" id="redRainStatExisted" style="color:#2980b9;">0</div><div class="stat-label">已存在</div></div>
+                    <div class="stat"><div class="stat-value" id="redRainStatPending" style="color:#f39c12;">0</div><div class="stat-label">待确认</div></div>
+                    <div class="stat"><div class="stat-value" id="redRainStatFailed" style="color:#e74c3c;">0</div><div class="stat-label">失败</div></div>
+                </div>
+                <div class="progress-bar"><div class="progress-fill" id="redRainProgressFill" style="width:0%"></div></div>
+                <div class="progress-info"><span id="redRainProgressText">准备中...</span><span id="redRainProgressPercent">0%</span></div>
+                <div style="text-align:center; margin-bottom:16px;"><button class="btn btn-secondary" id="redRainStopBtn" style="background:#e74c3c;color:white;">停止创建</button></div>
+                <div class="log-wrapper">
+                    <div class="log-header"><div class="section-title" style="margin-bottom:0;">实时日志</div></div>
+                    <div class="log-container" id="redRainLogContainer"></div>
+                </div>
+            </div>
+
+            <div class="card result-section" id="redRainResultCard">
+                <div class="result-icon">✓</div>
+                <div class="result-title">红包雨创建任务完成</div>
+                <div class="summary-grid">
+                    <div class="summary-item"><div class="summary-value" id="redRainResultSuccess">0</div><div class="summary-label">成功</div></div>
+                    <div class="summary-item"><div class="summary-value" id="redRainResultExisted">0</div><div class="summary-label">已存在</div></div>
+                    <div class="summary-item"><div class="summary-value" id="redRainResultPending">0</div><div class="summary-label">待确认</div></div>
+                    <div class="summary-item"><div class="summary-value" id="redRainResultFailed">0</div><div class="summary-label">失败</div></div>
+                    <div class="summary-item"><div class="summary-value" id="redRainResultSkipped">0</div><div class="summary-label">预校验跳过</div></div>
+                </div>
+                <div class="result-desc">结果文件已生成，可下载查看每一行状态及失败原因</div>
+                <div style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap;">
+                    <button class="btn btn-success" id="redRainDownloadBtn">下载结果</button>
+                    <button class="btn btn-secondary" id="redRainRestartBtn">再次创建</button>
                 </div>
             </div>
         </section>
@@ -1088,7 +1219,7 @@
 
         <section class="tool-panel" id="productSelectionPanel">
             <div class="card" id="productSelectionMainCard">
-                <div class="section-title">京东四来源选品</div>
+                <div class="section-title">京东多来源选品</div>
                 <div style="font-size: 14px; color: #666; line-height: 1.8; margin-bottom: 16px;">
                     从国家补贴、黑色星期五、排行榜和京东特价抓取商品；每类目保留最多 30 个候选，由 AI 一次筛选最多 Top10，并生成业务 Excel 报表。
                 </div>
@@ -1167,6 +1298,19 @@
 
     </div>
 
+    <aside class="update-notice" id="updateNotice" hidden>
+        <button class="update-notice-close" id="updateNoticeClose" type="button" aria-label="关闭更新提示">×</button>
+        <div class="update-notice-title" id="updateNoticeTitle">发现新版本</div>
+        <div class="update-notice-desc" id="updateNoticeDesc">可以在后台下载，下载期间不影响继续使用。</div>
+        <div class="update-progress" id="updateProgress" hidden>
+            <div class="update-progress-bar" id="updateProgressBar"></div>
+        </div>
+        <div class="update-actions">
+            <button class="update-action-button" id="updateActionButton" type="button">后台下载</button>
+            <a class="update-release-link" id="updateReleaseLink" href="#" target="_blank" rel="noopener noreferrer" hidden>版本说明 ↗</a>
+        </div>
+    </aside>
+
     <div class="modal" id="loginModal">
         <div class="modal-overlay"></div>
         <div class="modal-content">
@@ -1233,6 +1377,148 @@
         let productSelectionCategoriesLoaded = false;
         let productSelectionCategoriesLoading = false;
         let productSelectionRunning = false;
+        const updateNotice = document.getElementById('updateNotice');
+        const updateNoticeTitle = document.getElementById('updateNoticeTitle');
+        const updateNoticeDesc = document.getElementById('updateNoticeDesc');
+        const updateProgress = document.getElementById('updateProgress');
+        const updateProgressBar = document.getElementById('updateProgressBar');
+        const updateActionButton = document.getElementById('updateActionButton');
+        const updateReleaseLink = document.getElementById('updateReleaseLink');
+        let updateState = null;
+        let updatePollTimer = null;
+        let updateRetryTimer = null;
+        let updateNoticeDismissed = false;
+
+        function formatUpdateBytes(value) {
+            if (!value) return '0 MB';
+            return `${(value / 1024 / 1024).toFixed(1)} MB`;
+        }
+
+        function renderUpdateState(state) {
+            updateState = state;
+            if (!state.supported || ['idle', 'checking', 'up_to_date', 'unsupported'].includes(state.stage)) {
+                updateNotice.hidden = true;
+                return;
+            }
+            if (state.stage === 'error' && !state.latest_version) {
+                updateNotice.hidden = true;
+                scheduleUpdateRecheck();
+                return;
+            }
+            if (updateNoticeDismissed && state.stage === 'available') return;
+
+            updateNotice.hidden = false;
+            updateReleaseLink.hidden = !state.release_url;
+            if (state.release_url) updateReleaseLink.href = state.release_url;
+            updateProgress.hidden = state.stage !== 'downloading' && state.stage !== 'ready';
+            updateProgressBar.style.width = `${state.progress || 0}%`;
+            updateActionButton.disabled = false;
+
+            if (state.stage === 'available') {
+                updateNoticeTitle.textContent = `发现新版本 v${state.latest_version}`;
+                updateNoticeDesc.textContent = '可以在后台下载，下载期间不影响继续使用。';
+                updateActionButton.textContent = '后台下载';
+            } else if (state.stage === 'downloading') {
+                updateNoticeTitle.textContent = `正在后台下载 v${state.latest_version}`;
+                const progressText = state.total_bytes
+                    ? `${state.progress}%（${formatUpdateBytes(state.downloaded_bytes)} / ${formatUpdateBytes(state.total_bytes)}）`
+                    : formatUpdateBytes(state.downloaded_bytes);
+                updateNoticeDesc.textContent = `${progressText}，可以继续使用当前页面。`;
+                updateActionButton.textContent = '下载中…';
+                updateActionButton.disabled = true;
+            } else if (state.stage === 'ready') {
+                updateNoticeTitle.textContent = `v${state.latest_version} 已下载完成`;
+                updateNoticeDesc.textContent = '安装时程序会关闭并自动重启，请先保存正在进行的工作。';
+                updateActionButton.textContent = '立即安装并重启';
+            } else if (state.stage === 'installing') {
+                updateNoticeTitle.textContent = '正在启动更新器';
+                updateNoticeDesc.textContent = '程序即将关闭，安装完成后会自动重新打开。';
+                updateActionButton.textContent = '正在安装…';
+                updateActionButton.disabled = true;
+            } else if (state.stage === 'error') {
+                updateNoticeTitle.textContent = '更新下载未完成';
+                updateNoticeDesc.textContent = state.error || '网络不稳定，可以稍后继续下载。';
+                updateActionButton.textContent = '继续下载';
+            }
+        }
+
+        function pollUpdateStatus() {
+            fetch('/api/update/status')
+                .then((response) => response.json())
+                .then((state) => {
+                    renderUpdateState(state);
+                    if (['checking', 'downloading'].includes(state.stage)) {
+                        updatePollTimer = setTimeout(pollUpdateStatus, 1200);
+                    }
+                })
+                .catch(() => {});
+        }
+
+        function startUpdateCheck() {
+            if (updateRetryTimer) {
+                clearTimeout(updateRetryTimer);
+                updateRetryTimer = null;
+            }
+            fetch('/api/update/check', { method: 'POST' })
+                .then((response) => response.json())
+                .then((state) => {
+                    renderUpdateState(state);
+                    if (state.stage === 'checking') pollUpdateStatus();
+                })
+                .catch(() => scheduleUpdateRecheck());
+        }
+
+        function scheduleUpdateRecheck() {
+            if (updateRetryTimer) return;
+            updateRetryTimer = setTimeout(() => {
+                updateRetryTimer = null;
+                startUpdateCheck();
+            }, 60 * 1000);
+        }
+
+        updateActionButton.addEventListener('click', () => {
+            if (!updateState) return;
+            if (updateState.stage === 'ready') {
+                if (!confirm('安装更新会关闭当前程序。请确认当前任务已经完成，是否立即安装并重启？')) return;
+                updateActionButton.disabled = true;
+                fetch('/api/update/install', {
+                    method: 'POST',
+                    headers: { 'X-Live-Tools-Update': '1' }
+                })
+                    .then(async (response) => ({ ok: response.ok, data: await response.json() }))
+                    .then(({ ok, data }) => {
+                        if (!ok) throw new Error(data.error || '启动更新器失败');
+                        renderUpdateState(data);
+                    })
+                    .catch((error) => {
+                        updateActionButton.disabled = false;
+                        updateNoticeDesc.textContent = error.message || '启动更新器失败';
+                    });
+                return;
+            }
+
+            updateNoticeDismissed = false;
+            fetch('/api/update/download', {
+                method: 'POST',
+                headers: { 'X-Live-Tools-Update': '1' }
+            })
+                .then(async (response) => ({ ok: response.ok, data: await response.json() }))
+                .then(({ ok, data }) => {
+                    if (!ok) throw new Error(data.error || '开始下载失败');
+                    renderUpdateState(data);
+                    pollUpdateStatus();
+                })
+                .catch((error) => {
+                    updateNoticeDesc.textContent = error.message || '开始下载失败';
+                });
+        });
+
+        document.getElementById('updateNoticeClose').addEventListener('click', () => {
+            updateNoticeDismissed = true;
+            updateNotice.hidden = true;
+        });
+
+        startUpdateCheck();
 
         document.querySelectorAll('.tool-tab').forEach((button) => {
             button.addEventListener('click', () => {
@@ -1457,6 +1743,11 @@
                     roomCreatorStartBtn.disabled = true;
                     roomCreatorMapping.classList.remove('active');
                     roomCreatorFileInput.value = '';
+                } else if (targetList === redRainFileList) {
+                    selectedRedRainTaskId = null;
+                    redRainStartBtn.disabled = true;
+                    redRainMapping.classList.remove('active');
+                    redRainFileInput.value = '';
                 } else {
                     selectedPromotionFile = null;
                     selectedPromotionTaskId = null;
@@ -1641,6 +1932,7 @@
             hideLoginModal();
             fetch('/api/continue', { method: 'POST' });
             fetch('/api/room-creator/continue', { method: 'POST' });
+            fetch('/api/red-rain/continue', { method: 'POST' });
             fetch('/api/bigscreen-capture/continue', { method: 'POST' });
         });
 
@@ -2334,6 +2626,170 @@
                     btn.classList.remove('copied');
                 }, 2000);
             }).catch(() => alert('复制失败，请手动选择复制'));
+        });
+
+        // Red Rain Creator
+        let selectedRedRainTaskId = null;
+        let redRainStatusInterval = null;
+        let redRainTaskRunning = false;
+        const redRainUploadArea = document.getElementById('redRainUploadArea');
+        const redRainFileInput = document.getElementById('redRainFileInput');
+        const redRainFileList = document.getElementById('redRainFileList');
+        const redRainStartBtn = document.getElementById('redRainStartBtn');
+        const redRainStatusMessage = document.getElementById('redRainStatusMessage');
+        const redRainMapping = document.getElementById('redRainMapping');
+        const redRainMappingText = document.getElementById('redRainMappingText');
+
+        bindUpload(redRainUploadArea, redRainFileInput, handleRedRainFile);
+
+        function setRedRainTaskRunning(running) {
+            redRainTaskRunning = running;
+            redRainFileInput.disabled = running;
+            redRainUploadArea.style.pointerEvents = running ? 'none' : '';
+            redRainUploadArea.style.opacity = running ? '0.65' : '';
+            redRainStartBtn.disabled = running || !selectedRedRainTaskId;
+            redRainStartBtn.textContent = running ? '创建中...' : '开始创建';
+        }
+
+        function handleRedRainFile(file) {
+            if (redRainTaskRunning) {
+                alert('红包雨创建任务正在运行，请等待完成或先停止');
+                return;
+            }
+            if (!file.name.endsWith('.xlsx')) {
+                alert('仅支持 .xlsx 格式');
+                return;
+            }
+            selectedRedRainTaskId = null;
+            redRainStartBtn.disabled = true;
+            redRainMapping.classList.remove('active');
+            renderFile(redRainFileList, redRainUploadArea, file.name, '正在检查');
+            showMessage(redRainStatusMessage, '正在读取并预校验...', 'info');
+            const formData = new FormData();
+            formData.append('file', file);
+            fetch('/api/red-rain/preview', { method: 'POST', body: formData })
+                .then((res) => res.json())
+                .then((data) => {
+                    if (!data.success) throw new Error(data.error || '读取文件失败');
+                    selectedRedRainTaskId = data.task_id;
+                    redRainMappingText.innerHTML = [
+                        `活动名称：${escapeHtml(data.mapping.activity_name_col || '未识别')}`,
+                        `活动时间：${escapeHtml(data.mapping.start_time_col || '未识别')} ～ ${escapeHtml(data.mapping.end_time_col || '未识别')}`,
+                        `发放方式：${escapeHtml(data.mapping.issue_method_col || '未识别')}`,
+                        `红包ID：${escapeHtml(data.mapping.red_packet_id_col || '未识别')}`,
+                        `中奖概率：${escapeHtml(data.mapping.win_probability_col || '未识别（人群策略可为空）')}`,
+                        `数据行：${data.row_count || 0}，预校验异常：${data.invalid_count || 0}`,
+                    ].map((item) => `<div>${item}</div>`).join('');
+                    redRainMapping.classList.add('active');
+                    renderFile(redRainFileList, redRainUploadArea, data.filename || file.name, '检查完成');
+                    setRedRainTaskRunning(false);
+                    showMessage(
+                        redRainStatusMessage,
+                        data.invalid_count > 0 ? `发现 ${data.invalid_count} 行异常，运行时将跳过并写入结果报告` : '文件检查通过',
+                        data.invalid_count > 0 ? 'info' : 'success'
+                    );
+                })
+                .catch((error) => {
+                    showMessage(redRainStatusMessage, error.message, 'error');
+                    redRainStartBtn.disabled = true;
+                });
+        }
+
+        redRainStartBtn.addEventListener('click', () => {
+            if (!selectedRedRainTaskId || redRainTaskRunning) return;
+            setRedRainTaskRunning(true);
+            document.getElementById('redRainProgressCard').classList.add('active');
+            document.getElementById('redRainResultCard').classList.remove('active');
+            fetch('/api/red-rain/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    task_id: selectedRedRainTaskId,
+                    show_browser: document.getElementById('showRedRainBrowserInput').checked,
+                }),
+            })
+                .then((res) => res.json())
+                .then((data) => {
+                    if (!data.success) throw new Error(data.error || '启动失败');
+                    startRedRainPolling();
+                })
+                .catch((error) => {
+                    showMessage(redRainStatusMessage, error.message, 'error');
+                    setRedRainTaskRunning(false);
+                });
+        });
+
+        function startRedRainPolling() {
+            if (redRainStatusInterval) clearInterval(redRainStatusInterval);
+            document.getElementById('redRainStopBtn').disabled = false;
+            redRainStatusInterval = setInterval(() => {
+                fetch('/api/red-rain/status')
+                    .then((res) => res.json())
+                    .then((data) => {
+                        updateRedRainUI(data);
+                        if (data.need_login) showLoginModal();
+                        else hideLoginModal();
+                        if (!data.running && data.result_file && !data.error) {
+                            clearInterval(redRainStatusInterval);
+                            showRedRainResult(data);
+                        } else if (!data.running && data.error) {
+                            clearInterval(redRainStatusInterval);
+                            showMessage(redRainStatusMessage, data.error, 'error');
+                            setRedRainTaskRunning(false);
+                        } else if (!data.running) {
+                            clearInterval(redRainStatusInterval);
+                            showMessage(redRainStatusMessage, '任务已停止', 'success');
+                            setRedRainTaskRunning(false);
+                        }
+                    })
+                    .catch(() => {
+                        clearInterval(redRainStatusInterval);
+                        showMessage(redRainStatusMessage, '连接服务失败，请重新启动工具', 'error');
+                        setRedRainTaskRunning(false);
+                    });
+            }, 600);
+        }
+
+        function updateRedRainUI(data) {
+            const completed = Math.min(data.current || 0, data.total || 0);
+            const percent = data.total > 0 ? Math.round(completed / data.total * 100) : 100;
+            document.getElementById('redRainProgressFill').style.width = percent + '%';
+            document.getElementById('redRainProgressPercent').textContent = percent + '%';
+            document.getElementById('redRainProgressText').textContent = data.stopping ? '正在停止...' : (data.running ? `正在创建：${data.current_title || '准备中'}` : '已完成');
+            document.getElementById('redRainStatCurrent').textContent = `${completed}/${data.total || 0}`;
+            document.getElementById('redRainStatSuccess').textContent = data.created_count || 0;
+            document.getElementById('redRainStatExisted').textContent = data.existed_count || 0;
+            document.getElementById('redRainStatPending').textContent = data.pending_count || 0;
+            document.getElementById('redRainStatFailed').textContent = data.failed_count || 0;
+            const logContainer = document.getElementById('redRainLogContainer');
+            logContainer.innerHTML = (data.logs || []).map((log) => `<div class="log-entry"><span class="log-time">${escapeHtml(log.time)}</span>${escapeHtml(log.message)}</div>`).join('');
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+
+        function showRedRainResult(data) {
+            document.getElementById('redRainResultCard').classList.add('active');
+            setRedRainTaskRunning(false);
+            document.getElementById('redRainResultSuccess').textContent = data.created_count || 0;
+            document.getElementById('redRainResultExisted').textContent = data.existed_count || 0;
+            document.getElementById('redRainResultPending').textContent = data.pending_count || 0;
+            document.getElementById('redRainResultFailed').textContent = data.failed_count || 0;
+            document.getElementById('redRainResultSkipped').textContent = data.skipped || 0;
+            document.getElementById('redRainResultCard').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        document.getElementById('redRainStopBtn').addEventListener('click', () => {
+            if (!confirm('确定要停止红包雨创建吗？')) return;
+            document.getElementById('redRainStopBtn').disabled = true;
+            fetch('/api/red-rain/stop', { method: 'POST' });
+        });
+        document.getElementById('redRainDownloadBtn').addEventListener('click', () => { window.location.href = '/api/red-rain/download'; });
+        document.getElementById('redRainRestartBtn').addEventListener('click', () => {
+            selectedRedRainTaskId = null;
+            setRedRainTaskRunning(false);
+            document.getElementById('redRainResultCard').classList.remove('active');
+            document.getElementById('redRainProgressCard').classList.remove('active');
+            redRainMapping.classList.remove('active');
+            redRainUploadArea.scrollIntoView({ behavior: 'smooth' });
         });
 
         const productSelectionStageLabels = {

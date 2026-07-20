@@ -1,5 +1,6 @@
 # 业务数据文件（含敏感信息，不上传）
 input/*.xlsx
+!input/点菜清单模板.xlsx
 input/*.xls
 input/*.csv
 

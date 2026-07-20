@@ -45,6 +45,7 @@ jobs:
           pip install -r live-sku-price-audit/requirements.txt
           pip install -r live-promotion-binding/requirements.txt
           pip install -r live-room-creator/requirements.txt
+          pip install -r live-red-rain-creator/requirements.txt
           pip install -r live-bigscreen-capture/requirements.txt
           pip install -r product-selection-agent/requirements.txt
           pip install pyinstaller
@@ -64,6 +65,7 @@ jobs:
           (cd live-web && python -m unittest discover -s tests -p "test_*.py" -v)
           (cd live-sku-price-audit && python -m unittest discover -s tests -p "test_*.py" -v)
           (cd live-room-creator && python -m unittest discover -s tests -p "test_*.py" -v)
+          (cd live-red-rain-creator && python -m unittest discover -s tests -p "test_*.py" -v)
           (cd live-bigscreen-capture && python -m unittest discover -s tests -p "test_*.py" -v)
           (cd product-selection-agent && python -m unittest discover -s tests -p "test_*.py" -v)
           python -m unittest discover -s tests -p "test_*.py" -v
@@ -76,6 +78,7 @@ jobs:
             --paths "live-promotion-binding" \
             --paths "live-sku-price-audit" \
             --paths "live-room-creator" \
+            --paths "live-red-rain-creator" \
             --paths "live-bigscreen-capture" \
             --paths "product-selection-agent" \
             --collect-all playwright \
@@ -99,6 +102,13 @@ jobs:
             --hidden-import room_creator.validator \
             --hidden-import room_creator.report_writer \
             --hidden-import room_creator.models \
+            --hidden-import red_rain_creator \
+            --hidden-import red_rain_creator.browser \
+            --hidden-import red_rain_creator.excel_reader \
+            --hidden-import red_rain_creator.runner \
+            --hidden-import red_rain_creator.validator \
+            --hidden-import red_rain_creator.report_writer \
+            --hidden-import red_rain_creator.models \
             --hidden-import bigscreen_capture \
             --hidden-import bigscreen_capture.browser \
             --hidden-import bigscreen_capture.service \
@@ -115,7 +125,11 @@ jobs:
             --add-data "live-promotion-binding/assets:live-promotion-binding/assets" \
             --add-data "live-promotion-binding/promotion_binding:live-promotion-binding/promotion_binding" \
             --add-data "live-sku-price-audit/utils:live-sku-price-audit/utils" \
+            --add-data "live-sku-price-audit/input/点菜清单模板.xlsx:live-sku-price-audit/input" \
             --add-data "live-room-creator/room_creator:live-room-creator/room_creator" \
+            --add-data "live-room-creator/input/直播间创建模板.xlsx:live-room-creator/input" \
+            --add-data "live-red-rain-creator/red_rain_creator:live-red-rain-creator/red_rain_creator" \
+            --add-data "live-red-rain-creator/input/红包雨创建模板.xlsx:live-red-rain-creator/input" \
             --add-data "live-bigscreen-capture/bigscreen_capture:live-bigscreen-capture/bigscreen_capture" \
             --add-data "product-selection-agent/product_selection_agent:product-selection-agent/product_selection_agent" \
             live-web/app.py
@@ -152,7 +166,11 @@ jobs:
             "live-promotion-binding/assets"
             "live-promotion-binding/promotion_binding"
             "live-sku-price-audit/utils"
+            "live-sku-price-audit/input/点菜清单模板.xlsx"
             "live-room-creator/room_creator"
+            "live-room-creator/input/直播间创建模板.xlsx"
+            "live-red-rain-creator/red_rain_creator"
+            "live-red-rain-creator/input/红包雨创建模板.xlsx"
             "live-bigscreen-capture/bigscreen_capture"
             "product-selection-agent/product_selection_agent"
             "product-selection-agent/model-config.example.json"
@@ -235,6 +253,22 @@ jobs:
           pattern: Live-Tools-macOS-*
           path: release
           merge-multiple: true
+
+      - name: Wait for validated Windows release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for attempt in {1..180}; do
+            assets="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null || true)"
+            if grep -qx "Live-Tools-Windows.zip" <<< "$assets" && grep -qx "live-tools-update.json" <<< "$assets"; then
+              echo "Validated Windows release assets are ready"
+              exit 0
+            fi
+            echo "Waiting for Windows release assets ($attempt/180)"
+            sleep 10
+          done
+          echo "Windows release assets were not published; refusing to create an incomplete release"
+          exit 1
 
       - name: Upload to Release
         uses: softprops/action-gh-release@v2

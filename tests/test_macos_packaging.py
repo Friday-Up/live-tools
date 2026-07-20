@@ -40,6 +40,10 @@ class MacOSPackagingTest(unittest.TestCase):
         self.assertIn("启动直播工具.command", content)
         self.assertIn("关闭直播工具.command", content)
         self.assertIn("model-config.example.json", content)
+        self.assertIn("live-red-rain-creator/red_rain_creator", content)
+        self.assertIn("live-sku-price-audit/input/点菜清单模板.xlsx", content)
+        self.assertIn("live-room-creator/input/直播间创建模板.xlsx", content)
+        self.assertIn("live-red-rain-creator/input/红包雨创建模板.xlsx", content)
         self.assertIn('browser_cache="$HOME/Library/Caches/ms-playwright"', content)
         self.assertIn('ditto "$browser_cache" "$dist_path/ms-playwright"', content)
         self.assertNotIn('PLAYWRIGHT_BROWSERS_PATH: "0"', content)
@@ -51,6 +55,10 @@ class MacOSPackagingTest(unittest.TestCase):
         self.assertIn('-name "chromium_headless_shell-*"', content)
         self.assertIn("ditto -c -k --sequesterRsrc --keepParent", content)
         self.assertIn("actions/upload-artifact@v4", content)
+        self.assertIn("Wait for validated Windows release", content)
+        self.assertIn('gh release view "$GITHUB_REF_NAME"', content)
+        self.assertIn('grep -qx "live-tools-update.json"', content)
+        self.assertIn("refusing to create an incomplete release", content)
 
     def test_github_workflow_signs_embedded_python_framework(self):
         workflow = LIVE_ROOT / ".github" / "workflows" / "build-macos.yml"

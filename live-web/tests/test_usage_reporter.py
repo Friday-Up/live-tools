@@ -1,4 +1,5 @@
 import json
+import threading
 import unittest
 from datetime import datetime, timezone, timedelta
 from urllib.error import URLError
@@ -7,6 +8,39 @@ from usage_reporter import LiveToolUsageReporter
 
 
 class UsageReporterTest(unittest.TestCase):
+    def test_async_events_are_sent_in_enqueue_order(self):
+        actions = []
+        completed = threading.Event()
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return b'{}'
+
+        def fake_urlopen(request, timeout):
+            action = json.loads(request.data.decode("utf-8"))["events"][0]["action"]
+            actions.append(action)
+            if len(actions) == 3:
+                completed.set()
+            return FakeResponse()
+
+        reporter = LiveToolUsageReporter(
+            endpoint="http://usage.example/events",
+            token="token",
+            urlopen=fake_urlopen,
+        )
+        reporter.report_async(tool_code="red_rain_creator", action="upload")
+        reporter.report_async(tool_code="red_rain_creator", action="task_start")
+        reporter.report_async(tool_code="red_rain_creator", action="task_finish")
+
+        self.assertTrue(completed.wait(2))
+        self.assertEqual(actions, ["upload", "task_start", "task_finish"])
+
     def test_build_event_matches_order_contract(self):
         fixed_now = datetime(2026, 7, 9, 20, 30, 0, tzinfo=timezone(timedelta(hours=8)))
         reporter = LiveToolUsageReporter(
