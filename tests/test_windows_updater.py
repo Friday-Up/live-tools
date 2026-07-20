@@ -38,9 +38,13 @@ class WindowsUpdaterTest(unittest.TestCase):
             "local", encoding="utf-8"
         )
         (install_dir / "Live-Tools-Web.exe").write_text("old", encoding="utf-8")
+        (install_dir / "Live-Tools-Updater.exe").write_text("old-updater", encoding="utf-8")
+        (install_dir / "启动直播工具.bat").write_text("old-launcher", encoding="utf-8")
         (payload_dir / "product-selection-agent").mkdir(parents=True)
         (payload_dir / "product-selection-agent" / "package.py").write_text("new", encoding="utf-8")
         (payload_dir / "Live-Tools-Web.exe").write_text("new", encoding="utf-8")
+        (payload_dir / "Live-Tools-Updater.exe").write_text("new-updater", encoding="utf-8")
+        (payload_dir / "启动直播工具.bat").write_text("new-launcher", encoding="utf-8")
 
         preserved = updater.read_preserved_files(install_dir)
         updater.move_current_install_to_backup(install_dir, backup_dir)
@@ -48,6 +52,7 @@ class WindowsUpdaterTest(unittest.TestCase):
         updater.restore_preserved_files(install_dir, preserved)
 
         self.assertEqual((install_dir / "Live-Tools-Web.exe").read_text(), "new")
+        self.assertEqual((install_dir / "Live-Tools-Updater.exe").read_text(), "new-updater")
         self.assertEqual((install_dir / "runtime" / "business.xlsx").read_text(), "data")
         self.assertEqual(
             (install_dir / "product-selection-agent" / "model-config.local.json").read_text(),
@@ -85,6 +90,54 @@ class WindowsUpdaterTest(unittest.TestCase):
             sorted(path.name for path in install_dir.iterdir()),
             ["a.txt", "b.txt", "c.txt"],
         )
+
+    def test_startup_recovery_restores_interrupted_transaction(self):
+        root = Path(tempfile.mkdtemp())
+        install_dir = root / "Live-Tools-Web"
+        backup_dir = root / ".Live-Tools-Web-backup-test"
+        transaction_file = install_dir / "runtime" / updater.UPDATE_TRANSACTION_NAME
+        (install_dir / "runtime").mkdir(parents=True)
+        (install_dir / "Live-Tools-Web.exe").write_text("old", encoding="utf-8")
+
+        updater.write_update_transaction(transaction_file, backup_dir, "0.5.1")
+        updater.move_current_install_to_backup(install_dir, backup_dir)
+        (install_dir / "Live-Tools-Web.exe").write_text("partial-new", encoding="utf-8")
+
+        updater.recover_interrupted_update(install_dir, transaction_file, lambda _message: None)
+
+        self.assertEqual((install_dir / "Live-Tools-Web.exe").read_text(), "old")
+        self.assertFalse(transaction_file.exists())
+        self.assertFalse(backup_dir.exists())
+
+    def test_wait_result_rejects_timeout_and_api_failure(self):
+        with self.assertRaises(TimeoutError):
+            updater.validate_wait_result(updater.WAIT_TIMEOUT)
+        with self.assertRaises(OSError):
+            updater.validate_wait_result(updater.WAIT_FAILED, 5)
+
+    def test_recovery_waits_for_live_update_owner(self):
+        root = Path(tempfile.mkdtemp())
+        install_dir = root / "Live-Tools-Web"
+        transaction_file = install_dir / "runtime" / updater.UPDATE_TRANSACTION_NAME
+        updater.write_update_transaction(
+            transaction_file,
+            root / ".Live-Tools-Web-backup-test",
+            "0.5.1",
+            owner_pid=12345,
+        )
+
+        def finish_update(_pid, timeout_seconds):
+            self.assertEqual(timeout_seconds, 180)
+            transaction_file.unlink()
+
+        with patch.object(updater, "wait_for_process", side_effect=finish_update) as mocked:
+            updater.recover_interrupted_update(
+                install_dir,
+                transaction_file,
+                lambda _message: None,
+            )
+
+        mocked.assert_called_once()
 
 
 if __name__ == "__main__":

@@ -11,6 +11,29 @@ set "LOG_DIR=%SCRIPT_DIR%logs"
 set "LOG_FILE=%LOG_DIR%\web.log"
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>&1
 
+set "UPDATE_TRANSACTION=%SCRIPT_DIR%runtime\update-transaction.json"
+if exist "%UPDATE_TRANSACTION%" (
+    if not exist "%SCRIPT_DIR%Live-Tools-Updater.exe" (
+        echo 检测到未完成更新，但恢复程序不存在。请重新下载完整安装包。
+        pause
+        exit /b 1
+    )
+    echo 检测到上次更新未完成，正在自动恢复...
+    "%SCRIPT_DIR%Live-Tools-Updater.exe" --recover --install-dir "%SCRIPT_DIR%" --transaction-file "%UPDATE_TRANSACTION%"
+    if %errorlevel% neq 0 (
+        echo 自动恢复失败，请查看 %TEMP%\Live-Tools-Updater.log
+        pause
+        exit /b 1
+    )
+)
+
+powershell -Command "try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:8080/api/health' -TimeoutSec 2 -UseBasicParsing; exit 0 } catch { exit 1 }" >nul 2>&1
+if %errorlevel% equ 0 (
+    echo 直播工具已在运行，正在打开页面...
+    start http://127.0.0.1:8080
+    exit /b 0
+)
+
 if exist "%SCRIPT_DIR%\Live-Tools-Web.exe" (
     start "直播工具服务" /min cmd /c ""%SCRIPT_DIR%\Live-Tools-Web.exe" > "%LOG_FILE%" 2>&1"
     goto :wait_for_server

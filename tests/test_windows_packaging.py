@@ -17,6 +17,9 @@ class WindowsPackagingTest(unittest.TestCase):
         self.assertIn('set "PYTHONIOENCODING=utf-8"', content)
         self.assertNotIn("启动测价工具", content)
         self.assertNotIn("SKU-Price-Audit", content)
+        self.assertIn("update-transaction.json", content)
+        self.assertIn("--recover", content)
+        self.assertIn("直播工具已在运行", content)
 
     def test_live_web_windows_source_launcher_writes_service_log(self):
         launcher = LIVE_ROOT / "live-web" / "start.bat"
@@ -71,10 +74,15 @@ class WindowsPackagingTest(unittest.TestCase):
         self.assertIn("live-tools-update.json", content)
         self.assertIn("Get-FileHash", content)
         self.assertIn("Live-Tools-Updater.exe", content)
+        self.assertIn("draft: true", content)
+        self.assertIn("Verify and publish Windows release", content)
+        self.assertIn("Refusing to publish release without both Windows update assets", content)
+        self.assertIn("--draft=false --latest", content)
 
         updater_source = (LIVE_ROOT / "live-updater" / "updater.py").read_text(encoding="utf-8")
         manager_source = (LIVE_ROOT / "live-web" / "update_manager.py").read_text(encoding="utf-8")
-        self.assertIn('parser.add_argument("--ready-file", required=True)', updater_source)
+        self.assertIn('parser.add_argument("--ready-file")', updater_source)
+        self.assertIn('parser.add_argument("--recover", action="store_true")', updater_source)
         self.assertIn("_wait_for_updater_ready", manager_source)
         self.assertIn("_cleanup_stale_updater_copies", manager_source)
         self.assertIn("启动直播工具.bat", content)

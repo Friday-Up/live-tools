@@ -17,7 +17,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-from flask import Flask, jsonify, render_template, request, send_file, url_for
+from flask import Flask, g, jsonify, render_template, request, send_file, url_for
 from werkzeug.utils import secure_filename
 
 from config import (
@@ -238,6 +238,31 @@ def create_app(
         )
     app.config["UPDATE_MANAGER"] = update_manager
 
+    operation_gate_lock = threading.Lock()
+    operation_gate = {"active_requests": 0, "installing": False}
+
+    @app.before_request
+    def register_business_mutation():
+        if request.method != "POST" or request.path.startswith("/api/update/"):
+            return None
+        if request.path == "/api/shutdown":
+            return None
+        with operation_gate_lock:
+            if operation_gate["installing"]:
+                return _json_error("程序正在安装更新，请稍候", status_code=409)
+            operation_gate["active_requests"] += 1
+            g.live_tools_business_mutation = True
+        return None
+
+    @app.teardown_request
+    def unregister_business_mutation(_error=None):
+        if not getattr(g, "live_tools_business_mutation", False):
+            return
+        with operation_gate_lock:
+            operation_gate["active_requests"] = max(
+                0, operation_gate["active_requests"] - 1
+            )
+
     status_lock = threading.Lock()
     price_status = _initial_price_status()
     login_event = threading.Event()
@@ -363,9 +388,17 @@ def create_app(
                 f"请等待当前任务完成后再安装更新：{'、'.join(active_tasks)}",
                 status_code=409,
             )
+        with operation_gate_lock:
+            if operation_gate["active_requests"]:
+                return _json_error("请等待当前操作完成后再安装更新", status_code=409)
+            if operation_gate["installing"]:
+                return _json_error("更新正在安装中", status_code=409)
+            operation_gate["installing"] = True
         try:
             state = app.config["UPDATE_MANAGER"].launch_installer(os.getpid())
         except (RuntimeError, OSError) as exc:
+            with operation_gate_lock:
+                operation_gate["installing"] = False
             return _json_error(str(exc), status_code=409)
 
         def shutdown_after_response():

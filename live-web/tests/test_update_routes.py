@@ -1,5 +1,6 @@
 from pathlib import Path
 import tempfile
+import threading
 import unittest
 
 from app import create_app
@@ -58,6 +59,32 @@ class UpdateRoutesTest(unittest.TestCase):
     def test_install_requires_same_origin_header(self):
         response = self.client.post("/api/update/install")
         self.assertEqual(response.status_code, 403)
+
+    def test_install_waits_for_any_active_business_request(self):
+        started = threading.Event()
+        release = threading.Event()
+
+        @self.app.post("/api/test-long-business-operation")
+        def long_business_operation():
+            started.set()
+            release.wait(timeout=2)
+            return {"success": True}
+
+        worker = threading.Thread(
+            target=lambda: self.app.test_client().post("/api/test-long-business-operation")
+        )
+        worker.start()
+        self.assertTrue(started.wait(timeout=1))
+        try:
+            response = self.client.post(
+                "/api/update/install",
+                headers={"X-Live-Tools-Update": "1"},
+            )
+            self.assertEqual(response.status_code, 409)
+            self.assertIn("当前操作", response.get_json()["error"])
+        finally:
+            release.set()
+            worker.join(timeout=2)
 
 
 if __name__ == "__main__":
