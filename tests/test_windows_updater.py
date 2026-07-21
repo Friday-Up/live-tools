@@ -151,6 +151,32 @@ class WindowsUpdaterTest(unittest.TestCase):
         self.assertFalse(healthy)
         sleep.assert_called_once_with(1)
 
+    def test_running_version_rejects_another_install_directory(self):
+        root = Path(tempfile.mkdtemp())
+
+        class Response:
+            status = 200
+
+            def read(self):
+                return json.dumps(
+                    {
+                        "success": True,
+                        "version": "0.5.2",
+                        "install_dir": str(root / "other-copy"),
+                    }
+                ).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+        with patch.object(updater, "urlopen", return_value=Response()):
+            version = updater.get_running_version(root / "target-copy")
+
+        self.assertIsNone(version)
+
     def test_recovery_waits_for_live_update_owner(self):
         root = Path(tempfile.mkdtemp())
         install_dir = root / "Live-Tools-Web"

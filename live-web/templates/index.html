@@ -59,6 +59,32 @@
 
         .help-link:hover { text-decoration: underline; }
 
+        .update-check-button {
+            min-height: 30px;
+            padding: 0 11px;
+            border: 1px solid #b8cbe5;
+            border-radius: 7px;
+            background: white;
+            color: #3978c2;
+            cursor: pointer;
+            font-size: 13px;
+            white-space: nowrap;
+        }
+
+        .update-check-button:hover { background: #f2f7fd; }
+        .update-check-button.has-update {
+            border-color: #4a90e2;
+            background: #4a90e2;
+            color: white;
+            font-weight: 600;
+        }
+        .update-check-button.check-error {
+            border-color: #e8b36a;
+            color: #b86800;
+            background: #fff9ef;
+        }
+        .update-check-button:disabled { cursor: wait; opacity: 0.7; }
+
         .update-notice {
             position: fixed;
             top: 18px;
@@ -758,6 +784,7 @@
             <h1>直播运营工具</h1>
             <p>SKU 测价、绑定券码/促销ID、批量创建直播间、蓝屏自动截图、自动创建红包雨、选品 Agent</p>
             <div class="header-actions">
+                <button class="update-check-button" id="updateCheckButton" type="button">检查更新</button>
                 <a class="help-link" href="https://joyspace.jd.com/pages/Knx10idaiNsUUaa7fD0C" target="_blank" rel="noopener noreferrer">使用文档 ↗</a>
                 <a class="help-link" href="https://joyspace.jd.com/share/bdBb9YpwG8md7rx86lOW?sharedId=F0GdxTbgTp5KZB&amp;viewType=4" target="_blank" rel="noopener noreferrer">问题反馈 ↗</a>
             </div>
@@ -1384,6 +1411,7 @@
         const updateProgressBar = document.getElementById('updateProgressBar');
         const updateActionButton = document.getElementById('updateActionButton');
         const updateReleaseLink = document.getElementById('updateReleaseLink');
+        const updateCheckButton = document.getElementById('updateCheckButton');
         let updateState = null;
         let updatePollTimer = null;
         let updateRetryTimer = null;
@@ -1396,16 +1424,18 @@
 
         function renderUpdateState(state) {
             updateState = state;
+            renderUpdateCheckButton(state);
+            if (state.check_error && (state.stage === 'available' || (state.stage === 'error' && !state.latest_version))) {
+                scheduleUpdateRecheck(60 * 1000);
+            } else if (!state.checking && ['available', 'up_to_date'].includes(state.stage)) {
+                scheduleUpdateRecheck(30 * 60 * 1000);
+            }
+
             if (!state.supported || ['idle', 'checking', 'up_to_date', 'unsupported'].includes(state.stage)) {
                 updateNotice.hidden = true;
                 return;
             }
-            if (state.stage === 'error' && !state.latest_version) {
-                updateNotice.hidden = true;
-                scheduleUpdateRecheck();
-                return;
-            }
-            if (updateNoticeDismissed && state.stage === 'available') return;
+            if (updateNoticeDismissed && ['available', 'error'].includes(state.stage)) return;
 
             updateNotice.hidden = false;
             updateReleaseLink.hidden = !state.release_url;
@@ -1413,11 +1443,20 @@
             updateProgress.hidden = state.stage !== 'downloading' && state.stage !== 'ready';
             updateProgressBar.style.width = `${state.progress || 0}%`;
             updateActionButton.disabled = false;
+            updateActionButton.hidden = false;
 
             if (state.stage === 'available') {
                 updateNoticeTitle.textContent = `发现新版本 v${state.latest_version}`;
-                updateNoticeDesc.textContent = '可以在后台下载，下载期间不影响继续使用。';
-                updateActionButton.textContent = '后台下载';
+                if (state.checking) {
+                    updateNoticeDesc.textContent = '正在重新检查版本，已发现的更新会继续保留。';
+                    updateActionButton.textContent = '检查中…';
+                    updateActionButton.disabled = true;
+                } else {
+                    updateNoticeDesc.textContent = state.check_error
+                        ? '已保留本地更新信息；本次联网检查失败，仍可尝试后台下载。'
+                        : '可以在后台下载，下载期间不影响继续使用。';
+                    updateActionButton.textContent = '后台下载';
+                }
             } else if (state.stage === 'downloading') {
                 updateNoticeTitle.textContent = `正在后台下载 v${state.latest_version}`;
                 const progressText = state.total_bytes
@@ -1436,10 +1475,39 @@
                 updateActionButton.textContent = '正在安装…';
                 updateActionButton.disabled = true;
             } else if (state.stage === 'error') {
-                updateNoticeTitle.textContent = '更新下载未完成';
-                updateNoticeDesc.textContent = state.error || '网络不稳定，可以稍后继续下载。';
-                updateActionButton.textContent = '继续下载';
+                if (state.latest_version) {
+                    updateNoticeTitle.textContent = '更新下载未完成';
+                    updateNoticeDesc.textContent = state.error || '网络不稳定，可以稍后继续下载。';
+                    updateActionButton.textContent = '继续下载';
+                } else {
+                    updateNoticeTitle.textContent = '暂时无法检查更新';
+                    updateNoticeDesc.textContent = state.check_error || state.error || '网络异常，程序将在 60 秒后自动重试。';
+                    updateActionButton.textContent = state.checking ? '检查中…' : '重新检查';
+                    updateActionButton.disabled = Boolean(state.checking);
+                }
             }
+            if (state.checking) updateActionButton.disabled = true;
+        }
+
+        function renderUpdateCheckButton(state) {
+            updateCheckButton.hidden = !state.supported;
+            updateCheckButton.classList.toggle('has-update', Boolean(state.latest_version && ['available', 'downloading', 'ready', 'installing'].includes(state.stage)));
+            updateCheckButton.classList.toggle('check-error', Boolean(state.check_error && !state.latest_version));
+            updateCheckButton.disabled = Boolean(state.checking || ['downloading', 'installing'].includes(state.stage));
+            if (state.stage === 'ready') {
+                updateCheckButton.textContent = `安装更新 v${state.latest_version}`;
+            } else if (state.stage === 'downloading') {
+                updateCheckButton.textContent = `下载中 ${state.progress || 0}%`;
+            } else if (state.latest_version && ['available', 'error'].includes(state.stage)) {
+                updateCheckButton.textContent = `有新版本 v${state.latest_version}`;
+            } else if (state.checking) {
+                updateCheckButton.textContent = '正在检查…';
+            } else if (state.check_error) {
+                updateCheckButton.textContent = '检查更新（网络异常）';
+            } else {
+                updateCheckButton.textContent = '检查更新';
+            }
+            updateCheckButton.title = state.check_error || '检查是否有新版本';
         }
 
         function pollUpdateStatus() {
@@ -1447,37 +1515,42 @@
                 .then((response) => response.json())
                 .then((state) => {
                     renderUpdateState(state);
-                    if (['checking', 'downloading'].includes(state.stage)) {
+                    if (state.checking || state.stage === 'downloading') {
                         updatePollTimer = setTimeout(pollUpdateStatus, 1200);
                     }
                 })
                 .catch(() => {});
         }
 
-        function startUpdateCheck() {
+        function startUpdateCheck({ manual = false } = {}) {
             if (updateRetryTimer) {
                 clearTimeout(updateRetryTimer);
                 updateRetryTimer = null;
             }
+            if (manual) updateNoticeDismissed = false;
             fetch('/api/update/check', { method: 'POST' })
                 .then((response) => response.json())
                 .then((state) => {
                     renderUpdateState(state);
-                    if (state.stage === 'checking') pollUpdateStatus();
+                    if (state.checking) pollUpdateStatus();
                 })
-                .catch(() => scheduleUpdateRecheck());
+                .catch(() => scheduleUpdateRecheck(60 * 1000));
         }
 
-        function scheduleUpdateRecheck() {
+        function scheduleUpdateRecheck(delayMs) {
             if (updateRetryTimer) return;
             updateRetryTimer = setTimeout(() => {
                 updateRetryTimer = null;
                 startUpdateCheck();
-            }, 60 * 1000);
+            }, delayMs);
         }
 
         updateActionButton.addEventListener('click', () => {
             if (!updateState) return;
+            if (updateState.stage === 'error' && !updateState.latest_version) {
+                startUpdateCheck({ manual: true });
+                return;
+            }
             if (updateState.stage === 'ready') {
                 if (!confirm('安装更新会关闭当前程序。请确认当前任务已经完成，是否立即安装并重启？')) return;
                 updateActionButton.disabled = true;
@@ -1518,7 +1591,20 @@
             updateNotice.hidden = true;
         });
 
-        startUpdateCheck();
+        updateCheckButton.addEventListener('click', () => {
+            if (updateState && updateState.latest_version && ['available', 'error', 'ready'].includes(updateState.stage)) {
+                updateNoticeDismissed = false;
+                renderUpdateState(updateState);
+                return;
+            }
+            startUpdateCheck({ manual: true });
+        });
+
+        fetch('/api/update/status')
+            .then((response) => response.json())
+            .then((state) => renderUpdateState(state))
+            .catch(() => {})
+            .finally(() => startUpdateCheck());
 
         document.querySelectorAll('.tool-tab').forEach((button) => {
             button.addEventListener('click', () => {

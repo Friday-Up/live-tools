@@ -44,6 +44,14 @@ class UpdateRoutesTest(unittest.TestCase):
         self.assertEqual(self.client.post("/api/update/check").status_code, 200)
         self.assertEqual(self.manager.calls, ["status", "check"])
 
+    def test_health_identifies_running_install_directory(self):
+        response = self.client.get("/api/health")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["success"])
+        self.assertTrue(payload["install_dir"])
+
     def test_download_requires_same_origin_header(self):
         response = self.client.post("/api/update/download")
         self.assertEqual(response.status_code, 403)

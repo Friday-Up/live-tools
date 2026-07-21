@@ -7,7 +7,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from update_manager import UpdateManager, parse_version
+from update_manager import MANIFEST_CACHE_MAX_AGE_SECONDS, UpdateManager, parse_version
 
 
 class FakeResponse:
@@ -34,6 +34,16 @@ def wait_for_stage(manager, stages, timeout=2):
             return state
         time.sleep(0.01)
     raise AssertionError(f"更新状态未结束: {manager.status()}")
+
+
+def wait_for_check(manager, timeout=2):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        state = manager.status()
+        if not state["checking"]:
+            return state
+        time.sleep(0.01)
+    raise AssertionError(f"更新检查未结束: {manager.status()}")
 
 
 class UpdateManagerTest(unittest.TestCase):
@@ -64,6 +74,26 @@ class UpdateManagerTest(unittest.TestCase):
 
         self.assertEqual(state["stage"], "available")
         self.assertEqual(state["latest_version"], "0.5.1")
+        self.assertTrue(self.manager.manifest_cache_path.is_file())
+
+    def test_cache_write_failure_does_not_hide_fetched_update(self):
+        manifest = {
+            "version": "0.5.1",
+            "asset_url": "https://example.test/Live-Tools-Windows.zip",
+            "sha256": "a" * 64,
+        }
+        response = FakeResponse(json.dumps(manifest).encode("utf-8"))
+
+        with patch("update_manager.urlopen", return_value=response), patch.object(
+            self.manager,
+            "_save_cached_manifest",
+            side_effect=PermissionError("locked"),
+        ):
+            self.manager.start_check()
+            state = wait_for_check(self.manager)
+
+        self.assertEqual(state["stage"], "available")
+        self.assertEqual(state["latest_version"], "0.5.1")
 
     def test_check_retries_transient_manifest_failures(self):
         manifest = {
@@ -82,7 +112,7 @@ class UpdateManagerTest(unittest.TestCase):
         self.assertEqual(state["stage"], "available")
         self.assertEqual(mocked.call_count, 3)
 
-    def test_failed_refresh_does_not_leave_stale_manifest_downloadable(self):
+    def test_failed_refresh_keeps_last_valid_manifest_available(self):
         self.manager._manifest = {
             "version": "0.5.1",
             "asset_url": "https://example.test/old.zip",
@@ -97,12 +127,117 @@ class UpdateManagerTest(unittest.TestCase):
         with patch("update_manager.urlopen", side_effect=TimeoutError("offline")), patch(
             "update_manager.time.sleep"
         ):
-            self.manager.start_check()
-            state = wait_for_stage(self.manager, {"error"})
+            checking_state = self.manager.start_check()
+            self.assertEqual(checking_state["stage"], "available")
+            state = wait_for_check(self.manager)
 
-        self.assertIsNone(state["latest_version"])
-        self.assertIsNone(state["release_url"])
-        with self.assertRaisesRegex(RuntimeError, "先检查更新"):
+        self.assertEqual(state["stage"], "available")
+        self.assertEqual(state["latest_version"], "0.5.1")
+        self.assertEqual(state["release_url"], "https://example.test/old")
+        self.assertIn("offline", state["check_error"])
+
+    def test_cached_manifest_survives_manager_restart(self):
+        manifest = {
+            "version": "0.5.1",
+            "asset_url": "https://example.test/Live-Tools-Windows.zip",
+            "sha256": "a" * 64,
+            "release_url": "https://example.test/releases/v0.5.1",
+        }
+        self.manager._save_cached_manifest(manifest)
+
+        restarted = UpdateManager(
+            "0.5.0",
+            self.temp_dir,
+            enabled=True,
+            manifest_url="https://example.test/live-tools-update.json",
+        )
+
+        state = restarted.status()
+        self.assertEqual(state["stage"], "available")
+        self.assertEqual(state["latest_version"], "0.5.1")
+        self.assertEqual(state["release_url"], manifest["release_url"])
+
+    def test_cache_for_installed_version_is_discarded(self):
+        manifest = {
+            "version": "0.5.0",
+            "asset_url": "https://example.test/Live-Tools-Windows.zip",
+            "sha256": "a" * 64,
+        }
+        self.manager._save_cached_manifest(manifest)
+
+        restarted = UpdateManager(
+            "0.5.0",
+            self.temp_dir,
+            enabled=True,
+            manifest_url="https://example.test/live-tools-update.json",
+        )
+
+        self.assertEqual(restarted.status()["stage"], "idle")
+        self.assertFalse(restarted.manifest_cache_path.exists())
+
+    def test_expired_manifest_cache_is_discarded(self):
+        manifest = {
+            "version": "0.5.1",
+            "asset_url": "https://example.test/Live-Tools-Windows.zip",
+            "sha256": "a" * 64,
+        }
+        with patch("update_manager.time.time", return_value=1000):
+            self.manager._save_cached_manifest(manifest)
+
+        with patch(
+            "update_manager.time.time",
+            return_value=1000 + MANIFEST_CACHE_MAX_AGE_SECONDS + 1,
+        ):
+            restarted = UpdateManager(
+                "0.5.0",
+                self.temp_dir,
+                enabled=True,
+                manifest_url="https://example.test/live-tools-update.json",
+            )
+
+        self.assertEqual(restarted.status()["stage"], "idle")
+        self.assertFalse(restarted.manifest_cache_path.exists())
+
+    def test_fresh_check_without_update_clears_cached_release(self):
+        cached_manifest = {
+            "version": "0.5.1",
+            "asset_url": "https://example.test/Live-Tools-Windows.zip",
+            "sha256": "a" * 64,
+        }
+        self.manager._save_cached_manifest(cached_manifest)
+        restarted = UpdateManager(
+            "0.5.0",
+            self.temp_dir,
+            enabled=True,
+            manifest_url="https://example.test/live-tools-update.json",
+        )
+        current_manifest = {
+            "version": "0.5.0",
+            "asset_url": "https://example.test/Live-Tools-Windows.zip",
+            "sha256": "b" * 64,
+        }
+
+        with patch(
+            "update_manager.urlopen",
+            return_value=FakeResponse(json.dumps(current_manifest).encode("utf-8")),
+        ):
+            restarted.start_check()
+            state = wait_for_check(restarted)
+
+        self.assertEqual(state["stage"], "up_to_date")
+        self.assertIsNone(restarted._manifest)
+        self.assertFalse(restarted.manifest_cache_path.exists())
+
+    def test_download_waits_for_refresh_to_finish(self):
+        self.manager._manifest = {
+            "version": "0.5.1",
+            "asset_url": "https://example.test/Live-Tools-Windows.zip",
+            "sha256": "a" * 64,
+        }
+        self.manager._update_state(stage="available", latest_version="0.5.1")
+        self.manager._checking = True
+
+        with self.assertRaisesRegex(RuntimeError, "正在检查更新"):
             self.manager.start_download()
 
     def test_download_runs_in_background_and_verifies_sha256(self):

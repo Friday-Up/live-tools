@@ -237,6 +237,9 @@ def create_app(
             manifest_url=LIVE_TOOLS_UPDATE_MANIFEST_URL,
         )
     app.config["UPDATE_MANAGER"] = update_manager
+    app.config["INSTALL_DIR"] = Path(
+        getattr(update_manager, "install_dir", LIVE_DIR)
+    ).resolve()
 
     operation_gate_lock = threading.Lock()
     operation_gate = {"active_requests": 0, "installing": False}
@@ -349,7 +352,13 @@ def create_app(
 
     @app.route("/api/health")
     def health():
-        return jsonify({"success": True, "version": LIVE_TOOLS_APP_VERSION})
+        return jsonify(
+            {
+                "success": True,
+                "version": LIVE_TOOLS_APP_VERSION,
+                "install_dir": str(app.config["INSTALL_DIR"]),
+            }
+        )
 
     @app.route("/api/update/status")
     def update_status():

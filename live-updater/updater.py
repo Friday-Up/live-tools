@@ -239,7 +239,7 @@ def recover_interrupted_update(
     if (
         expected_version
         and (install_dir / "Live-Tools-Web.exe").is_file()
-        and get_running_version() == expected_version
+        and get_running_version(install_dir) == expected_version
     ):
         # The updater may have been terminated after the new application became
         # healthy but before it committed the transaction. In that case the new
@@ -257,11 +257,17 @@ def recover_interrupted_update(
     log("未完成更新已恢复")
 
 
-def get_running_version() -> str | None:
+def get_running_version(expected_install_dir: Path | None = None) -> str | None:
     try:
         with urlopen(HEALTH_URL, timeout=2) as response:
             payload = json.loads(response.read().decode("utf-8"))
             if response.status == 200 and payload.get("success") is True:
+                if expected_install_dir is not None:
+                    reported_dir = str(payload.get("install_dir") or "").strip()
+                    if not reported_dir or os.path.normcase(
+                        str(Path(reported_dir).resolve())
+                    ) != os.path.normcase(str(expected_install_dir.resolve())):
+                        return None
                 version = str(payload.get("version") or "").strip()
                 return version or None
     except Exception:
@@ -291,6 +297,7 @@ def wait_for_health(
     process: subprocess.Popen,
     timeout_seconds: int = 45,
     expected_version: str | None = None,
+    expected_install_dir: Path | None = None,
 ) -> bool:
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
@@ -303,6 +310,16 @@ def wait_for_health(
                     response.status == 200
                     and payload.get("success") is True
                     and (expected_version is None or payload.get("version") == expected_version)
+                    and (
+                        expected_install_dir is None
+                        or (
+                            payload.get("install_dir")
+                            and os.path.normcase(
+                                str(Path(str(payload["install_dir"])).resolve())
+                            )
+                            == os.path.normcase(str(expected_install_dir.resolve()))
+                        )
+                    )
                 ):
                     return True
         except Exception:
@@ -352,7 +369,11 @@ def update(package: Path, install_dir: Path, pid: int, expected_version: str, lo
         restore_preserved_files(install_dir, preserved_files)
         new_process = launch_application(install_dir)
         log("正在验证新版本启动状态")
-        if not wait_for_health(new_process, expected_version=expected_version):
+        if not wait_for_health(
+            new_process,
+            expected_version=expected_version,
+            expected_install_dir=install_dir,
+        ):
             raise RuntimeError("新版本启动失败")
         log("更新完成")
         transaction_file.unlink(missing_ok=True)
