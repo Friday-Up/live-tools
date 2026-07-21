@@ -279,6 +279,14 @@ jobs:
             notes = ""
           } | ConvertTo-Json
           Set-Content -Path "dist/live-tools-update.json" -Value $manifest -Encoding utf8
+          $internalManifest = [ordered]@{
+            version = $version
+            asset_url = "http://stock.seifallspark.com/temp/aiTools/Live-Tools-Windows-v$version.zip"
+            sha256 = $sha256
+            release_url = "https://github.com/Friday-Up/live-tools/releases/tag/$tag"
+            notes = ""
+          } | ConvertTo-Json
+          Set-Content -Path "dist/live-tools-update-internal.json" -Value $internalManifest -Encoding utf8
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -287,6 +295,7 @@ jobs:
           path: |
             dist/Live-Tools-Windows.zip
             dist/live-tools-update.json
+            dist/live-tools-update-internal.json
           retention-days: 30
 
       - name: Upload to Release
@@ -297,6 +306,7 @@ jobs:
           files: |
             dist/Live-Tools-Windows.zip
             dist/live-tools-update.json
+            dist/live-tools-update-internal.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -307,8 +317,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $assets = gh release view $env:GITHUB_REF_NAME --repo $env:GITHUB_REPOSITORY --json assets --jq '.assets[].name'
-          if (-not ($assets -contains "Live-Tools-Windows.zip") -or -not ($assets -contains "live-tools-update.json")) {
-            Write-Host "Refusing to publish release without both Windows update assets"
+          if (-not ($assets -contains "Live-Tools-Windows.zip") -or -not ($assets -contains "live-tools-update.json") -or -not ($assets -contains "live-tools-update-internal.json")) {
+            Write-Host "Refusing to publish release without all Windows update assets"
             exit 1
           }
           gh release edit $env:GITHUB_REF_NAME --repo $env:GITHUB_REPOSITORY --draft=false --latest

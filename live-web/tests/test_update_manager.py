@@ -303,11 +303,37 @@ class UpdateManagerTest(unittest.TestCase):
 
         self.assertFalse(partial.exists())
 
-    def test_manifest_requires_https_and_sha256(self):
-        with self.assertRaisesRegex(ValueError, "HTTPS"):
+    def test_manifest_allows_trusted_internal_http_and_rejects_other_http(self):
+        manifest = self.manager._validate_manifest(
+            {
+                "version": "0.5.1",
+                "asset_url": "http://stock.seifallspark.com/temp/aiTools/Live-Tools-Windows-v0.5.1.zip",
+                "sha256": "a" * 64,
+            }
+        )
+        self.assertEqual(
+            manifest["asset_url"],
+            "http://stock.seifallspark.com/temp/aiTools/Live-Tools-Windows-v0.5.1.zip",
+        )
+
+        with self.assertRaisesRegex(ValueError, "指定的内部更新地址"):
             self.manager._validate_manifest(
                 {"version": "0.5.1", "asset_url": "http://example.test/a.zip", "sha256": "a" * 64}
             )
+
+    def test_check_rejects_untrusted_http_manifest_url(self):
+        manager = UpdateManager(
+            "0.5.0",
+            self.temp_dir,
+            enabled=True,
+            manifest_url="http://example.test/live-tools-update.json",
+        )
+
+        manager.start_check()
+        state = wait_for_check(manager)
+
+        self.assertEqual(state["stage"], "error")
+        self.assertIn("指定的内部更新地址", state["check_error"])
 
     def test_updater_ready_handshake_rejects_early_process_exit(self):
         class ExitedProcess:

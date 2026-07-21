@@ -13,14 +13,16 @@ import tempfile
 import threading
 import time
 from urllib.error import HTTPError
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 import uuid
 
 
 DEFAULT_MANIFEST_URL = (
-    "https://github.com/Friday-Up/live-tools/releases/latest/download/"
-    "live-tools-update.json"
+    "http://stock.seifallspark.com/temp/aiTools/live-tools-update.json"
 )
+TRUSTED_HTTP_UPDATE_HOST = "stock.seifallspark.com"
+TRUSTED_HTTP_UPDATE_PATH_PREFIX = "/temp/aiTools/"
 _VERSION_PATTERN = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
 _SHA256_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")
 MANIFEST_CACHE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
@@ -104,6 +106,7 @@ class UpdateManager:
 
     def _check_worker(self) -> None:
         try:
+            self._validate_update_url(self.manifest_url, "更新清单地址")
             manifest = None
             last_error: Exception | None = None
             for attempt in range(4):
@@ -225,14 +228,30 @@ class UpdateManager:
             pass
 
     @staticmethod
-    def _validate_manifest(manifest: object) -> dict:
+    def _validate_update_url(url: str, field_name: str) -> str:
+        value = str(url or "").strip()
+        parsed = urlsplit(value)
+        if parsed.scheme == "https" and parsed.netloc:
+            return value
+        if (
+            parsed.scheme == "http"
+            and parsed.hostname == TRUSTED_HTTP_UPDATE_HOST
+            and parsed.port in {None, 80}
+            and parsed.path.startswith(TRUSTED_HTTP_UPDATE_PATH_PREFIX)
+        ):
+            return value
+        raise ValueError(f"{field_name}必须使用 HTTPS 或指定的内部更新地址")
+
+    @classmethod
+    def _validate_manifest(cls, manifest: object) -> dict:
         if not isinstance(manifest, dict):
             raise ValueError("更新清单格式错误")
         version = str(manifest.get("version", "")).strip().lstrip("v")
         parse_version(version)
-        asset_url = str(manifest.get("asset_url", "")).strip()
-        if not asset_url.startswith("https://"):
-            raise ValueError("更新包地址必须使用 HTTPS")
+        asset_url = cls._validate_update_url(
+            manifest.get("asset_url", ""),
+            "更新包地址",
+        )
         sha256 = str(manifest.get("sha256", "")).strip().lower()
         if not _SHA256_PATTERN.fullmatch(sha256):
             raise ValueError("更新包缺少有效的 SHA256")
