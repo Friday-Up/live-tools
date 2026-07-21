@@ -1,0 +1,137 @@
+name: Sync release to internal storage
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version, for example v0.5.4
+        required: true
+        type: string
+  push:
+    branches:
+      - codex/windows-auto-update-test-20260720
+    paths:
+      - .github/workflows/sync-internal-release.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-internal-release
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SSHPASS: ${{ secrets.LIVE_TOOLS_SFTP_PASSWORD }}
+      SFTP_HOST: 101.124.5.212
+      SFTP_PORT: "8922"
+      SFTP_USER: sftp
+      REMOTE_DIR: /home/allSpark/files/temp/aiTools
+    steps:
+      - name: Resolve release version
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ inputs.version }}"
+          if [[ -z "$version" ]]; then
+            version="$(gh release view --repo "${{ github.repository }}" --json tagName --jq .tagName)"
+          fi
+          if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid release version: $version" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Download and verify release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.release.outputs.version }}"
+          gh release download "$version" \
+            --repo "${{ github.repository }}" \
+            --pattern Live-Tools-Windows.zip \
+            --pattern live-tools-update-internal.json
+          python3 - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          package = Path("Live-Tools-Windows.zip")
+          manifest_path = Path("live-tools-update-internal.json")
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          actual_sha = hashlib.sha256(package.read_bytes()).hexdigest()
+          expected_sha = manifest["sha256"].lower()
+          if actual_sha != expected_sha:
+              raise SystemExit(f"SHA256 mismatch: {actual_sha} != {expected_sha}")
+          if manifest["asset_url"] != (
+              "http://stock.seifallspark.com/temp/aiTools/"
+              f"Live-Tools-Windows-v{manifest['version']}.zip"
+          ):
+              raise SystemExit("Unexpected internal asset URL")
+          print(f"Verified v{manifest['version']} ({package.stat().st_size} bytes, {actual_sha})")
+          PY
+
+      - name: Upload package and publish manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${SSHPASS:-}" ]]; then
+            echo "LIVE_TOOLS_SFTP_PASSWORD is not configured" >&2
+            exit 1
+          fi
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          ssh-keyscan -p "$SFTP_PORT" "$SFTP_HOST" >> ~/.ssh/known_hosts
+
+          version="${{ steps.release.outputs.version }}"
+          package_name="Live-Tools-Windows-${version}.zip"
+          sshpass -e scp -P "$SFTP_PORT" \
+            Live-Tools-Windows.zip \
+            "$SFTP_USER@$SFTP_HOST:$REMOTE_DIR/$package_name"
+
+          sshpass -e scp -P "$SFTP_PORT" \
+            live-tools-update-internal.json \
+            "$SFTP_USER@$SFTP_HOST:$REMOTE_DIR/live-tools-update.json.new"
+
+          printf 'rename %s/live-tools-update.json.new %s/live-tools-update.json\n' \
+            "$REMOTE_DIR" "$REMOTE_DIR" | \
+            sshpass -e sftp -oBatchMode=no -P "$SFTP_PORT" "$SFTP_USER@$SFTP_HOST"
+
+      - name: Verify published files
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import time
+          import urllib.request
+
+          base = "http://stock.seifallspark.com/temp/aiTools"
+          expected = json.load(open("live-tools-update-internal.json", encoding="utf-8"))
+          expected_size = __import__("pathlib").Path("Live-Tools-Windows.zip").stat().st_size
+          manifest = None
+          for attempt in range(6):
+              with urllib.request.urlopen(f"{base}/live-tools-update.json", timeout=30) as response:
+                  manifest = json.load(response)
+              if manifest == expected:
+                  break
+              time.sleep(5)
+          if manifest != expected:
+              raise SystemExit("Published manifest does not match the release manifest")
+
+          request = urllib.request.Request(expected["asset_url"], headers={"Range": "bytes=0-0"})
+          with urllib.request.urlopen(request, timeout=30) as response:
+              if response.status != 206:
+                  raise SystemExit(f"Range request returned HTTP {response.status}")
+              total_size = int(response.headers["Content-Range"].rsplit("/", 1)[1])
+          if total_size != expected_size:
+              raise SystemExit(f"Published size mismatch: {total_size} != {expected_size}")
+          print(f"Published v{manifest['version']} ({total_size} bytes, {manifest['sha256']})")
+          PY
