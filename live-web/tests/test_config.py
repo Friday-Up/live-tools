@@ -19,7 +19,7 @@ class UsageReportingConfigTest(unittest.TestCase):
             config["LIVE_USAGE_EVENT_TOKEN"],
             "live-tools-analytics-2026",
         )
-        self.assertEqual(config["LIVE_TOOLS_APP_VERSION"], "0.5.0")
+        self.assertEqual(config["LIVE_TOOLS_APP_VERSION"], "0.5.1")
         self.assertEqual(
             config["LIVE_TOOLS_UPDATE_MANIFEST_URL"],
             "https://github.com/Friday-Up/live-tools/releases/latest/download/live-tools-update.json",

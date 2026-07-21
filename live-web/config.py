@@ -18,7 +18,7 @@ LIVE_USAGE_EVENT_ENABLED = os.environ.get("LIVE_USAGE_EVENT_ENABLED", "true").lo
     "yes",
 }
 LIVE_USAGE_EVENT_TIMEOUT_SECONDS = float(os.environ.get("LIVE_USAGE_EVENT_TIMEOUT_SECONDS", "2.0"))
-LIVE_TOOLS_APP_VERSION = "0.5.0"
+LIVE_TOOLS_APP_VERSION = "0.5.1"
 LIVE_TOOLS_UPDATE_MANIFEST_URL = os.environ.get(
     "LIVE_TOOLS_UPDATE_MANIFEST_URL",
     "https://github.com/Friday-Up/live-tools/releases/latest/download/live-tools-update.json",
